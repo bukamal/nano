@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: flet-native-files
+Version: 0.1.0
+Summary: Native file sharing, picking and print/PDF bridge for Qeid Flet 0.28.x
+Requires-Python: >=3.10
+Requires-Dist: flet==0.28.3

@@ -1,0 +1,15 @@
+MANIFEST.in
+pyproject.toml
+src/flet_native_files/__init__.py
+src/flet_native_files/native_files.py
+src/flet_native_files.egg-info/PKG-INFO
+src/flet_native_files.egg-info/SOURCES.txt
+src/flet_native_files.egg-info/dependency_links.txt
+src/flet_native_files.egg-info/requires.txt
+src/flet_native_files.egg-info/top_level.txt
+src/flutter/flet_native_files/__init__.py
+src/flutter/flet_native_files/pubspec.yaml
+src/flutter/flet_native_files/__pycache__/__init__.cpython-313.pyc
+src/flutter/flet_native_files/lib/flet_native_files.dart
+src/flutter/flet_native_files/lib/src/create_control.dart
+src/flutter/flet_native_files/lib/src/native_files.dart
