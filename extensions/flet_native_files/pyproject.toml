@@ -1,0 +1,17 @@
+[project]
+name = "flet-native-files"
+version = "0.1.0"
+description = "Native file sharing, picking and print/PDF bridge for Qeid Flet 0.28.x"
+requires-python = ">=3.10"
+dependencies = ["flet==0.28.3"]
+
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["flet_native_files*", "flutter*"]
+
+[tool.setuptools.package-data]
+"flutter.flet_native_files" = ["**/*"]

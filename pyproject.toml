@@ -1,0 +1,52 @@
+[project]
+name = "qeid-offline"
+version = "0.7.0"
+description = "Offline Flet conversion of qeid-app"
+requires-python = ">=3.10"
+dependencies = [
+  "flet==0.28.3",
+  "flet-native-files==0.1.0",
+]
+
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.flet]
+org = "com.qeid"
+product = "قيد - أوفلاين"
+company = "Qeid"
+copyright = "Copyright © 2026"
+build_number = 7
+android_permissions = [
+  "android.permission.INTERNET",
+]
+
+[tool.flet.app]
+path = "src"
+module = "main"
+
+[tool.flet.splash]
+color = "#0F4C81"
+dark_color = "#0B3559"
+android = true
+ios = true
+web = true
+
+[tool.flet.android]
+adaptive_icon_background = "#0F4C81"
+
+[tool.flet.android.manifest_application]
+allowBackup = "false"
+
+[tool.flet.android.permission]
+"android.permission.INTERNET" = true
+
+[tool.flet.dev_packages]
+"flet-native-files" = "extensions/flet_native_files"
