@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import tempfile
+import urllib.error
 import urllib.request
 from datetime import date
 from pathlib import Path
@@ -35,6 +37,7 @@ with tempfile.TemporaryDirectory(prefix="qeid_phase6_hawaa_license_") as td:
         captured["url"] = request.full_url
         captured["timeout"] = timeout
         captured["body"] = json.loads(request.data.decode("utf-8"))
+        captured["user_agent"] = request.get_header("User-agent")
         return FakeResponse({"expirationDate": "2030-12-31", "edition": "standard"})
 
     urllib.request.urlopen = fake_urlopen
@@ -47,6 +50,7 @@ with tempfile.TemporaryDirectory(prefix="qeid_phase6_hawaa_license_") as td:
     assert set(captured["body"]) == {"licenseCode", "fingerprint"}
     assert captured["body"]["licenseCode"] == "QED-TEST-HAWAA"
     assert captured["body"]["fingerprint"] == ctx.license.device_id()
+    assert captured["user_agent"] == "QEID-Offline/0.6.0"
     serialized = json.dumps(captured["body"], ensure_ascii=False).lower()
     for forbidden in ["customer", "supplier", "invoice", "inventory", "report", "user"]:
         assert forbidden not in serialized
@@ -65,6 +69,38 @@ with tempfile.TemporaryDirectory(prefix="qeid_phase6_hawaa_license_") as td:
         urllib.request.urlopen = original
     assert offline.valid and offline.protocol == HAWAA_PROTOCOL
     assert not LicenseService(ctx.db).status(now=date(2031, 1, 1)).valid
+
+    # Cloudflare Error 1010 must be translated to a concise, actionable message
+    # instead of leaking the raw JSON/HTML response into the activation UI.
+    cloudflare_1010 = json.dumps({
+        "status": 403,
+        "error_code": 1010,
+        "error_name": "browser_signature_banned",
+        "detail": "The site owner has blocked access based on your browser's signature.",
+    }).encode("utf-8")
+
+    def blocked_urlopen(request, timeout=0):
+        raise urllib.error.HTTPError(
+            request.full_url,
+            403,
+            "Forbidden",
+            hdrs=None,
+            fp=io.BytesIO(cloudflare_1010),
+        )
+
+    urllib.request.urlopen = blocked_urlopen
+    try:
+        try:
+            ctx.license.activate_online("QED-BLOCKED", "0.7.0")
+        except RuntimeError as exc:
+            error_text = str(exc)
+        else:
+            raise AssertionError("Cloudflare 1010 unexpectedly succeeded")
+    finally:
+        urllib.request.urlopen = original
+    assert "Error 1010" in error_text
+    assert "إعادة المحاولة الآن لن تفيد" in error_text
+    assert "browser_signature_banned" not in error_text
 
     # Local tampering is detected by the device-bound MAC/seal.
     with ctx.db.transaction() as conn:

@@ -391,10 +391,19 @@ class LicenseService:
             {"licenseCode": key, "fingerprint": self.device_id()},
             ensure_ascii=False,
         ).encode("utf-8")
+        version_token = "".join(
+            ch for ch in (app_version or "") if ch.isalnum() or ch in ".-_"
+        )[:32] or "unknown"
         request = urllib.request.Request(
             self.server_url(),
             data=body,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                # Identify the native activation client explicitly instead of
+                # relying on urllib's generic Python-urllib/<version> signature.
+                "User-Agent": f"QEID-Offline/{version_token}",
+            },
             method="POST",
         )
         try:
@@ -407,6 +416,48 @@ class LicenseService:
                 message = exc.read().decode("utf-8", errors="replace").strip()
             except Exception:
                 message = ""
+
+            # Cloudflare 1010 means the request was rejected by an owner-side
+            # browser/client signature rule before the activation Worker could
+            # process the license payload. Retrying the same request is useless.
+            error_code = None
+            error_name = ""
+            if message:
+                try:
+                    error_payload = json.loads(message)
+                except json.JSONDecodeError:
+                    error_payload = None
+                if isinstance(error_payload, dict):
+                    error_code = error_payload.get("error_code")
+                    error_name = str(error_payload.get("error_name") or "")
+            signature_blocked = (
+                str(error_code) == "1010"
+                or error_name == "browser_signature_banned"
+                or "browser_signature_banned" in message.lower()
+                or "error 1010" in message.lower()
+            )
+            if exc.code == 403 and signature_blocked:
+                raise RuntimeError(
+                    "حظر Cloudflare عميل التفعيل (Error 1010). "
+                    "يلزم تعديل إعدادات Cloudflare لسيرفر التفعيل للسماح بمسار /activate "
+                    "أو إزالة قاعدة حظر User-Agent الخاصة بهذا العميل؛ إعادة المحاولة الآن لن تفيد."
+                ) from exc
+
+            # Prefer a concise API error when the server returned JSON instead of
+            # surfacing the complete raw Cloudflare/server payload in the UI.
+            if message:
+                try:
+                    error_payload = json.loads(message)
+                except json.JSONDecodeError:
+                    error_payload = None
+                if isinstance(error_payload, dict):
+                    concise = str(
+                        error_payload.get("message")
+                        or error_payload.get("detail")
+                        or ""
+                    ).strip()
+                    if concise:
+                        raise RuntimeError(concise) from exc
             raise RuntimeError(message or f"رفض خادم التفعيل الطلب ({exc.code})") from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise RuntimeError("تعذر الاتصال بسيرفر تفعيل هوى الشام") from exc

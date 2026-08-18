@@ -40,7 +40,7 @@ class ActivationGate:
     async def _activate(self, _):
         self._set_busy(True)
         try:
-            status = await asyncio.to_thread(self.ctx.license.activate_online, self.key.value or "", "0.7.0")
+            status = await asyncio.to_thread(self.ctx.license.activate_online, self.key.value or "", "0.7.1")
             if not status.valid:
                 raise RuntimeError(status.reason or "فشل التفعيل")
             self.status.value = "تم التفعيل بنجاح. سيعمل التطبيق الآن أوفلاين."
