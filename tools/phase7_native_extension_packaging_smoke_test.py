@@ -21,7 +21,7 @@ for path in required_source:
     assert path.is_file(), path
 
 pubspec = (EXT / "src/flutter/flet_native_files/pubspec.yaml").read_text(encoding="utf-8")
-for needle in ["flet: 0.28.3", "file_picker:", "share_plus:", "printing:", "pdf:"]:
+for needle in ["flet: 0.28.3", "file_picker: 10.1.9", "share_plus:", "printing:", "pdf:"]:
     assert needle in pubspec, needle
 
 dart = (EXT / "src/flutter/flet_native_files/lib/src/native_files.dart").read_text(encoding="utf-8")

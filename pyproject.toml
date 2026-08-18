@@ -1,11 +1,11 @@
 [project]
 name = "qeid-offline"
-version = "0.7.0"
+version = "0.7.1"
 description = "Offline Flet conversion of qeid-app"
 requires-python = ">=3.10"
 dependencies = [
   "flet==0.28.3",
-  "flet-native-files==0.1.0",
+  "flet-native-files==0.1.1",
 ]
 
 [build-system]
@@ -23,7 +23,7 @@ org = "com.qeid"
 product = "قيد - أوفلاين"
 company = "Qeid"
 copyright = "Copyright © 2026"
-build_number = 7
+build_number = 8
 android_permissions = [
   "android.permission.INTERNET",
 ]

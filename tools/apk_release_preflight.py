@@ -9,8 +9,8 @@ license_code = (ROOT / "src/qeid_offline/services/license_service.py").read_text
 paths = (ROOT / "src/qeid_offline/core/paths.py").read_text(encoding="utf-8")
 
 required = {
-    "pyproject version": ('version = "0.7.0"', pyproject),
-    "build number": ("build_number = 7", pyproject),
+    "pyproject version": ('version = "0.7.1"', pyproject),
+    "build number": ("build_number = 8", pyproject),
     "internet permission": ("android.permission.INTERNET", pyproject),
     "android auto backup disabled": ('allowBackup = "false"', pyproject),
     "persistent Flet storage": ("FLET_APP_STORAGE_DATA", paths),
@@ -18,7 +18,7 @@ required = {
     "Hawaa activation URL": ("license.manhal-almasriiii199119.workers.dev/activate", license_code),
     "Hawaa request licenseCode": ('"licenseCode"', license_code),
     "Hawaa request fingerprint": ('"fingerprint"', license_code),
-    "native files dependency": ('flet-native-files==0.1.0', pyproject),
+    "native files dependency": ('flet-native-files==0.1.1', pyproject),
     "native files dev package": ('"flet-native-files" = "extensions/flet_native_files"', pyproject),
 }
 for label, (needle, text) in required.items():

@@ -2,7 +2,7 @@
 
 تحويل تنفيذي لمشروع `bukamal/qeid-app` إلى تطبيق Flet/Python يعمل محليًا باستخدام SQLite. جميع العمليات المحاسبية والمخزون والتقارير والمستخدمين محلية؛ الشبكة مخصصة للتفعيل فقط عبر نفس بروتوكول هوى الشام.
 
-## المرحلة الحالية: Phase 7
+## المرحلة الحالية: Phase 7.2
 
 - SQLite محلي مع WAL وForeign Keys وTransactions.
 - Schema Version 5 مع ترحيل غير هدّام من المراحل السابقة.
@@ -56,7 +56,7 @@ PYTHONPATH=src python tools/quality_gate.py
 محليًا:
 
 ```bash
-flet build apk --build-version 0.7.0 --build-number 7
+flet build apk --build-version 0.7.1 --build-number 8
 python tools/verify_flet_native_files_registration.py build/flutter
 ```
 
