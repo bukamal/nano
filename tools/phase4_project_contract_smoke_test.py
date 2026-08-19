@@ -9,7 +9,7 @@ assert tuple(int(x) for x in project["project"]["version"].split(".")) >= (0, 4,
 assert project["tool"]["flet"]["build_number"] >= 4
 assert "flet==0.28.3" in project["project"]["dependencies"]
 
-service = (ROOT / "src/qeid_offline/services/reporting_service.py").read_text(encoding="utf-8")
+service = (ROOT / "src/nano_offline/services/reporting_service.py").read_text(encoding="utf-8")
 for token in [
     "def income_statement",
     "def invoice_profitability",

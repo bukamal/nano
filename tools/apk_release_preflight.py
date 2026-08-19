@@ -5,8 +5,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 main = (ROOT / "src/main.py").read_text(encoding="utf-8")
-license_code = (ROOT / "src/qeid_offline/services/license_service.py").read_text(encoding="utf-8")
-paths = (ROOT / "src/qeid_offline/core/paths.py").read_text(encoding="utf-8")
+license_code = (ROOT / "src/nano_offline/services/license_service.py").read_text(encoding="utf-8")
+paths = (ROOT / "src/nano_offline/core/paths.py").read_text(encoding="utf-8")
 
 required = {
     "pyproject version": ('version = "0.7.1"', pyproject),

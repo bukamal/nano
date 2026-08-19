@@ -7,8 +7,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from qeid_offline.app_context import AppContext
-from qeid_offline.services.invoice_service import InvoiceLineInput
+from nano_offline.app_context import AppContext
+from nano_offline.services.invoice_service import InvoiceLineInput
 
 
 def close(a, b, eps=1e-6):
@@ -17,7 +17,7 @@ def close(a, b, eps=1e-6):
 
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="qeid-phase3-edge-") as td:
-        ctx = AppContext.create(Path(td) / "qeid.db")
+        ctx = AppContext.create(Path(td) / "nano.db")
         c1 = ctx.customers.create("عميل أ")
         c2 = ctx.customers.create("عميل ب")
         service = ctx.items.create(name="خدمة edge", item_type="خدمة", selling_price=100)

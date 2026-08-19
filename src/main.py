@@ -5,22 +5,23 @@ from pathlib import Path
 import flet as ft
 from flet_native_files import NativeFiles
 
-from qeid_offline.app_context import AppContext
-from qeid_offline.core.paths import database_path, migrate_legacy_database
-from qeid_offline.views.activation_view import ActivationGate
-from qeid_offline.views.admin_view import AdminCenter
-from qeid_offline.views.finance_view import FinanceCenter
-from qeid_offline.views.invoice_view import InvoiceCenter
-from qeid_offline.views.reports_view import ReportsCenter
+from nano_offline.app_context import AppContext
+from nano_offline.core.paths import database_path, migrate_legacy_database
+from nano_offline.views.activation_view import ActivationGate
+from nano_offline.views.admin_view import AdminCenter
+from nano_offline.views.finance_view import FinanceCenter
+from nano_offline.views.invoice_view import InvoiceCenter
+from nano_offline.views.reports_view import ReportsCenter
 
 APP_DB = database_path()
-LEGACY_APP_DB = Path(__file__).resolve().parent.parent / "data" / "qeid.db"
+LEGACY_APP_DB = next((p for p in [Path(__file__).resolve().parent.parent / "data" / "nano.db", Path(__file__).resolve().parent.parent / "data" / "qeid.db"] if p.exists()), Path(__file__).resolve().parent.parent / "data" / "nano.db")
 
 
 def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: NativeFiles):
-    page.title = "قيد - أوفلاين"
+    page.title = "Nano | نانو"
     page.rtl = True
     page.theme_mode = ft.ThemeMode.LIGHT
+    page.theme = ft.Theme(color_scheme_seed="#0B63F6")
     page.padding = 0
     page.bgcolor = "#F8FAFC"
 
@@ -64,9 +65,9 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
                 ft.Container(
                     ft.Column(
                         [
-                            ft.Text("Flet Offline", weight=ft.FontWeight.BOLD),
+                            ft.Text("Nano", weight=ft.FontWeight.BOLD),
                             ft.Text(
-                                "المرحلة 7: مشاركة النسخ الاحتياطية، استيرادها، طباعة/PDF، وتكلفة الخدمات — مع بقاء المحاسبة أوفلاين.",
+                                "منصة أعمال حديثة للمحاسبة والمخزون والفواتير، بهوية Nano الجديدة وتشغيل محلي كامل.",
                                 color="#64748B",
                             ),
                         ]
@@ -323,9 +324,9 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         raise RuntimeError("لا توجد جلسة مستخدم")
     available_pages = [
         ("dashboard", ft.Icons.HOME_OUTLINED, ft.Icons.HOME, "الرئيسية", show_dashboard),
+        ("items", ft.Icons.INVENTORY_2_OUTLINED, ft.Icons.INVENTORY_2, "المواد", items_view),
         ("customers", ft.Icons.PEOPLE_OUTLINE, ft.Icons.PEOPLE, "العملاء", lambda: party_view(ctx.customers, "العملاء")),
         ("suppliers", ft.Icons.LOCAL_SHIPPING_OUTLINED, ft.Icons.LOCAL_SHIPPING, "الموردون", lambda: party_view(ctx.suppliers, "الموردون")),
-        ("items", ft.Icons.INVENTORY_2_OUTLINED, ft.Icons.INVENTORY_2, "المواد", items_view),
         ("invoices", ft.Icons.RECEIPT_LONG_OUTLINED, ft.Icons.RECEIPT_LONG, "الفواتير", invoice_center.show_center),
         ("finance", ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, ft.Icons.ACCOUNT_BALANCE_WALLET, "المالية", finance_center.show_center),
         ("reports", ft.Icons.QUERY_STATS_OUTLINED, ft.Icons.QUERY_STATS, "التقارير", reports_center.show_center),
@@ -342,7 +343,7 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         index = max(0, min(int(e.control.selected_index), len(allowed_pages) - 1))
         allowed_pages[index][4]()
 
-    primary_keys = {"dashboard", "invoices", "finance", "reports"}
+    primary_keys = {"dashboard", "items", "invoices", "finance"}
     mobile_primary = [entry for entry in allowed_pages if entry[0] in primary_keys]
     mobile_secondary = [entry for entry in allowed_pages if entry[0] not in primary_keys]
 
@@ -364,7 +365,7 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         content.content = ft.Column(
             [
                 ft.Text("المزيد", size=24, weight=ft.FontWeight.BOLD),
-                ft.Text("العملاء والموردون والمواد والإدارة حسب صلاحيات المستخدم.", size=12, color="#64748B"),
+                ft.Text("العملاء والموردون والتقارير والإدارة حسب صلاحيات المستخدم.", size=12, color="#64748B"),
                 ft.ResponsiveRow(cards) if cards else ft.Text("لا توجد أقسام إضافية لهذا المستخدم.", color="#64748B"),
             ],
             spacing=12,
@@ -421,9 +422,10 @@ def main(page: ft.Page):
     ctx = AppContext.create(APP_DB)
     native_files = NativeFiles()
     page.overlay.append(native_files)
-    page.title = "قيد - أوفلاين"
+    page.title = "Nano | نانو"
     page.rtl = True
     page.theme_mode = ft.ThemeMode.LIGHT
+    page.theme = ft.Theme(color_scheme_seed="#0B63F6")
     page.padding = 0
     page.bgcolor = "#F8FAFC"
 
@@ -467,8 +469,8 @@ def main(page: ft.Page):
                 notify(str(exc))
 
         controls = [
-            ft.Icon(ft.Icons.ACCOUNT_BALANCE, size=48, color="#0F4C81"),
-            ft.Text("قيد - أوفلاين", size=26, weight=ft.FontWeight.BOLD),
+            ft.Image(src="icon.png", width=84, height=84, fit=ft.ImageFit.CONTAIN),
+            ft.Text("Nano | نانو", size=26, weight=ft.FontWeight.BOLD, color="#0A2E78"),
             ft.Text(
                 "إنشاء المدير الأول" if first_run else "تسجيل الدخول المحلي",
                 color="#64748B",

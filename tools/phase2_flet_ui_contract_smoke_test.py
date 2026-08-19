@@ -4,9 +4,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 main = (ROOT / "src" / "main.py").read_text(encoding="utf-8")
-invoice_ui = (ROOT / "src" / "qeid_offline" / "views" / "invoice_view.py").read_text(encoding="utf-8")
-invoice_service = (ROOT / "src" / "qeid_offline" / "services" / "invoice_service.py").read_text(encoding="utf-8")
-item_repo = (ROOT / "src" / "qeid_offline" / "repositories" / "item_repository.py").read_text(encoding="utf-8")
+invoice_ui = (ROOT / "src" / "nano_offline" / "views" / "invoice_view.py").read_text(encoding="utf-8")
+invoice_service = (ROOT / "src" / "nano_offline" / "services" / "invoice_service.py").read_text(encoding="utf-8")
+item_repo = (ROOT / "src" / "nano_offline" / "repositories" / "item_repository.py").read_text(encoding="utf-8")
 all_text = "\n".join([main, invoice_ui, invoice_service, item_repo]).lower()
 
 required_ui = [

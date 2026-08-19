@@ -2,7 +2,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-db = (ROOT / "src/qeid_offline/core/database.py").read_text(encoding="utf-8")
+db = (ROOT / "src/nano_offline/core/database.py").read_text(encoding="utf-8")
 workflow = (ROOT / ".github/workflows/build-android-apk.yml").read_text(encoding="utf-8")
 preflight = (ROOT / "tools/apk_release_preflight.py").read_text(encoding="utf-8")
 

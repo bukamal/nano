@@ -85,7 +85,7 @@
 
 أضيف:
 
-`qeid_offline.core.paths`
+`nano_offline.core.paths`
 
 والأولوية أصبحت:
 

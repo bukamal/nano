@@ -6,7 +6,7 @@
 ## المنفذ
 
 ### 1. ReportingService
-أضيف `src/qeid_offline/services/reporting_service.py` ويقدم:
+أضيف `src/nano_offline/services/reporting_service.py` ويقدم:
 
 - `income_statement()`
   - المبيعات.

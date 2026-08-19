@@ -8,10 +8,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from qeid_offline.core.database import Database, SCHEMA_VERSION
+from nano_offline.core.database import Database, SCHEMA_VERSION
 
 with tempfile.TemporaryDirectory(prefix="qeid-phase2-migration-") as td:
-    path = Path(td) / "qeid.db"
+    path = Path(td) / "nano.db"
     conn = sqlite3.connect(path)
     conn.executescript(
         """

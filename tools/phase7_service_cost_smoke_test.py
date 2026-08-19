@@ -3,9 +3,9 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from qeid_offline.app_context import AppContext
-from qeid_offline.core.database import Database, SCHEMA_VERSION
-from qeid_offline.services.invoice_service import InvoiceLineInput
+from nano_offline.app_context import AppContext
+from nano_offline.core.database import Database, SCHEMA_VERSION
+from nano_offline.services.invoice_service import InvoiceLineInput
 
 
 def approx(a, b, eps=1e-7):
@@ -13,7 +13,7 @@ def approx(a, b, eps=1e-7):
 
 
 with tempfile.TemporaryDirectory(prefix="qeid-phase7-service-cost-") as td:
-    db_path = Path(td) / "qeid.db"
+    db_path = Path(td) / "nano.db"
     ctx = AppContext.create(db_path)
     customer_id = ctx.customers.create("عميل خدمة")
     service_id = ctx.items.create(

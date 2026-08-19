@@ -3,12 +3,12 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from qeid_offline.app_context import AppContext
-from qeid_offline.core.database import SCHEMA_VERSION
+from nano_offline.app_context import AppContext
+from nano_offline.core.database import SCHEMA_VERSION
 
-with tempfile.TemporaryDirectory(prefix="qeid_phase5_backup_") as td:
+with tempfile.TemporaryDirectory(prefix="nano_phase5_backup_") as td:
     root = Path(td)
-    ctx = AppContext.create(root / "data" / "qeid.db")
+    ctx = AppContext.create(root / "data" / "nano.db")
     ctx.auth.create_initial_admin("admin", "المدير", "StrongPass1")
     ctx.auth.login("admin", "StrongPass1")
     first_id = ctx.customers.create("العميل الأصلي")
@@ -19,16 +19,16 @@ with tempfile.TemporaryDirectory(prefix="qeid_phase5_backup_") as td:
             (device_id,),
         )
 
-    backup = ctx.backup.create_backup(root / "snapshot.qeidbackup")
+    backup = ctx.backup.create_backup(root / "snapshot.nanobackup")
     validation = ctx.backup.validate_backup(backup)
     assert validation.valid and validation.schema_version == SCHEMA_VERSION
 
-    with tempfile.TemporaryDirectory(prefix="qeid_phase5_backup_inspect_") as inspect_dir:
+    with tempfile.TemporaryDirectory(prefix="nano_phase5_backup_inspect_") as inspect_dir:
         import sqlite3, zipfile
         out = Path(inspect_dir)
         with zipfile.ZipFile(backup) as zf:
-            zf.extract("qeid.db", out)
-        conn = sqlite3.connect(out / "qeid.db")
+            zf.extract("nano.db", out)
+        conn = sqlite3.connect(out / "nano.db")
         try:
             assert conn.execute("SELECT COUNT(*) FROM license_state").fetchone()[0] == 0
         finally:

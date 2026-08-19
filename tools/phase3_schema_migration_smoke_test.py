@@ -8,8 +8,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from qeid_offline.app_context import AppContext
-from qeid_offline.core.database import SCHEMA_VERSION
+from nano_offline.app_context import AppContext
+from nano_offline.core.database import SCHEMA_VERSION
 
 
 def make_phase2_db(path: Path) -> None:

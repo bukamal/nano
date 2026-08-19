@@ -1,4 +1,4 @@
-name: Build Qeid Android APK
+name: Build Nano Android APK
 
 on:
   workflow_dispatch:
@@ -123,8 +123,8 @@ jobs:
           # re-running Flutter Doctor after an unrelated build failure. The
           # complete first failure is preserved in flet-build.log instead.
           flet build apk --verbose --clear-cache --skip-flutter-doctor \
-            --product "قيد - أوفلاين" \
-            --org com.qeid \
+            --product "Nano | نانو" \
+            --org com.nano \
             --build-number 8 \
             --build-version 0.7.1 \
             2>&1 | tee flet-build.log
@@ -142,19 +142,19 @@ jobs:
             exit 1
           fi
           mkdir -p build/apk/release
-          cp "$APK_PATH" build/apk/release/qeid-offline-release.apk
-          ls -lh build/apk/release/qeid-offline-release.apk
+          cp "$APK_PATH" build/apk/release/nano-release.apk
+          ls -lh build/apk/release/nano-release.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: qeid-offline-apk
-          path: build/apk/release/qeid-offline-release.apk
+          name: nano-apk
+          path: build/apk/release/nano-release.apk
 
       - name: Upload Flet build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qeid-flet-build-log
+          name: nano-flet-build-log
           path: flet-build.log
           if-no-files-found: ignore

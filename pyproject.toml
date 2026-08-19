@@ -1,7 +1,7 @@
 [project]
-name = "qeid-offline"
+name = "nano-offline"
 version = "0.7.1"
-description = "Offline Flet conversion of qeid-app"
+description = "Nano offline accounting and inventory suite built with Flet"
 requires-python = ">=3.10"
 dependencies = [
   "flet==0.28.3",
@@ -19,9 +19,9 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.flet]
-org = "com.qeid"
-product = "قيد - أوفلاين"
-company = "Qeid"
+org = "com.nano"
+product = "Nano | نانو"
+company = "Nano"
 copyright = "Copyright © 2026"
 build_number = 8
 android_permissions = [
@@ -33,14 +33,14 @@ path = "src"
 module = "main"
 
 [tool.flet.splash]
-color = "#0F4C81"
-dark_color = "#0B3559"
+color = "#0B63F6"
+dark_color = "#0A2E78"
 android = true
 ios = true
 web = true
 
 [tool.flet.android]
-adaptive_icon_background = "#0F4C81"
+adaptive_icon_background = "#0B63F6"
 
 [tool.flet.android.manifest_application]
 allowBackup = "false"

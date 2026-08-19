@@ -4,10 +4,10 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from qeid_offline.core.database import Database, SCHEMA_VERSION
+from nano_offline.core.database import Database, SCHEMA_VERSION
 
-with tempfile.TemporaryDirectory(prefix="qeid_phase5_migration_") as td:
-    db_path = Path(td) / "qeid.db"
+with tempfile.TemporaryDirectory(prefix="nano_phase5_migration_") as td:
+    db_path = Path(td) / "nano.db"
     conn = sqlite3.connect(db_path)
     try:
         conn.executescript("""

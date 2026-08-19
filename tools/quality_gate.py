@@ -42,6 +42,7 @@ SCRIPTS = [
     "tools/phase7_1_android_ci_environment_smoke_test.py",
     "tools/phase7_2_flutter_dependency_alignment_smoke_test.py",
     "tools/phase7_project_contract_smoke_test.py",
+    "tools/nano_branding_contract_smoke_test.py",
     "tools/apk_release_preflight.py",
 ]
 

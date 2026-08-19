@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 source = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "src").rglob("*.py"))
-database = (ROOT / "src/qeid_offline/core/database.py").read_text(encoding="utf-8")
+database = (ROOT / "src/nano_offline/core/database.py").read_text(encoding="utf-8")
 
 version = re.search(r'^version\s*=\s*"(\d+)\.(\d+)\.(\d+)"', pyproject, re.M)
 assert version and tuple(map(int, version.groups())) >= (0, 2, 0)

@@ -8,8 +8,8 @@ import urllib.request
 from datetime import date
 from pathlib import Path
 
-from qeid_offline.app_context import AppContext
-from qeid_offline.services.license_service import HAWAA_ACTIVATION_URL, HAWAA_PROTOCOL, LicenseService
+from nano_offline.app_context import AppContext
+from nano_offline.services.license_service import HAWAA_ACTIVATION_URL, HAWAA_PROTOCOL, LicenseService
 
 
 class FakeResponse:
@@ -28,8 +28,8 @@ class FakeResponse:
         return self.payload
 
 
-with tempfile.TemporaryDirectory(prefix="qeid_phase6_hawaa_license_") as td:
-    ctx = AppContext.create(Path(td) / "qeid.db")
+with tempfile.TemporaryDirectory(prefix="nano_phase6_hawaa_license_") as td:
+    ctx = AppContext.create(Path(td) / "nano.db")
     captured = {}
     original = urllib.request.urlopen
 
@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix="qeid_phase6_hawaa_license_") as td:
     assert set(captured["body"]) == {"licenseCode", "fingerprint"}
     assert captured["body"]["licenseCode"] == "QED-TEST-HAWAA"
     assert captured["body"]["fingerprint"] == ctx.license.device_id()
-    assert captured["user_agent"] == "QEID-Offline/0.6.0"
+    assert captured["user_agent"] == "Nano-Offline/0.6.0"
     serialized = json.dumps(captured["body"], ensure_ascii=False).lower()
     for forbidden in ["customer", "supplier", "invoice", "inventory", "report", "user"]:
         assert forbidden not in serialized

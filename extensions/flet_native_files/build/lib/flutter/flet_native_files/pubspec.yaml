@@ -1,6 +1,6 @@
 name: flet_native_files
 description: Native file sharing, picking and print/PDF bridge for Qeid.
-version: 0.1.0
+version: 0.1.1
 homepage: https://example.invalid/qeid
 
 environment:
@@ -11,7 +11,7 @@ dependencies:
   flutter:
     sdk: flutter
   flet: 0.28.3
-  file_picker: ^8.3.7
+  file_picker: 10.1.9
   share_plus: ^10.1.4
   cross_file: ^0.3.4+2
   path_provider: ^2.1.5

@@ -7,13 +7,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from qeid_offline.app_context import AppContext
-from qeid_offline.services.invoice_service import InvoiceLineInput
+from nano_offline.app_context import AppContext
+from nano_offline.services.invoice_service import InvoiceLineInput
 
 
 def main():
-    with tempfile.TemporaryDirectory(prefix="qeid-offline-") as td:
-        ctx = AppContext.create(Path(td) / "qeid.db")
+    with tempfile.TemporaryDirectory(prefix="nano-offline-") as td:
+        ctx = AppContext.create(Path(td) / "nano.db")
         unit_id = ctx.definitions.create_unit("قطعة", "قط")
         customer_id = ctx.customers.create("عميل تجريبي", "0900000000")
         supplier_id = ctx.suppliers.create("مورد تجريبي")

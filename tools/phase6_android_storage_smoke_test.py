@@ -5,16 +5,16 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from qeid_offline.core.paths import app_data_dir, database_path, migrate_legacy_database
+from nano_offline.core.paths import app_data_dir, database_path, migrate_legacy_database
 
-with tempfile.TemporaryDirectory(prefix="qeid_phase6_storage_") as td:
+with tempfile.TemporaryDirectory(prefix="nano_phase6_storage_") as td:
     root = Path(td)
     data = root / "android_data"
     previous = os.environ.get("FLET_APP_STORAGE_DATA")
     os.environ["FLET_APP_STORAGE_DATA"] = str(data)
     try:
         assert app_data_dir() == data
-        assert database_path() == data / "qeid.db"
+        assert database_path() == data / "nano.db"
         assert data.is_dir()
 
         legacy = root / "legacy" / "qeid.db"

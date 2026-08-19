@@ -3,10 +3,10 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from qeid_offline.app_context import AppContext
+from nano_offline.app_context import AppContext
 
-with tempfile.TemporaryDirectory(prefix="qeid_phase5_auth_") as td:
-    ctx = AppContext.create(Path(td) / "qeid.db")
+with tempfile.TemporaryDirectory(prefix="nano_phase5_auth_") as td:
+    ctx = AppContext.create(Path(td) / "nano.db")
     assert not ctx.auth.has_users()
     admin_id = ctx.auth.create_initial_admin("admin", "المدير", "StrongPass1")
     assert ctx.auth.has_users()

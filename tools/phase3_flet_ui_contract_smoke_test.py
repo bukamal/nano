@@ -4,9 +4,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 main = (ROOT / "src/main.py").read_text(encoding="utf-8")
-finance = (ROOT / "src/qeid_offline/views/finance_view.py").read_text(encoding="utf-8")
-invoice = (ROOT / "src/qeid_offline/views/invoice_view.py").read_text(encoding="utf-8")
-payment_service = (ROOT / "src/qeid_offline/services/payment_service.py").read_text(encoding="utf-8")
+finance = (ROOT / "src/nano_offline/views/finance_view.py").read_text(encoding="utf-8")
+invoice = (ROOT / "src/nano_offline/views/invoice_view.py").read_text(encoding="utf-8")
+payment_service = (ROOT / "src/nano_offline/services/payment_service.py").read_text(encoding="utf-8")
 
 required_main = [
     "FinanceCenter",
