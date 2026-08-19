@@ -182,9 +182,16 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         search = ft.TextField(label="بحث في المواد", prefix_icon=ft.Icons.SEARCH)
         rows = ft.Column(spacing=8)
 
+        definitions_dialog = ft.AlertDialog(modal=True)
+
+        def close_definitions(_=None):
+            page.close(definitions_dialog)
+
         def add_category(_):
             try:
                 ctx.definitions.create_category(cat_name.value or "")
+                close_definitions()
+                notify("تمت إضافة التصنيف")
                 items_view()
             except Exception as exc:
                 notify(str(exc))
@@ -192,6 +199,8 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         def add_unit(_):
             try:
                 ctx.definitions.create_unit(unit_name.value or "", unit_abbr.value)
+                close_definitions()
+                notify("تمت إضافة الوحدة")
                 items_view()
             except Exception as exc:
                 notify(str(exc))
@@ -267,50 +276,105 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
             except Exception as exc:
                 notify(str(exc))
 
+        definitions_dialog.title = ft.Text("التصنيفات والوحدات")
+        definitions_dialog.content = ft.Container(
+            ft.Column(
+                [
+                    ft.Text("التصنيفات", weight=ft.FontWeight.BOLD),
+                    cat_name,
+                    ft.FilledButton("إضافة تصنيف", icon=ft.Icons.ADD, on_click=add_category),
+                    ft.Divider(),
+                    ft.Text("الوحدات", weight=ft.FontWeight.BOLD),
+                    ft.ResponsiveRow(
+                        [
+                            ft.Container(unit_name, col={"xs": 8}),
+                            ft.Container(unit_abbr, col={"xs": 4}),
+                        ]
+                    ),
+                    ft.OutlinedButton("إضافة وحدة", icon=ft.Icons.ADD, on_click=add_unit),
+                ],
+                tight=True,
+                spacing=10,
+                scroll=ft.ScrollMode.AUTO,
+            ),
+            width=460,
+        )
+        definitions_dialog.actions = [ft.TextButton("إغلاق", on_click=close_definitions)]
+
+        form_panel = ft.Container(
+            ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Text("مادة / خدمة جديدة", size=18, weight=ft.FontWeight.BOLD, expand=True),
+                            ft.IconButton(icon=ft.Icons.CLOSE, tooltip="إغلاق", on_click=lambda _: hide_form()),
+                        ]
+                    ),
+                    ft.Text(
+                        "عند اختيار خدمة، يستخدم سعر الشراء كتكلفة معيارية لأغراض الربحية.",
+                        size=11,
+                        color="#64748B",
+                    ),
+                    name,
+                    ft.ResponsiveRow(
+                        [
+                            ft.Container(kind, col={"xs": 6, "md": 3}),
+                            ft.Container(category, col={"xs": 6, "md": 3}),
+                            ft.Container(base_unit, col={"xs": 6, "md": 3}),
+                            ft.Container(qty, col={"xs": 6, "md": 3}),
+                            ft.Container(purchase, col={"xs": 6, "md": 3}),
+                            ft.Container(selling, col={"xs": 6, "md": 3}),
+                            ft.Container(alt_unit, col={"xs": 6, "md": 3}),
+                            ft.Container(alt_factor, col={"xs": 6, "md": 3}),
+                        ],
+                        spacing=8,
+                        run_spacing=8,
+                    ),
+                    ft.FilledButton("حفظ المادة", icon=ft.Icons.SAVE_OUTLINED, on_click=add),
+                ],
+                spacing=10,
+            ),
+            padding=12,
+            border=ft.border.all(1, "#BFDBFE"),
+            border_radius=14,
+            bgcolor="#F8FBFF",
+            visible=False,
+        )
+
+        def show_form(_=None):
+            form_panel.visible = True
+            page.update()
+
+        def hide_form(_=None):
+            form_panel.visible = False
+            page.update()
+
+        def show_definitions(_=None):
+            page.open(definitions_dialog)
+
         refresh()
         content.content = ft.Column(
             [
-                ft.Text("المواد والتعريفات", size=24, weight=ft.FontWeight.BOLD),
-                ft.Container(
-                    ft.Column(
-                        [
-                            ft.Text("التعريفات", weight=ft.FontWeight.BOLD),
-                            ft.ResponsiveRow(
-                                [
-                                    ft.Container(cat_name, col={"xs": 8, "md": 4}),
-                                    ft.Container(ft.FilledButton("إضافة تصنيف", on_click=add_category), col={"xs": 4, "md": 2}),
-                                    ft.Container(unit_name, col={"xs": 5, "md": 3}),
-                                    ft.Container(unit_abbr, col={"xs": 3, "md": 1}),
-                                    ft.Container(ft.OutlinedButton("إضافة وحدة", on_click=add_unit), col={"xs": 4, "md": 2}),
-                                ]
-                            ),
-                        ]
-                    ),
-                    padding=10,
-                    border=ft.border.all(1, "#E5E7EB"),
-                    border_radius=12,
-                    bgcolor="#FFFFFF",
-                ),
-                ft.Text("إضافة مادة / خدمة", size=18, weight=ft.FontWeight.BOLD),
-                ft.Text("عند اختيار خدمة، يُستخدم سعر الشراء كتكلفة معيارية وتُحفظ لقطة التكلفة داخل فاتورة البيع لأغراض الربحية.", size=11, color="#64748B"),
+                ft.Text("المواد", size=24, weight=ft.FontWeight.BOLD),
                 ft.ResponsiveRow(
                     [
-                        ft.Container(name, col={"xs": 12, "md": 4}),
-                        ft.Container(kind, col={"xs": 6, "md": 2}),
-                        ft.Container(category, col={"xs": 6, "md": 2}),
-                        ft.Container(base_unit, col={"xs": 6, "md": 2}),
-                        ft.Container(qty, col={"xs": 6, "md": 2}),
-                        ft.Container(purchase, col={"xs": 6, "md": 2}),
-                        ft.Container(selling, col={"xs": 6, "md": 2}),
-                        ft.Container(alt_unit, col={"xs": 6, "md": 2}),
-                        ft.Container(alt_factor, col={"xs": 6, "md": 2}),
-                    ]
+                        ft.Container(
+                            ft.FilledButton("مادة جديدة", icon=ft.Icons.ADD, on_click=show_form),
+                            col={"xs": 6, "md": 3},
+                        ),
+                        ft.Container(
+                            ft.OutlinedButton("التصنيفات والوحدات", icon=ft.Icons.SETTINGS_OUTLINED, on_click=show_definitions),
+                            col={"xs": 6, "md": 3},
+                        ),
+                    ],
+                    spacing=8,
+                    run_spacing=8,
                 ),
-                ft.FilledButton("حفظ المادة", icon=ft.Icons.SAVE_OUTLINED, on_click=add),
-                ft.Divider(),
+                form_panel,
                 search,
                 rows,
             ],
+            spacing=12,
             scroll=ft.ScrollMode.AUTO,
         )
         page.update()
@@ -403,7 +467,9 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
 
     page.navigation_bar = nav
     root = ft.Row([rail, ft.VerticalDivider(width=1), content], expand=True, spacing=0)
-    page.add(root)
+    # Keep page content below Android/iOS status bars while the bottom NavigationBar
+    # continues to use the platform-safe inset managed by Flet.
+    page.add(ft.SafeArea(root, expand=True))
 
     def adapt_navigation(_=None):
         desktop = bool(page.width and page.width >= 900)

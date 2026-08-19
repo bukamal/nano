@@ -1,6 +1,6 @@
 [project]
 name = "nano-offline"
-version = "0.7.1"
+version = "0.7.2"
 description = "Nano offline accounting and inventory suite built with Flet"
 requires-python = ">=3.10"
 dependencies = [
@@ -23,7 +23,7 @@ org = "com.nano"
 product = "Nano | نانو"
 company = "Nano"
 copyright = "Copyright © 2026"
-build_number = 8
+build_number = 9
 android_permissions = [
   "android.permission.INTERNET",
 ]

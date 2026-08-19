@@ -9,8 +9,8 @@ license_code = (ROOT / "src/nano_offline/services/license_service.py").read_text
 paths = (ROOT / "src/nano_offline/core/paths.py").read_text(encoding="utf-8")
 
 required = {
-    "pyproject version": ('version = "0.7.1"', pyproject),
-    "build number": ("build_number = 8", pyproject),
+    "pyproject version": ('version = "0.7.2"', pyproject),
+    "build number": ("build_number = 9", pyproject),
     "internet permission": ("android.permission.INTERNET", pyproject),
     "android auto backup disabled": ('allowBackup = "false"', pyproject),
     "persistent Flet storage": ("FLET_APP_STORAGE_DATA", paths),
