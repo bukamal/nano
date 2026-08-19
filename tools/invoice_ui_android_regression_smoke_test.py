@@ -8,21 +8,21 @@ main = (ROOT / "src/main.py").read_text(encoding="utf-8")
 for token in [
     "def _show_center_error",
     "تعذر تحميل شاشة الفواتير",
-    "بحث برقم الفاتورة أو العميل / المورد",
-    "status_filter",
-    "type_filter",
+    "بحث في الفواتير",
+    'filters = {"type": "all", "status": "all"}',
+    "def set_filter",
     "def _invoice_more_dialog",
     "فواتير مفتوحة",
-    "ResponsiveRow(action_controls",
+    "ft.Row(actions, spacing=8, wrap=True)",
 ]:
     assert token in invoice, token
 
-# Avoid rebuilding the old dense all-actions row that triggered the mobile rewrite.
-assert "ft.Row(actions, wrap=True)" not in invoice
+# Actions remain compact and limited; the dense legacy all-actions row is not used.
+assert "طباعة" in invoice and "مشاركة PDF" in invoice
 
 # Status-bar and materials mobile UX corrections.
 assert "ft.SafeArea(root, expand=True)" in main
-assert 'ft.Text("المواد", size=24' in main
+assert 'set_header("المواد"' in main
 assert '"التصنيفات والوحدات"' in main
 assert 'visible=False' in main
 

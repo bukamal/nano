@@ -11,13 +11,14 @@ all_text = "\n".join([main, invoice_ui, invoice_service, item_repo]).lower()
 
 required_ui = [
     "class InvoiceCenter",
-    "فاتورة جديدة",
+    "فاتورة بيع",
     "إضافة بند",
     "حفظ الفاتورة",
     "تعديل فاتورة",
     "تأكيد حذف الفاتورة",
-    "NavigationRail",
-    "NavigationBar",
+    "sidebar",
+    "mobile_bar",
+    "sale_fab",
     "ResponsiveRow",
     "conversion_factor",
     "base_price",

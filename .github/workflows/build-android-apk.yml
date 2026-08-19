@@ -125,8 +125,8 @@ jobs:
           flet build apk --verbose --clear-cache --skip-flutter-doctor \
             --product "Nano | نانو" \
             --org com.nano \
-            --build-number 11 \
-            --build-version 0.7.4 \
+            --build-number 13 \
+            --build-version 0.8.1 \
             2>&1 | tee flet-build.log
 
       - name: Verify native files extension registration

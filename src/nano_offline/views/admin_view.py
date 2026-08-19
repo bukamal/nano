@@ -9,6 +9,7 @@ import flet as ft
 
 from nano_offline.components import SearchSelect
 from nano_offline.services.auth_service import ROLE_LABELS
+from nano_offline.version import APP_VERSION
 
 
 class AdminCenter:
@@ -271,7 +272,7 @@ class AdminCenter:
             activation_progress.visible = True
             self.page.update()
             try:
-                status = await asyncio.to_thread(self.ctx.license.activate_online, license_key.value or "", "0.7.4")
+                status = await asyncio.to_thread(self.ctx.license.activate_online, license_key.value or "", APP_VERSION)
                 refresh_license()
                 self._notify("تم التفعيل عبر سيرفر هوى الشام" if status.valid else (status.reason or "فشل التفعيل"))
             except Exception as exc:

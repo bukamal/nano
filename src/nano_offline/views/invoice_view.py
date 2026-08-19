@@ -19,12 +19,13 @@ STATUS_AR = {
 class InvoiceCenter:
     """Responsive invoice center/editor for Flet 0.28.x."""
 
-    def __init__(self, page: ft.Page, ctx, content: ft.Container, on_saved=None, native_files=None):
+    def __init__(self, page: ft.Page, ctx, content: ft.Container, on_saved=None, native_files=None, on_title_change=None):
         self.page = page
         self.ctx = ctx
         self.content = content
         self.on_saved = on_saved
         self.native_files = native_files
+        self.on_title_change = on_title_change
         self.invoice_type = "sale"
         self.editing_id: int | None = None
         self.lines: list[dict] = []
@@ -64,6 +65,8 @@ class InvoiceCenter:
 
     def _show_center_error(self, exc: Exception) -> None:
         """Render a recoverable error state instead of leaving a gray Flutter ErrorWidget."""
+        if self.on_title_change:
+            self.on_title_change("الفواتير", "تعذر تحميل شاشة الفواتير")
         message = str(exc).strip() or exc.__class__.__name__
         self.content.content = ft.Column(
             [
@@ -130,52 +133,43 @@ class InvoiceCenter:
         self.page.open(dialog)
 
     def show_center(self) -> None:
-        """Mobile-first invoice list with defensive rendering and compact actions."""
+        """Reference-style invoice browser with mobile-safe cards and chip filters."""
+        if self.on_title_change:
+            self.on_title_change("الفواتير", "المبيعات والمشتريات وحالات السداد")
         try:
             invoices = self.ctx.invoices.list_invoices(limit=250)
-
             search = ft.TextField(
-                label="بحث برقم الفاتورة أو العميل / المورد",
+                label="بحث في الفواتير",
+                hint_text="رقم الفاتورة، العميل، المورد أو المرجع",
                 prefix_icon=ft.Icons.SEARCH,
+                border_radius=16,
             )
-            type_filter = SearchSelect(
-                label="النوع",
-                value="all",
-                choices=[("all", "الكل"), ("sale", "بيع"), ("purchase", "شراء")],
-                allow_clear=False,
-            )
-            status_filter = SearchSelect(
-                label="السداد",
-                value="all",
-                choices=[("all", "الكل"), ("unpaid", "غير مدفوعة"), ("partial", "جزئية"), ("paid", "مدفوعة")],
-                allow_clear=False,
-            )
-            cards = ft.Column(spacing=8)
+            cards = ft.Column(spacing=10)
+            filters = {"type": "all", "status": "all"}
+            type_row = ft.Row(spacing=6, wrap=True)
+            status_row = ft.Row(spacing=6, wrap=True)
 
             outstanding = sum(max(0.0, float(i.get("remaining_amount") or 0)) for i in invoices)
             open_count = sum(1 for i in invoices if i.get("payment_status") != "paid")
             sales_total = sum(float(i.get("total") or 0) for i in invoices if i.get("type") == "sale")
 
-            def summary_card(title: str, value: str):
+            def summary_card(title: str, value: str, icon, color: str):
                 return ft.Container(
-                    ft.Column(
+                    ft.Row(
                         [
-                            ft.Text(title, size=11, color="#64748B"),
-                            ft.Text(value, size=17, weight=ft.FontWeight.BOLD),
+                            ft.Container(ft.Icon(icon, color=color, size=20), width=38, height=38, alignment=ft.alignment.center, bgcolor="#F8FAFC", border_radius=12),
+                            ft.Column([ft.Text(title, size=10, color="#64748B"), ft.Text(value, size=16, weight=ft.FontWeight.BOLD)], spacing=2, expand=True),
                         ],
-                        spacing=3,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    padding=12,
-                    border=ft.border.all(1, "#E5E7EB"),
-                    border_radius=12,
-                    bgcolor="#FFFFFF",
+                    padding=11, border=ft.border.all(1, "#E2E8F0"), border_radius=16, bgcolor="#FFFFFF",
                 )
 
             def matches(inv: dict) -> bool:
                 query = (search.value or "").strip().lower()
-                if type_filter.value != "all" and inv.get("type") != type_filter.value:
+                if filters["type"] != "all" and inv.get("type") != filters["type"]:
                     return False
-                if status_filter.value != "all" and inv.get("payment_status") != status_filter.value:
+                if filters["status"] != "all" and inv.get("payment_status") != filters["status"]:
                     return False
                 if not query:
                     return True
@@ -191,7 +185,8 @@ class InvoiceCenter:
 
             def invoice_card(inv: dict):
                 invoice_id = int(inv["id"])
-                kind = "بيع" if inv.get("type") == "sale" else "شراء"
+                sale = inv.get("type") == "sale"
+                kind = "بيع" if sale else "شراء"
                 party = inv.get("party_name") or "نقدي"
                 total = float(inv.get("total") or 0)
                 paid_amount = float(inv.get("paid_amount") or 0)
@@ -200,80 +195,46 @@ class InvoiceCenter:
                 status = STATUS_AR.get(status_key, status_key)
                 status_bg = "#ECFDF5" if status_key == "paid" else "#FFF7ED" if status_key == "partial" else "#FEF2F2"
                 status_fg = "#166534" if status_key == "paid" else "#9A3412" if status_key == "partial" else "#B91C1C"
-                has_party = bool(inv.get("customer_id") if inv.get("type") == "sale" else inv.get("supplier_id"))
+                has_party = bool(inv.get("customer_id") if sale else inv.get("supplier_id"))
+                accent = "#16A34A" if sale else "#7C3AED"
+                accent_bg = "#ECFDF5" if sale else "#F5F3FF"
 
-                action_controls = [
-                    ft.Container(
-                        ft.FilledButton(
-                            "فتح",
-                            icon=ft.Icons.EDIT_OUTLINED,
-                            on_click=lambda _, iid=invoice_id: self.show_editor(iid),
-                        ),
-                        col={"xs": 5, "sm": 4},
-                    )
+                actions = [
+                    ft.FilledButton("فتح", icon=ft.Icons.VISIBILITY_OUTLINED, on_click=lambda _, iid=invoice_id: self.show_editor(iid)),
                 ]
                 if remaining > 1e-9 and has_party:
-                    action_controls.append(
-                        ft.Container(
-                            ft.OutlinedButton(
-                                "تسجيل دفعة",
-                                icon=ft.Icons.PAYMENTS_OUTLINED,
-                                on_click=lambda _, iid=invoice_id: self.show_payment_dialog(iid),
-                            ),
-                            col={"xs": 5, "sm": 4},
-                        )
-                    )
-                action_controls.append(
-                    ft.Container(
-                        ft.IconButton(
-                            icon=ft.Icons.MORE_VERT,
-                            tooltip="المزيد",
-                            on_click=lambda _, row=inv: self._invoice_more_dialog(row),
-                        ),
-                        col={"xs": 2, "sm": 2},
-                    )
-                )
+                    actions.append(ft.OutlinedButton("تسجيل دفعة", icon=ft.Icons.PAYMENTS_OUTLINED, on_click=lambda _, iid=invoice_id: self.show_payment_dialog(iid)))
 
                 return ft.Container(
                     ft.Column(
                         [
                             ft.Row(
                                 [
+                                    ft.Container(ft.Icon(ft.Icons.TRENDING_UP if sale else ft.Icons.TRENDING_DOWN, color=accent, size=21), width=44, height=44, alignment=ft.alignment.center, bgcolor=accent_bg, border_radius=14),
                                     ft.Column(
                                         [
-                                            ft.Text(f"فاتورة {kind} #{invoice_id}", weight=ft.FontWeight.BOLD),
-                                            ft.Text(f"{inv.get('invoice_date') or '—'} • {party}", size=12, color="#64748B"),
+                                            ft.Row([ft.Text(f"فاتورة {kind} #{invoice_id}", weight=ft.FontWeight.BOLD, size=14, expand=True), ft.Container(ft.Text(status, size=9, color=status_fg, weight=ft.FontWeight.BOLD), padding=ft.padding.symmetric(horizontal=8, vertical=4), bgcolor=status_bg, border_radius=12)]),
+                                            ft.Text(f"{party} • {inv.get('invoice_date') or '—'}", size=10, color="#64748B"),
                                         ],
-                                        spacing=2,
-                                        expand=True,
+                                        spacing=3, expand=True,
                                     ),
-                                    ft.Text(self.money(total), size=19, weight=ft.FontWeight.BOLD),
+                                    ft.IconButton(icon=ft.Icons.MORE_VERT, tooltip="المزيد", icon_color="#64748B", on_click=lambda _, row=inv: self._invoice_more_dialog(row)),
                                 ],
                                 vertical_alignment=ft.CrossAxisAlignment.START,
                             ),
+                            ft.Divider(height=1, color="#F1F5F9"),
                             ft.Row(
                                 [
-                                    ft.Text(f"المدفوع {self.money(paid_amount)}", size=11, color="#475569"),
-                                    ft.Text("•", size=11, color="#94A3B8"),
-                                    ft.Text(f"المتبقي {self.money(remaining)}", size=11, color="#475569"),
-                                    ft.Container(
-                                        ft.Text(status, size=11, color=status_fg, weight=ft.FontWeight.BOLD),
-                                        padding=ft.padding.symmetric(horizontal=8, vertical=4),
-                                        border_radius=20,
-                                        bgcolor=status_bg,
-                                    ),
-                                ],
-                                wrap=True,
-                                spacing=6,
+                                    ft.Column([ft.Text("الإجمالي", size=9, color="#94A3B8"), ft.Text(self.money(total), size=16, weight=ft.FontWeight.BOLD)], spacing=2, expand=True),
+                                    ft.Column([ft.Text("المدفوع", size=9, color="#94A3B8"), ft.Text(self.money(paid_amount), size=12, color="#475569")], spacing=2, expand=True),
+                                    ft.Column([ft.Text("المتبقي", size=9, color="#94A3B8"), ft.Text(self.money(remaining), size=12, color="#EA580C" if remaining else "#16A34A")], spacing=2, expand=True),
+                                ]
                             ),
-                            ft.ResponsiveRow(action_controls, spacing=6, run_spacing=6),
+                            ft.Row(actions, spacing=8, wrap=True),
                         ],
-                        spacing=8,
+                        spacing=9,
                     ),
-                    padding=12,
-                    border=ft.border.all(1, "#E5E7EB"),
-                    border_radius=14,
-                    bgcolor="#FFFFFF",
+                    padding=13, border=ft.border.all(1, "#E2E8F0"), border_radius=20, bgcolor="#FFFFFF",
                 )
 
             def refresh_cards(_=None):
@@ -281,72 +242,58 @@ class InvoiceCenter:
                 if not cards.controls:
                     cards.controls = [
                         ft.Container(
-                            ft.Column(
-                                [
-                                    ft.Icon(ft.Icons.RECEIPT_LONG_OUTLINED, size=38, color="#94A3B8"),
-                                    ft.Text("لا توجد فواتير مطابقة", color="#64748B"),
-                                ],
-                                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                                spacing=6,
-                            ),
-                            padding=28,
-                            alignment=ft.alignment.center,
+                            ft.Column([ft.Icon(ft.Icons.RECEIPT_LONG_OUTLINED, size=42, color="#CBD5E1"), ft.Text("لا توجد فواتير مطابقة", color="#64748B"), ft.Text("جرّب تغيير البحث أو عوامل التصفية", size=10, color="#94A3B8")], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=6),
+                            padding=34, alignment=ft.alignment.center,
                         )
                     ]
                 self.page.update()
 
+            def chip(text: str, key: str, value: str, row: ft.Row):
+                active = filters[key] == value
+                return ft.Container(
+                    ft.Text(text, size=11, color="#FFFFFF" if active else "#475569", weight=ft.FontWeight.BOLD if active else ft.FontWeight.W_500),
+                    padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                    bgcolor="#0B63F6" if active else "#FFFFFF",
+                    border=ft.border.all(1, "#0B63F6" if active else "#E2E8F0"),
+                    border_radius=14,
+                    on_click=lambda _: set_filter(key, value), ink=True,
+                )
+
+            def render_filters() -> None:
+                type_row.controls = [chip("الكل", "type", "all", type_row), chip("مبيعات", "type", "sale", type_row), chip("مشتريات", "type", "purchase", type_row)]
+                status_row.controls = [chip("كل الحالات", "status", "all", status_row), chip("غير مدفوعة", "status", "unpaid", status_row), chip("جزئية", "status", "partial", status_row), chip("مدفوعة", "status", "paid", status_row)]
+
+            def set_filter(key: str, value: str) -> None:
+                filters[key] = value
+                render_filters()
+                refresh_cards()
+
             search.on_change = refresh_cards
-            type_filter.on_change = refresh_cards
-            status_filter.on_change = refresh_cards
+            render_filters()
             refresh_cards()
 
             self.content.content = ft.Column(
                 [
-                    ft.Text("الفواتير", size=24, weight=ft.FontWeight.BOLD),
-                    ft.ResponsiveRow(
+                    ft.Row(
                         [
-                            ft.Container(
-                                ft.FilledButton(
-                                    "فاتورة بيع",
-                                    icon=ft.Icons.ADD,
-                                    on_click=lambda _: self.show_editor(None, "sale"),
-                                ),
-                                col={"xs": 6, "md": 3},
-                            ),
-                            ft.Container(
-                                ft.OutlinedButton(
-                                    "فاتورة شراء",
-                                    icon=ft.Icons.ADD,
-                                    on_click=lambda _: self.show_editor(None, "purchase"),
-                                ),
-                                col={"xs": 6, "md": 3},
-                            ),
+                            ft.FilledButton("بيع جديد", icon=ft.Icons.SHOPPING_CART_CHECKOUT, on_click=lambda _: self.show_editor(None, "sale")),
+                            ft.OutlinedButton("شراء جديد", icon=ft.Icons.ADD_SHOPPING_CART, on_click=lambda _: self.show_editor(None, "purchase")),
                         ],
-                        spacing=8,
-                        run_spacing=8,
+                        spacing=8, wrap=True,
                     ),
                     ft.ResponsiveRow(
                         [
-                            ft.Container(summary_card("إجمالي المبيعات", self.money(sales_total)), col={"xs": 6, "md": 4}),
-                            ft.Container(summary_card("المستحق", self.money(outstanding)), col={"xs": 6, "md": 4}),
-                            ft.Container(summary_card("فواتير مفتوحة", str(open_count)), col={"xs": 12, "md": 4}),
-                        ],
-                        spacing=8,
-                        run_spacing=8,
+                            ft.Container(summary_card("إجمالي المبيعات", self.money(sales_total), ft.Icons.TRENDING_UP, "#16A34A"), col={"xs": 6, "md": 4}),
+                            ft.Container(summary_card("المستحق", self.money(outstanding), ft.Icons.SCHEDULE, "#EA580C"), col={"xs": 6, "md": 4}),
+                            ft.Container(summary_card("فواتير مفتوحة", str(open_count), ft.Icons.RECEIPT_LONG_OUTLINED, "#0B63F6"), col={"xs": 12, "md": 4}),
+                        ], spacing=8, run_spacing=8,
                     ),
                     search,
-                    ft.ResponsiveRow(
-                        [
-                            ft.Container(type_filter, col={"xs": 6, "md": 3}),
-                            ft.Container(status_filter, col={"xs": 6, "md": 3}),
-                        ],
-                        spacing=8,
-                        run_spacing=8,
-                    ),
+                    ft.Column([ft.Text("النوع", size=10, color="#64748B"), type_row], spacing=4),
+                    ft.Column([ft.Text("حالة السداد", size=10, color="#64748B"), status_row], spacing=4),
                     cards,
                 ],
-                spacing=12,
-                scroll=ft.ScrollMode.AUTO,
+                spacing=12, scroll=ft.ScrollMode.AUTO,
             )
             self.page.update()
         except Exception as exc:
@@ -446,6 +393,12 @@ class InvoiceCenter:
 
         self.editing_id = invoice_id
         self.invoice_type = (existing["type"] if existing else invoice_type) or "sale"
+        if self.on_title_change:
+            kind_label = "بيع" if self.invoice_type == "sale" else "شراء"
+            self.on_title_change(
+                f"تعديل فاتورة #{invoice_id}" if invoice_id else f"فاتورة {kind_label}",
+                "إدارة بيانات الفاتورة والبنود والدفع" if invoice_id else f"إنشاء فاتورة {kind_label} جديدة — النقدي افتراضيًا",
+            )
         customers = self.ctx.customers.list()
         suppliers = self.ctx.suppliers.list()
         items = self.ctx.items.list()
@@ -699,14 +652,13 @@ class InvoiceCenter:
             [
                 ft.Row(
                     [
-                        ft.IconButton(icon=ft.Icons.ARROW_FORWARD, tooltip="رجوع", on_click=lambda _: self.show_center()),
-                        ft.Text(
-                            f"تعديل فاتورة #{self.editing_id}" if self.editing_id else "فاتورة جديدة",
-                            size=24,
-                            weight=ft.FontWeight.BOLD,
-                            expand=True,
+                        ft.OutlinedButton("رجوع للفواتير", icon=ft.Icons.ARROW_FORWARD, on_click=lambda _: self.show_center()),
+                        ft.Container(
+                            ft.Text("نقدي تلقائيًا عند عدم اختيار عميل / مورد", size=10, color="#0B63F6", weight=ft.FontWeight.W_600),
+                            padding=ft.padding.symmetric(horizontal=10, vertical=7), bgcolor="#EFF6FF", border_radius=14,
                         ),
-                    ]
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=True,
                 ),
                 ft.ResponsiveRow(
                     [

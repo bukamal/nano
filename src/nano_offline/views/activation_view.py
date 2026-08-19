@@ -5,6 +5,7 @@ import asyncio
 import flet as ft
 
 from nano_offline.services.license_service import HAWAA_ACTIVATION_URL
+from nano_offline.version import APP_VERSION
 
 
 class ActivationGate:
@@ -40,7 +41,7 @@ class ActivationGate:
     async def _activate(self, _):
         self._set_busy(True)
         try:
-            status = await asyncio.to_thread(self.ctx.license.activate_online, self.key.value or "", "0.7.4")
+            status = await asyncio.to_thread(self.ctx.license.activate_online, self.key.value or "", APP_VERSION)
             if not status.valid:
                 raise RuntimeError(status.reason or "فشل التفعيل")
             self.status.value = "تم التفعيل بنجاح. سيعمل التطبيق الآن أوفلاين."

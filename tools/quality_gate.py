@@ -47,6 +47,8 @@ SCRIPTS = [
     "tools/search_select_contract_smoke_test.py",
     "tools/quick_auth_saved_login_smoke_test.py",
     "tools/cash_backup_pdf_android_smoke_test.py",
+    "tools/qeid_reference_design_phase1_smoke_test.py",
+    "tools/qeid_reference_design_phase2_smoke_test.py",
     "tools/apk_release_preflight.py",
 ]
 

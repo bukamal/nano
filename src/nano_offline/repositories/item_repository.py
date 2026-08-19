@@ -64,6 +64,47 @@ class ItemRepository:
                 result.append(d)
             return result
 
+    def activity_summary(self, item_id: int) -> dict:
+        """Return sales/purchase and stock metrics for an item."""
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """SELECT i.id, i.name, i.item_type, i.quantity, i.average_cost, i.purchase_price, i.selling_price,
+                          COALESCE(SUM(CASE WHEN inv.type='sale' THEN il.quantity_in_base ELSE 0 END),0) AS sold_qty,
+                          COALESCE(SUM(CASE WHEN inv.type='purchase' THEN il.quantity_in_base ELSE 0 END),0) AS purchased_qty,
+                          COUNT(DISTINCT CASE WHEN inv.type='sale' THEN inv.id END) AS sale_count,
+                          COUNT(DISTINCT CASE WHEN inv.type='purchase' THEN inv.id END) AS purchase_count,
+                          MAX(CASE WHEN inv.type='sale' THEN inv.invoice_date END) AS last_sale_date,
+                          MAX(CASE WHEN inv.type='purchase' THEN inv.invoice_date END) AS last_purchase_date
+                   FROM items i
+                   LEFT JOIN invoice_lines il ON il.item_id=i.id
+                   LEFT JOIN invoices inv ON inv.id=il.invoice_id AND inv.status='posted'
+                   WHERE i.id=?
+                   GROUP BY i.id""",
+                (item_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("المادة غير موجودة")
+            result = dict(row)
+            qty = float(result.get("quantity") or 0)
+            avg = float(result.get("average_cost") or 0)
+            sell = float(result.get("selling_price") or 0)
+            result["inventory_cost_value"] = qty * avg
+            result["inventory_sale_value"] = qty * sell
+            return result
+
+    def movements(self, item_id: int, limit: int = 30) -> list[dict]:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """SELECT m.*, inv.type AS invoice_type, inv.reference AS invoice_reference
+                   FROM inventory_movements m
+                   LEFT JOIN invoices inv ON inv.id=m.invoice_id
+                   WHERE m.item_id=?
+                   ORDER BY m.movement_date DESC, m.id DESC
+                   LIMIT ?""",
+                (item_id, int(limit)),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def create(
         self,
         *,

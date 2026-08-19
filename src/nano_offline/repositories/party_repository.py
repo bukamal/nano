@@ -26,6 +26,33 @@ class PartyRepository:
             row = conn.execute(f"SELECT * FROM {self.table} WHERE id=?", (party_id,)).fetchone()
             return dict(row) if row else None
 
+    def activity_summary(self, party_id: int) -> dict:
+        party = self.get(party_id)
+        if party is None:
+            raise ValueError("الحساب غير موجود")
+        id_column = "customer_id" if self.table == "customers" else "supplier_id"
+        invoice_type = "sale" if self.table == "customers" else "purchase"
+        with self.db.connect() as conn:
+            stats = conn.execute(
+                f"""SELECT COUNT(*) AS invoice_count, COALESCE(SUM(total),0) AS invoice_total,
+                           COALESCE(SUM(paid_amount),0) AS paid_total,
+                           COALESCE(SUM(MAX(total-paid_amount,0)),0) AS outstanding_total,
+                           MAX(invoice_date) AS last_invoice_date
+                    FROM invoices WHERE type=? AND {id_column}=? AND status='posted'""",
+                (invoice_type, party_id),
+            ).fetchone()
+            recent = conn.execute(
+                f"""SELECT id,type,invoice_date,reference,total,paid_amount,
+                           MAX(total-paid_amount,0) AS remaining_amount
+                    FROM invoices WHERE type=? AND {id_column}=? AND status='posted'
+                    ORDER BY invoice_date DESC,id DESC LIMIT 8""",
+                (invoice_type, party_id),
+            ).fetchall()
+        result = dict(party)
+        result.update(dict(stats))
+        result["recent_invoices"] = [dict(r) for r in recent]
+        return result
+
     def create(self, name: str, phone: str | None = None, address: str | None = None) -> int:
         name = name.strip()
         if not name:

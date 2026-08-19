@@ -26,7 +26,35 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
     page.padding = 0
     page.bgcolor = "#F8FAFC"
 
-    content = ft.Container(expand=True, padding=16)
+    content = ft.Container(expand=True, padding=ft.padding.only(left=18, right=18, top=14, bottom=18))
+
+    header_title = ft.Text("لوحة التحكم", size=22, weight=ft.FontWeight.BOLD, color="#0F172A")
+    header_subtitle = ft.Text("نظرة عامة على أداء عملك", size=12, color="#64748B")
+
+    def set_header(title: str, subtitle: str = "") -> None:
+        header_title.value = title
+        header_subtitle.value = subtitle
+
+    top_bar = ft.Container(
+        ft.Row(
+            [
+                ft.Column([header_title, header_subtitle], spacing=1, expand=True),
+                ft.Container(
+                    ft.Icon(ft.Icons.NOTIFICATIONS_NONE_ROUNDED, color="#64748B", size=22),
+                    width=42,
+                    height=42,
+                    alignment=ft.alignment.center,
+                    border=ft.border.all(1, "#E2E8F0"),
+                    border_radius=14,
+                    bgcolor="#FFFFFF",
+                ),
+            ],
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        padding=ft.padding.symmetric(horizontal=18, vertical=12),
+        bgcolor="#FFFFFF",
+        border=ft.border.only(bottom=ft.BorderSide(1, "#E2E8F0")),
+    )
 
     def money(value):
         return f"{float(value or 0):,.2f}"
@@ -34,355 +62,650 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
     def notify(text: str):
         page.open(ft.SnackBar(ft.Text(text)))
 
-    def metric(title, value):
+    def metric(title: str, value: str, *, icon, accent: str, note: str = ""):
         return ft.Container(
             content=ft.Column(
-                [ft.Text(title, size=12, color="#64748B"), ft.Text(value, size=20, weight=ft.FontWeight.BOLD)],
-                spacing=4,
+                [
+                    ft.Row(
+                        [
+                            ft.Container(
+                                ft.Icon(icon, size=20, color=accent),
+                                width=40, height=40, alignment=ft.alignment.center,
+                                bgcolor={"#16A34A": "#ECFDF5", "#0B63F6": "#EFF6FF", "#F59E0B": "#FFFBEB", "#EF4444": "#FEF2F2"}.get(accent, "#EFF6FF"), border_radius=13,
+                            ),
+                            ft.Text(title, size=12, color="#64748B", weight=ft.FontWeight.W_600, expand=True),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Text(value, size=24, weight=ft.FontWeight.BOLD, color="#0F172A"),
+                    ft.Text(note, size=10, color="#94A3B8") if note else ft.Container(height=2),
+                ],
+                spacing=7,
             ),
-            padding=14,
-            border=ft.border.all(1, "#E5E7EB"),
-            border_radius=12,
+            padding=16,
+            border=ft.border.all(1, "#E2E8F0"),
+            border_radius=20,
             bgcolor="#FFFFFF",
+            shadow=ft.BoxShadow(blur_radius=18, spread_radius=0, color="#E2E8F0", offset=ft.Offset(0, 5)),
+        )
+
+    def dashboard_action(label: str, icon, on_click, *, primary: bool = False):
+        return ft.Container(
+            ft.Column(
+                [
+                    ft.Container(
+                        ft.Icon(icon, color="#FFFFFF" if primary else "#0B63F6", size=24),
+                        width=48, height=48, alignment=ft.alignment.center,
+                        bgcolor="#0B63F6" if primary else "#EFF6FF",
+                        border_radius=16,
+                    ),
+                    ft.Text(label, size=12, weight=ft.FontWeight.W_600, color="#0F172A", text_align=ft.TextAlign.CENTER),
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=7,
+            ),
+            padding=10,
+            border_radius=18,
+            on_click=on_click,
+            ink=True,
         )
 
     def show_dashboard():
+        set_header("لوحة التحكم", "نظرة عامة على أداء عملك")
         summary = ctx.dashboard.summary()
+        invoices = ctx.invoices.list_invoices(limit=100)
+        recent = invoices[:5]
+        open_invoices = [i for i in invoices if i.get("payment_status") != "paid"]
+        low_stock = [
+            i for i in ctx.items.list()
+            if i.get("item_type") == "مخزون" and float(i.get("quantity") or 0) <= 5
+        ]
+
+        sales = max(0.0, float(summary["sales"]))
+        purchases = max(0.0, float(summary["purchases"]))
+        max_flow = max(sales, purchases, 1.0)
+
+        def flow_row(label: str, value: float, color: str):
+            ratio = max(0.04, min(1.0, value / max_flow)) if value else 0.02
+            return ft.Column(
+                [
+                    ft.Row([ft.Text(label, size=12, color="#475569", expand=True), ft.Text(money(value), size=12, weight=ft.FontWeight.BOLD)]),
+                    ft.Stack(
+                        [
+                            ft.Container(height=8, bgcolor="#F1F5F9", border_radius=10),
+                            ft.Container(height=8, width=max(8, 260 * ratio), bgcolor=color, border_radius=10),
+                        ]
+                    ),
+                ],
+                spacing=5,
+            )
+
+        recent_cards: list[ft.Control] = []
+        for inv in recent:
+            sale = inv.get("type") == "sale"
+            remaining = max(0.0, float(inv.get("remaining_amount") or 0))
+            recent_cards.append(
+                ft.Container(
+                    ft.Row(
+                        [
+                            ft.Container(
+                                ft.Icon(ft.Icons.TRENDING_UP if sale else ft.Icons.TRENDING_DOWN, size=18, color="#16A34A" if sale else "#7C3AED"),
+                                width=38, height=38, alignment=ft.alignment.center,
+                                bgcolor="#ECFDF5" if sale else "#F5F3FF", border_radius=12,
+                            ),
+                            ft.Column(
+                                [
+                                    ft.Text(f"فاتورة {'بيع' if sale else 'شراء'} #{inv['id']}", size=13, weight=ft.FontWeight.BOLD),
+                                    ft.Text(f"{inv.get('party_name') or 'نقدي'} • {inv.get('invoice_date') or '—'}", size=10, color="#64748B"),
+                                ], spacing=2, expand=True,
+                            ),
+                            ft.Column(
+                                [
+                                    ft.Text(money(inv.get("total")), size=13, weight=ft.FontWeight.BOLD),
+                                    ft.Text("مسددة" if remaining <= 1e-9 else f"متبقي {money(remaining)}", size=9, color="#16A34A" if remaining <= 1e-9 else "#EA580C"),
+                                ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.END,
+                            ),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    padding=10,
+                    border_radius=14,
+                    bgcolor="#F8FAFC",
+                )
+            )
+        if not recent_cards:
+            recent_cards.append(ft.Container(ft.Text("لا توجد فواتير بعد", color="#64748B", size=12), padding=12))
+
+        alerts = ft.Column(spacing=8)
+        if open_invoices:
+            alerts.controls.append(
+                ft.Container(
+                    ft.Row([ft.Icon(ft.Icons.RECEIPT_LONG, color="#EA580C"), ft.Text(f"{len(open_invoices)} فاتورة غير مسددة أو جزئية", expand=True, size=12), ft.Icon(ft.Icons.CHEVRON_LEFT, color="#94A3B8")]),
+                    padding=12, bgcolor="#FFF7ED", border_radius=14, on_click=lambda _: navigate("invoices"), ink=True,
+                )
+            )
+        if low_stock:
+            alerts.controls.append(
+                ft.Container(
+                    ft.Row([ft.Icon(ft.Icons.INVENTORY_2_OUTLINED, color="#B91C1C"), ft.Text(f"{len(low_stock)} مادة منخفضة المخزون (≤ 5)", expand=True, size=12), ft.Icon(ft.Icons.CHEVRON_LEFT, color="#94A3B8")]),
+                    padding=12, bgcolor="#FEF2F2", border_radius=14, on_click=lambda _: navigate("items"), ink=True,
+                )
+            )
+        if not alerts.controls:
+            alerts.controls.append(ft.Container(ft.Row([ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, color="#16A34A"), ft.Text("لا توجد تنبيهات مهمة حاليًا", size=12)]), padding=12, bgcolor="#ECFDF5", border_radius=14))
+
         content.content = ft.Column(
             [
-                ft.Text("لوحة التحكم", size=24, weight=ft.FontWeight.BOLD),
                 ft.ResponsiveRow(
                     [
-                        ft.Container(metric("المبيعات", money(summary["sales"])), col={"xs": 6, "md": 3}),
-                        ft.Container(metric("الربح الصافي", money(summary["net_profit"])), col={"xs": 6, "md": 3}),
-                        ft.Container(metric("ذمم العملاء", money(summary["receivables"])), col={"xs": 6, "md": 3}),
-                        ft.Container(metric("ذمم الموردين", money(summary["payables"])), col={"xs": 6, "md": 3}),
-                        ft.Container(metric("أرصدة دائنة للعملاء", money(summary["customer_credits"])), col={"xs": 6, "md": 3}),
-                        ft.Container(metric("دفعات مقدمة للموردين", money(summary["supplier_advances"])), col={"xs": 6, "md": 3}),
-                        ft.Container(metric("قيمة المخزون", money(summary["inventory_value"])), col={"xs": 6, "md": 3}),
-                        ft.Container(metric("الصندوق", money(summary["cash"])), col={"xs": 6, "md": 3}),
-                    ]
+                        ft.Container(metric("صافي الربح", money(summary["net_profit"]), icon=ft.Icons.QUERY_STATS, accent="#16A34A", note="بعد تكلفة المبيعات والمصروفات"), col={"xs": 6, "md": 3}),
+                        ft.Container(metric("رصيد الصندوق", money(summary["cash"]), icon=ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, accent="#0B63F6", note="الرصيد النقدي الحالي"), col={"xs": 6, "md": 3}),
+                        ft.Container(metric("ذمم العملاء", money(summary["receivables"]), icon=ft.Icons.PEOPLE_OUTLINE, accent="#F59E0B", note="مبالغ مستحقة التحصيل"), col={"xs": 6, "md": 3}),
+                        ft.Container(metric("ذمم الموردين", money(summary["payables"]), icon=ft.Icons.LOCAL_SHIPPING_OUTLINED, accent="#EF4444", note="مبالغ مستحقة الدفع"), col={"xs": 6, "md": 3}),
+                    ], spacing=10, run_spacing=10,
                 ),
                 ft.Container(
                     ft.Column(
                         [
-                            ft.Text("Nano", weight=ft.FontWeight.BOLD),
-                            ft.Text(
-                                "منصة أعمال حديثة للمحاسبة والمخزون والفواتير، بهوية Nano الجديدة وتشغيل محلي كامل.",
-                                color="#64748B",
+                            ft.Row([ft.Text("إجراءات سريعة", size=16, weight=ft.FontWeight.BOLD, expand=True), ft.Text("الأكثر استخدامًا", size=10, color="#94A3B8")]),
+                            ft.Row(
+                                [
+                                    dashboard_action("بيع", ft.Icons.SHOPPING_CART_CHECKOUT, lambda _: open_sale(), primary=True),
+                                    dashboard_action("شراء", ft.Icons.ADD_SHOPPING_CART, lambda _: open_purchase()),
+                                    dashboard_action("الفواتير", ft.Icons.RECEIPT_LONG_OUTLINED, lambda _: navigate("invoices")),
+                                    dashboard_action("المواد", ft.Icons.INVENTORY_2_OUTLINED, lambda _: navigate("items")),
+                                ],
+                                alignment=ft.MainAxisAlignment.SPACE_AROUND,
                             ),
-                        ]
+                        ], spacing=12,
                     ),
-                    padding=14,
-                    border=ft.border.all(1, "#E5E7EB"),
-                    border_radius=12,
-                    bgcolor="#FFFFFF",
+                    padding=15, bgcolor="#FFFFFF", border=ft.border.all(1, "#E2E8F0"), border_radius=20,
+                ),
+                ft.ResponsiveRow(
+                    [
+                        ft.Container(
+                            ft.Container(
+                                ft.Column(
+                                    [
+                                        ft.Text("المبيعات والمشتريات", size=16, weight=ft.FontWeight.BOLD),
+                                        flow_row("المبيعات", sales, "#0B63F6"),
+                                        flow_row("المشتريات", purchases, "#8B5CF6"),
+                                        ft.Row([ft.Text("قيمة المخزون", size=11, color="#64748B", expand=True), ft.Text(money(summary["inventory_value"]), weight=ft.FontWeight.BOLD, size=12)]),
+                                    ], spacing=13,
+                                ),
+                                padding=16, bgcolor="#FFFFFF", border=ft.border.all(1, "#E2E8F0"), border_radius=20,
+                            ),
+                            col={"xs": 12, "md": 6},
+                        ),
+                        ft.Container(
+                            ft.Container(
+                                ft.Column([ft.Text("تنبيهات", size=16, weight=ft.FontWeight.BOLD), alerts], spacing=10),
+                                padding=16, bgcolor="#FFFFFF", border=ft.border.all(1, "#E2E8F0"), border_radius=20,
+                            ),
+                            col={"xs": 12, "md": 6},
+                        ),
+                    ], spacing=10, run_spacing=10,
+                ),
+                ft.Container(
+                    ft.Column([ft.Row([ft.Text("آخر الفواتير", size=16, weight=ft.FontWeight.BOLD, expand=True), ft.TextButton("عرض الكل", on_click=lambda _: navigate("invoices"))]), *recent_cards], spacing=8),
+                    padding=14, bgcolor="#FFFFFF", border=ft.border.all(1, "#E2E8F0"), border_radius=20,
                 ),
             ],
+            spacing=14,
             scroll=ft.ScrollMode.AUTO,
         )
         page.update()
 
     def party_view(repo, title):
-        name = ft.TextField(label="الاسم", expand=True)
-        phone = ft.TextField(label="الهاتف")
-        address = ft.TextField(label="العنوان")
-        search = ft.TextField(label="بحث", prefix_icon=ft.Icons.SEARCH)
-        rows = ft.Column(spacing=8)
+        is_customer = repo.table == "customers"
+        singular = "العميل" if is_customer else "المورد"
+        set_header(title, f"إدارة بيانات {title} والحسابات المرتبطة")
+        search = ft.TextField(
+            label=f"بحث في {title}",
+            hint_text=f"الاسم أو الهاتف",
+            prefix_icon=ft.Icons.SEARCH,
+            expand=True,
+        )
+        rows = ft.Column(spacing=9)
+        summary_row = ft.ResponsiveRow(spacing=8, run_spacing=8)
 
-        def refresh(_=None):
-            rows.controls = []
-            for party in repo.list(search.value or ""):
-                rows.controls.append(
+        def small_metric(label: str, value: str, icon, accent: str):
+            return ft.Container(
+                ft.Row(
+                    [
+                        ft.Container(ft.Icon(icon, size=19, color=accent), width=38, height=38, alignment=ft.alignment.center, bgcolor="#F8FAFC", border_radius=12),
+                        ft.Column([ft.Text(label, size=10, color="#64748B"), ft.Text(value, size=17, weight=ft.FontWeight.BOLD)], spacing=1, expand=True),
+                    ]
+                ),
+                padding=11,
+                bgcolor="#FFFFFF",
+                border=ft.border.all(1, "#E2E8F0"),
+                border_radius=16,
+            )
+
+        def open_editor(party: dict | None = None):
+            name = ft.TextField(label="الاسم", value=(party or {}).get("name", ""), autofocus=True)
+            phone = ft.TextField(label="الهاتف", value=(party or {}).get("phone") or "", keyboard_type=ft.KeyboardType.PHONE)
+            address = ft.TextField(label="العنوان", value=(party or {}).get("address") or "", multiline=True, min_lines=1, max_lines=3)
+            dialog = ft.AlertDialog(modal=True)
+
+            def close(_=None):
+                page.close(dialog)
+
+            def save(_=None):
+                try:
+                    if party:
+                        repo.update(int(party["id"]), name.value or "", phone.value, address.value)
+                        message = f"تم تحديث {singular}"
+                    else:
+                        repo.create(name.value or "", phone.value, address.value)
+                        message = f"تمت إضافة {singular}"
+                    close()
+                    notify(message)
+                    refresh()
+                except Exception as exc:
+                    notify(str(exc))
+
+            dialog.title = ft.Text(f"{'تعديل' if party else 'إضافة'} {singular}")
+            dialog.content = ft.Container(ft.Column([name, phone, address], spacing=10, tight=True), width=480)
+            dialog.actions = [ft.TextButton("إلغاء", on_click=close), ft.FilledButton("حفظ", icon=ft.Icons.SAVE_OUTLINED, on_click=save)]
+            page.open(dialog)
+
+        def confirm_delete(party: dict, parent_dialog=None):
+            confirm = ft.AlertDialog(modal=True)
+
+            def close(_=None):
+                page.close(confirm)
+
+            def remove(_=None):
+                try:
+                    repo.delete(int(party["id"]))
+                    close()
+                    if parent_dialog:
+                        try:
+                            page.close(parent_dialog)
+                        except Exception:
+                            pass
+                    notify(f"تم حذف {singular}")
+                    refresh()
+                except Exception as exc:
+                    close()
+                    notify(str(exc))
+
+            confirm.title = ft.Text(f"حذف {singular}")
+            confirm.content = ft.Text(f"هل تريد حذف «{party['name']}»؟ لن يسمح بالحذف إذا كانت هناك حركات مالية مرتبطة.")
+            confirm.actions = [ft.TextButton("إلغاء", on_click=close), ft.FilledButton("حذف", icon=ft.Icons.DELETE_FOREVER, on_click=remove)]
+            page.open(confirm)
+
+        def show_detail(party: dict):
+            try:
+                data = repo.activity_summary(int(party["id"]))
+            except Exception as exc:
+                notify(str(exc))
+                return
+            dialog = ft.AlertDialog(modal=True)
+            balance = float(data.get("balance") or 0)
+            recent = []
+            for inv in data.get("recent_invoices") or []:
+                remaining = float(inv.get("remaining_amount") or 0)
+                recent.append(
                     ft.Container(
                         ft.Row(
                             [
                                 ft.Column(
                                     [
-                                        ft.Text(party["name"], weight=ft.FontWeight.BOLD),
-                                        ft.Text(party.get("phone") or "", size=12, color="#64748B"),
-                                    ],
-                                    expand=True,
-                                    spacing=2,
+                                        ft.Text(f"فاتورة #{inv['id']}", size=12, weight=ft.FontWeight.BOLD),
+                                        ft.Text(str(inv.get("invoice_date") or "—"), size=10, color="#64748B"),
+                                    ], spacing=1, expand=True,
                                 ),
                                 ft.Column(
-                                    [ft.Text("الرصيد", size=11, color="#64748B"), ft.Text(money(party["balance"]), weight=ft.FontWeight.BOLD)],
-                                    spacing=2,
+                                    [
+                                        ft.Text(money(inv.get("total")), size=12, weight=ft.FontWeight.BOLD),
+                                        ft.Text("مسددة" if remaining <= 1e-9 else f"متبقي {money(remaining)}", size=9, color="#16A34A" if remaining <= 1e-9 else "#EA580C"),
+                                    ], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END,
                                 ),
                             ]
                         ),
-                        padding=10,
-                        border=ft.border.all(1, "#E5E7EB"),
-                        border_radius=10,
-                        bgcolor="#FFFFFF",
+                        padding=9, bgcolor="#F8FAFC", border_radius=12,
                     )
                 )
+            if not recent:
+                recent = [ft.Text("لا توجد فواتير مرتبطة بعد", size=11, color="#64748B")]
+
+            def close(_=None):
+                page.close(dialog)
+
+            def edit(_=None):
+                close()
+                open_editor(data)
+
+            dialog.title = ft.Row(
+                [
+                    ft.Container(ft.Icon(ft.Icons.PERSON if is_customer else ft.Icons.LOCAL_SHIPPING_OUTLINED, color="#0B63F6"), width=42, height=42, alignment=ft.alignment.center, bgcolor="#EFF6FF", border_radius=14),
+                    ft.Column([ft.Text(data["name"], size=18, weight=ft.FontWeight.BOLD), ft.Text(data.get("phone") or "بدون هاتف", size=11, color="#64748B")], spacing=1, expand=True),
+                ]
+            )
+            dialog.content = ft.Container(
+                ft.Column(
+                    [
+                        ft.ResponsiveRow(
+                            [
+                                ft.Container(small_metric("الرصيد الحالي", money(balance), ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, "#0B63F6"), col={"xs": 6, "md": 3}),
+                                ft.Container(small_metric("عدد الفواتير", str(int(data.get("invoice_count") or 0)), ft.Icons.RECEIPT_LONG_OUTLINED, "#7C3AED"), col={"xs": 6, "md": 3}),
+                                ft.Container(small_metric("إجمالي الفواتير", money(data.get("invoice_total")), ft.Icons.PAID_OUTLINED, "#16A34A"), col={"xs": 6, "md": 3}),
+                                ft.Container(small_metric("المتبقي", money(data.get("outstanding_total")), ft.Icons.PENDING_ACTIONS_OUTLINED, "#EA580C"), col={"xs": 6, "md": 3}),
+                            ], spacing=7, run_spacing=7,
+                        ),
+                        ft.Text(f"العنوان: {data.get('address') or '—'}", size=11, color="#475569"),
+                        ft.Divider(height=10),
+                        ft.Text("آخر الفواتير", size=14, weight=ft.FontWeight.BOLD),
+                        ft.Column(recent, spacing=6),
+                    ], spacing=9, scroll=ft.ScrollMode.AUTO,
+                ), width=680, height=500,
+            )
+            dialog.actions = [
+                ft.TextButton("حذف", icon=ft.Icons.DELETE_OUTLINE, on_click=lambda _: confirm_delete(data, dialog)),
+                ft.OutlinedButton("تعديل", icon=ft.Icons.EDIT_OUTLINED, on_click=edit),
+                ft.FilledButton("إغلاق", on_click=close),
+            ]
+            page.open(dialog)
+
+        def refresh(_=None):
+            parties = repo.list(search.value or "")
+            all_parties = repo.list()
+            total_balance = sum(float(x.get("balance") or 0) for x in all_parties)
+            positive = sum(1 for x in all_parties if abs(float(x.get("balance") or 0)) > 1e-9)
+            summary_row.controls = [
+                ft.Container(small_metric(f"عدد {title}", str(len(all_parties)), ft.Icons.GROUP_OUTLINED, "#0B63F6"), col={"xs": 6, "md": 4}),
+                ft.Container(small_metric("إجمالي الأرصدة", money(total_balance), ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, "#16A34A" if total_balance >= 0 else "#EF4444"), col={"xs": 6, "md": 4}),
+                ft.Container(small_metric("حسابات بحركة", str(positive), ft.Icons.SYNC_ALT, "#7C3AED"), col={"xs": 12, "md": 4}),
+            ]
+            rows.controls = []
+            for party in parties:
+                balance = float(party.get("balance") or 0)
+                initials = (party.get("name") or "؟").strip()[:1]
+                rows.controls.append(
+                    ft.Container(
+                        ft.Row(
+                            [
+                                ft.Container(ft.Text(initials, size=18, weight=ft.FontWeight.BOLD, color="#0B63F6"), width=46, height=46, alignment=ft.alignment.center, bgcolor="#EFF6FF", border_radius=15),
+                                ft.Column(
+                                    [
+                                        ft.Text(party["name"], weight=ft.FontWeight.BOLD, size=14),
+                                        ft.Text(party.get("phone") or party.get("address") or "بدون بيانات اتصال", size=10, color="#64748B", max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                                    ], expand=True, spacing=2,
+                                ),
+                                ft.Column(
+                                    [
+                                        ft.Text(money(balance), weight=ft.FontWeight.BOLD, size=13, color="#0F172A"),
+                                        ft.Text("رصيد", size=9, color="#64748B"),
+                                    ], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END,
+                                ),
+                                ft.Icon(ft.Icons.CHEVRON_LEFT, size=18, color="#94A3B8"),
+                            ], vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        padding=12, bgcolor="#FFFFFF", border=ft.border.all(1, "#E2E8F0"), border_radius=16,
+                        on_click=lambda _, p=dict(party): show_detail(p), ink=True,
+                    )
+                )
+            if not rows.controls:
+                rows.controls.append(ft.Container(ft.Column([ft.Icon(ft.Icons.PERSON_SEARCH, size=44, color="#CBD5E1"), ft.Text("لا توجد نتائج", color="#64748B")], horizontal_alignment=ft.CrossAxisAlignment.CENTER), alignment=ft.alignment.center, padding=30))
             page.update()
 
         search.on_change = refresh
-
-        def add(_):
-            try:
-                repo.create(name.value or "", phone.value, address.value)
-                name.value = phone.value = address.value = ""
-                refresh()
-            except Exception as exc:
-                notify(str(exc))
-
-        refresh()
         content.content = ft.Column(
             [
-                ft.Text(title, size=24, weight=ft.FontWeight.BOLD),
-                ft.ResponsiveRow(
-                    [
-                        ft.Container(name, col={"xs": 12, "md": 5}),
-                        ft.Container(phone, col={"xs": 12, "md": 3}),
-                        ft.Container(address, col={"xs": 12, "md": 4}),
-                    ]
-                ),
-                ft.FilledButton("إضافة", icon=ft.Icons.ADD, on_click=add),
-                ft.Divider(),
-                search,
+                summary_row,
+                ft.Row([search, ft.FilledButton(f"إضافة {singular}", icon=ft.Icons.ADD, on_click=lambda _: open_editor())], vertical_alignment=ft.CrossAxisAlignment.START),
                 rows,
-            ],
-            scroll=ft.ScrollMode.AUTO,
+            ], spacing=12, scroll=ft.ScrollMode.AUTO,
         )
-        page.update()
+        refresh()
 
     def items_view():
+        set_header("المواد", "إدارة المخزون والخدمات والتصنيفات والوحدات")
         categories = ctx.definitions.list_categories()
         units = ctx.definitions.list_units()
-        category_map = {int(c["id"]): c for c in categories}
-        unit_map = {int(u["id"]): u for u in units}
+        search = ft.TextField(label="بحث في المواد", hint_text="اسم المادة أو الخدمة", prefix_icon=ft.Icons.SEARCH)
+        rows = ft.Column(spacing=9)
+        summary_row = ft.ResponsiveRow(spacing=8, run_spacing=8)
+        filter_state = {"mode": "all"}
+        filter_boxes: dict[str, ft.Container] = {}
+        LOW_STOCK = 5.0
 
+        def stat_card(label: str, value: str, icon, accent: str):
+            return ft.Container(
+                ft.Row([
+                    ft.Container(ft.Icon(icon, color=accent, size=20), width=40, height=40, alignment=ft.alignment.center, bgcolor="#F8FAFC", border_radius=13),
+                    ft.Column([ft.Text(label, size=10, color="#64748B"), ft.Text(value, size=17, weight=ft.FontWeight.BOLD)], spacing=1, expand=True),
+                ]),
+                padding=11, bgcolor="#FFFFFF", border=ft.border.all(1, "#E2E8F0"), border_radius=16,
+            )
+
+        def filter_box(key: str, label: str, icon):
+            box = ft.Container(
+                ft.Row([ft.Icon(icon, size=15), ft.Text(label, size=11, weight=ft.FontWeight.W_600)], spacing=5),
+                padding=ft.padding.symmetric(horizontal=11, vertical=8),
+                border_radius=20, border=ft.border.all(1, "#E2E8F0"), ink=True,
+                on_click=lambda _, k=key: set_filter(k),
+            )
+            filter_boxes[key] = box
+            return box
+
+        def update_filter_styles():
+            for key, box in filter_boxes.items():
+                selected = key == filter_state["mode"]
+                box.bgcolor = "#0B63F6" if selected else "#FFFFFF"
+                box.border = ft.border.all(1, "#0B63F6" if selected else "#E2E8F0")
+                row = box.content
+                if isinstance(row, ft.Row):
+                    for control in row.controls:
+                        if isinstance(control, ft.Text):
+                            control.color = "#FFFFFF" if selected else "#475569"
+                        elif isinstance(control, ft.Icon):
+                            control.color = "#FFFFFF" if selected else "#64748B"
+
+        def set_filter(key: str):
+            filter_state["mode"] = key
+            update_filter_styles()
+            refresh()
+
+        definitions_dialog = ft.AlertDialog(modal=True)
         cat_name = ft.TextField(label="تصنيف جديد")
         unit_name = ft.TextField(label="وحدة جديدة")
         unit_abbr = ft.TextField(label="اختصار")
 
-        name = ft.TextField(label="اسم المادة / الخدمة")
-        purchase = ft.TextField(label="سعر الشراء / تكلفة الخدمة", value="0", keyboard_type=ft.KeyboardType.NUMBER)
-        selling = ft.TextField(label="سعر البيع", value="0", keyboard_type=ft.KeyboardType.NUMBER)
-        qty = ft.TextField(label="الرصيد الافتتاحي", value="0", keyboard_type=ft.KeyboardType.NUMBER)
-        kind = SearchSelect(
-            label="النوع",
-            choices=[("مخزون", "مخزون"), ("خدمة", "خدمة")],
-            value="مخزون",
-            allow_clear=False,
-        )
-        category = SearchSelect(
-            label="التصنيف",
-            choices=[(str(c["id"]), c["name"]) for c in categories],
-        )
-        base_unit = SearchSelect(
-            label="الوحدة الأساسية",
-            choices=[(str(u["id"]), u["name"]) for u in units],
-        )
-        alt_unit = SearchSelect(
-            label="وحدة إضافية",
-            choices=[(str(u["id"]), u["name"]) for u in units],
-        )
-        alt_factor = ft.TextField(label="معامل التحويل", value="1", keyboard_type=ft.KeyboardType.NUMBER)
-        search = ft.TextField(label="بحث في المواد", prefix_icon=ft.Icons.SEARCH)
-        rows = ft.Column(spacing=8)
-
-        definitions_dialog = ft.AlertDialog(modal=True)
-
         def close_definitions(_=None):
             page.close(definitions_dialog)
 
-        def add_category(_):
+        def add_category(_=None):
             try:
                 ctx.definitions.create_category(cat_name.value or "")
-                close_definitions()
-                notify("تمت إضافة التصنيف")
-                items_view()
+                close_definitions(); notify("تمت إضافة التصنيف"); items_view()
             except Exception as exc:
                 notify(str(exc))
 
-        def add_unit(_):
+        def add_unit(_=None):
             try:
                 ctx.definitions.create_unit(unit_name.value or "", unit_abbr.value)
-                close_definitions()
-                notify("تمت إضافة الوحدة")
-                items_view()
-            except Exception as exc:
-                notify(str(exc))
-
-        def refresh(_=None):
-            rows.controls = []
-            for item in ctx.items.list(search.value or ""):
-                item_units = ctx.items.units(int(item["id"]))
-                units_text = "، ".join(
-                    f"{u['name']} × {money(u['conversion_factor'])}" for u in item_units
-                ) or "بلا وحدة"
-                rows.controls.append(
-                    ft.Container(
-                        ft.Column(
-                            [
-                                ft.Row(
-                                    [
-                                        ft.Column(
-                                            [
-                                                ft.Text(item["name"], weight=ft.FontWeight.BOLD),
-                                                ft.Text(
-                                                    f"{item['item_type']} • {item.get('category_name') or 'بلا تصنيف'}",
-                                                    size=12,
-                                                    color="#64748B",
-                                                ),
-                                            ],
-                                            expand=True,
-                                            spacing=2,
-                                        ),
-                                        ft.Column(
-                                            [
-                                                ft.Text(f"المخزون: {money(item['quantity'])}"),
-                                                ft.Text(f"بيع: {money(item['selling_price'])}", size=12),
-                                                ft.Text(("تكلفة الخدمة: " if item["item_type"] == "خدمة" else "متوسط التكلفة: ") + money(item["purchase_price"] if item["item_type"] == "خدمة" else item["average_cost"]), size=11, color="#64748B"),
-                                            ],
-                                            spacing=2,
-                                        ),
-                                    ]
-                                ),
-                                ft.Text(f"الوحدات: {units_text}", size=11, color="#64748B"),
-                            ],
-                            spacing=5,
-                        ),
-                        padding=10,
-                        border=ft.border.all(1, "#E5E7EB"),
-                        border_radius=10,
-                        bgcolor="#FFFFFF",
-                    )
-                )
-            page.update()
-
-        search.on_change = refresh
-
-        def add(_):
-            try:
-                alternate_units = []
-                if alt_unit.value:
-                    alternate_units.append(
-                        {"unit_id": int(alt_unit.value), "conversion_factor": float(alt_factor.value or 1)}
-                    )
-                ctx.items.create(
-                    name=name.value or "",
-                    item_type=kind.value or "مخزون",
-                    category_id=int(category.value) if category.value else None,
-                    purchase_price=float(purchase.value or 0),
-                    selling_price=float(selling.value or 0),
-                    quantity=float(qty.value or 0),
-                    base_unit_id=int(base_unit.value) if base_unit.value else None,
-                    item_units=alternate_units,
-                )
-                notify("تمت إضافة المادة")
-                items_view()
+                close_definitions(); notify("تمت إضافة الوحدة"); items_view()
             except Exception as exc:
                 notify(str(exc))
 
         definitions_dialog.title = ft.Text("التصنيفات والوحدات")
         definitions_dialog.content = ft.Container(
-            ft.Column(
-                [
-                    ft.Text("التصنيفات", weight=ft.FontWeight.BOLD),
-                    cat_name,
-                    ft.FilledButton("إضافة تصنيف", icon=ft.Icons.ADD, on_click=add_category),
-                    ft.Divider(),
-                    ft.Text("الوحدات", weight=ft.FontWeight.BOLD),
-                    ft.ResponsiveRow(
-                        [
-                            ft.Container(unit_name, col={"xs": 8}),
-                            ft.Container(unit_abbr, col={"xs": 4}),
-                        ]
-                    ),
-                    ft.OutlinedButton("إضافة وحدة", icon=ft.Icons.ADD, on_click=add_unit),
-                ],
-                tight=True,
-                spacing=10,
-                scroll=ft.ScrollMode.AUTO,
-            ),
-            width=460,
+            ft.Column([
+                ft.Text("التصنيفات", weight=ft.FontWeight.BOLD), cat_name, ft.FilledButton("إضافة تصنيف", icon=ft.Icons.ADD, on_click=add_category),
+                ft.Divider(), ft.Text("الوحدات", weight=ft.FontWeight.BOLD),
+                ft.ResponsiveRow([ft.Container(unit_name, col={"xs": 8}), ft.Container(unit_abbr, col={"xs": 4})]),
+                ft.OutlinedButton("إضافة وحدة", icon=ft.Icons.ADD, on_click=add_unit),
+            ], spacing=9, tight=True, scroll=ft.ScrollMode.AUTO), width=460,
         )
         definitions_dialog.actions = [ft.TextButton("إغلاق", on_click=close_definitions)]
 
-        form_panel = ft.Container(
-            ft.Column(
-                [
-                    ft.Row(
-                        [
-                            ft.Text("مادة / خدمة جديدة", size=18, weight=ft.FontWeight.BOLD, expand=True),
-                            ft.IconButton(icon=ft.Icons.CLOSE, tooltip="إغلاق", on_click=lambda _: hide_form()),
-                        ]
-                    ),
-                    ft.Text(
-                        "عند اختيار خدمة، يستخدم سعر الشراء كتكلفة معيارية لأغراض الربحية.",
-                        size=11,
-                        color="#64748B",
-                    ),
+        def open_item_editor(item: dict | None = None):
+            name = ft.TextField(label="اسم المادة / الخدمة", value=(item or {}).get("name", ""), autofocus=True)
+            purchase = ft.TextField(label="سعر الشراء / تكلفة الخدمة", value=str((item or {}).get("purchase_price", 0)), keyboard_type=ft.KeyboardType.NUMBER)
+            selling = ft.TextField(label="سعر البيع", value=str((item or {}).get("selling_price", 0)), keyboard_type=ft.KeyboardType.NUMBER)
+            qty = ft.TextField(label="الرصيد الافتتاحي", value="0", keyboard_type=ft.KeyboardType.NUMBER, visible=item is None)
+            kind = SearchSelect(label="النوع", choices=[("مخزون", "مخزون"), ("خدمة", "خدمة")], value=(item or {}).get("item_type") or "مخزون", allow_clear=False)
+            category = SearchSelect(label="التصنيف", choices=[(str(c["id"]), c["name"]) for c in categories], value=str(item.get("category_id")) if item and item.get("category_id") else None)
+            base_unit = SearchSelect(label="الوحدة الأساسية", choices=[(str(u["id"]), u["name"]) for u in units], value=str(item.get("base_unit_id")) if item and item.get("base_unit_id") else None)
+            current_units = ctx.items.units(int(item["id"])) if item else []
+            alt_current = next((u for u in current_units if not u.get("is_base")), None)
+            alt_unit = SearchSelect(label="وحدة إضافية", choices=[(str(u["id"]), u["name"]) for u in units], value=str(alt_current.get("id")) if alt_current else None)
+            alt_factor = ft.TextField(label="معامل التحويل", value=str(alt_current.get("conversion_factor", 1) if alt_current else 1), keyboard_type=ft.KeyboardType.NUMBER)
+            dialog = ft.AlertDialog(modal=True)
+
+            def close(_=None): page.close(dialog)
+
+            def save(_=None):
+                try:
+                    alternate_units = []
+                    if alt_unit.value:
+                        alternate_units.append({"unit_id": int(alt_unit.value), "conversion_factor": float(alt_factor.value or 1)})
+                    kwargs = dict(
+                        name=name.value or "", item_type=kind.value or "مخزون",
+                        category_id=int(category.value) if category.value else None,
+                        purchase_price=float(purchase.value or 0), selling_price=float(selling.value or 0),
+                        base_unit_id=int(base_unit.value) if base_unit.value else None, item_units=alternate_units,
+                    )
+                    if item:
+                        ctx.items.update(int(item["id"]), **kwargs)
+                        msg = "تم تحديث المادة"
+                    else:
+                        ctx.items.create(quantity=float(qty.value or 0), **kwargs)
+                        msg = "تمت إضافة المادة"
+                    close(); notify(msg); refresh()
+                except Exception as exc:
+                    notify(str(exc))
+
+            dialog.title = ft.Text("تعديل المادة" if item else "مادة / خدمة جديدة")
+            dialog.content = ft.Container(
+                ft.Column([
                     name,
-                    ft.ResponsiveRow(
-                        [
-                            ft.Container(kind, col={"xs": 6, "md": 3}),
-                            ft.Container(category, col={"xs": 6, "md": 3}),
-                            ft.Container(base_unit, col={"xs": 6, "md": 3}),
-                            ft.Container(qty, col={"xs": 6, "md": 3}),
-                            ft.Container(purchase, col={"xs": 6, "md": 3}),
-                            ft.Container(selling, col={"xs": 6, "md": 3}),
-                            ft.Container(alt_unit, col={"xs": 6, "md": 3}),
-                            ft.Container(alt_factor, col={"xs": 6, "md": 3}),
-                        ],
-                        spacing=8,
-                        run_spacing=8,
-                    ),
-                    ft.FilledButton("حفظ المادة", icon=ft.Icons.SAVE_OUTLINED, on_click=add),
-                ],
-                spacing=10,
-            ),
-            padding=12,
-            border=ft.border.all(1, "#BFDBFE"),
-            border_radius=14,
-            bgcolor="#F8FBFF",
-            visible=False,
-        )
+                    ft.ResponsiveRow([
+                        ft.Container(kind, col={"xs": 6, "md": 4}), ft.Container(category, col={"xs": 6, "md": 4}), ft.Container(base_unit, col={"xs": 12, "md": 4}),
+                        ft.Container(qty, col={"xs": 6, "md": 4}), ft.Container(purchase, col={"xs": 6, "md": 4}), ft.Container(selling, col={"xs": 6, "md": 4}),
+                        ft.Container(alt_unit, col={"xs": 6, "md": 4}), ft.Container(alt_factor, col={"xs": 6, "md": 4}),
+                    ], spacing=7, run_spacing=7),
+                    ft.Text("الخدمات لا تؤثر في المخزون، وتستخدم تكلفة الخدمة لحساب الربحية.", size=10, color="#64748B"),
+                ], spacing=9, scroll=ft.ScrollMode.AUTO), width=720, height=500,
+            )
+            dialog.actions = [ft.TextButton("إلغاء", on_click=close), ft.FilledButton("حفظ", icon=ft.Icons.SAVE_OUTLINED, on_click=save)]
+            page.open(dialog)
 
-        def show_form(_=None):
-            form_panel.visible = True
-            page.update()
+        def show_item_detail(item: dict):
+            try:
+                data = ctx.items.get(int(item["id"])) or item
+                stats = ctx.items.activity_summary(int(item["id"]))
+                movements = ctx.items.movements(int(item["id"]), limit=20)
+                item_units = ctx.items.units(int(item["id"]))
+            except Exception as exc:
+                notify(str(exc)); return
+            dialog = ft.AlertDialog(modal=True)
+            move_cards = []
+            type_labels = {"sale": "بيع", "purchase": "شراء", "adjustment": "تسوية"}
+            for mv in movements:
+                delta = float(mv.get("quantity_delta") or 0)
+                move_cards.append(
+                    ft.Container(
+                        ft.Row([
+                            ft.Container(ft.Icon(ft.Icons.ARROW_DOWNWARD if delta > 0 else ft.Icons.ARROW_UPWARD, size=15, color="#16A34A" if delta > 0 else "#EF4444"), width=32, height=32, alignment=ft.alignment.center, bgcolor="#F8FAFC", border_radius=10),
+                            ft.Column([ft.Text(type_labels.get(mv.get("movement_type"), str(mv.get("movement_type"))), size=11, weight=ft.FontWeight.BOLD), ft.Text(f"{mv.get('movement_date') or '—'} • فاتورة #{mv.get('invoice_id') or '—'}", size=9, color="#64748B")], spacing=1, expand=True),
+                            ft.Text(f"{delta:+,.2f}", size=12, weight=ft.FontWeight.BOLD, color="#16A34A" if delta > 0 else "#EF4444"),
+                        ]), padding=8, bgcolor="#F8FAFC", border_radius=11,
+                    )
+                )
+            if not move_cards:
+                move_cards = [ft.Text("لا توجد حركات مخزون بعد", size=11, color="#64748B")]
+            units_text = "، ".join(f"{u['name']} × {float(u.get('conversion_factor') or 1):g}" for u in item_units) or "بلا وحدة"
 
-        def hide_form(_=None):
-            form_panel.visible = False
-            page.update()
+            def close(_=None): page.close(dialog)
+            def edit(_=None): close(); open_item_editor(data)
 
-        def show_definitions(_=None):
-            page.open(definitions_dialog)
+            dialog.title = ft.Row([
+                ft.Container(ft.Icon(ft.Icons.INVENTORY_2_OUTLINED, color="#0B63F6"), width=42, height=42, alignment=ft.alignment.center, bgcolor="#EFF6FF", border_radius=14),
+                ft.Column([ft.Text(data["name"], size=18, weight=ft.FontWeight.BOLD), ft.Text(f"{data.get('item_type')} • {data.get('category_name') or 'بلا تصنيف'}", size=10, color="#64748B")], spacing=1, expand=True),
+            ])
+            dialog.content = ft.Container(
+                ft.Column([
+                    ft.ResponsiveRow([
+                        ft.Container(stat_card("المخزون", money(stats.get("quantity")), ft.Icons.INVENTORY, "#0B63F6"), col={"xs": 6, "md": 3}),
+                        ft.Container(stat_card("متوسط التكلفة", money(stats.get("average_cost")), ft.Icons.PRICE_CHECK_OUTLINED, "#7C3AED"), col={"xs": 6, "md": 3}),
+                        ft.Container(stat_card("قيمة المخزون", money(stats.get("inventory_cost_value")), ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, "#16A34A"), col={"xs": 6, "md": 3}),
+                        ft.Container(stat_card("بسعر البيع", money(stats.get("inventory_sale_value")), ft.Icons.SELL_OUTLINED, "#F59E0B"), col={"xs": 6, "md": 3}),
+                    ], spacing=7, run_spacing=7),
+                    ft.ResponsiveRow([
+                        ft.Container(stat_card("كمية مباعة", money(stats.get("sold_qty")), ft.Icons.TRENDING_UP, "#EF4444"), col={"xs": 6, "md": 3}),
+                        ft.Container(stat_card("كمية مشتراة", money(stats.get("purchased_qty")), ft.Icons.TRENDING_DOWN, "#16A34A"), col={"xs": 6, "md": 3}),
+                        ft.Container(stat_card("فواتير بيع", str(int(stats.get("sale_count") or 0)), ft.Icons.RECEIPT_LONG, "#0B63F6"), col={"xs": 6, "md": 3}),
+                        ft.Container(stat_card("فواتير شراء", str(int(stats.get("purchase_count") or 0)), ft.Icons.SHOPPING_BAG_OUTLINED, "#7C3AED"), col={"xs": 6, "md": 3}),
+                    ], spacing=7, run_spacing=7),
+                    ft.Text(f"الوحدات: {units_text}", size=10, color="#475569"),
+                    ft.Text(f"آخر بيع: {stats.get('last_sale_date') or '—'}   •   آخر شراء: {stats.get('last_purchase_date') or '—'}", size=10, color="#64748B"),
+                    ft.Divider(height=8), ft.Text("آخر حركات المخزون", size=14, weight=ft.FontWeight.BOLD), ft.Column(move_cards, spacing=5),
+                ], spacing=9, scroll=ft.ScrollMode.AUTO), width=760, height=570,
+            )
+            dialog.actions = [ft.OutlinedButton("تعديل", icon=ft.Icons.EDIT_OUTLINED, on_click=edit), ft.FilledButton("إغلاق", on_click=close)]
+            page.open(dialog)
 
+        def refresh(_=None):
+            all_items = ctx.items.list()
+            query = (search.value or "").strip().casefold()
+            filtered = [i for i in all_items if not query or query in str(i.get("name") or "").casefold()]
+            mode = filter_state["mode"]
+            if mode == "stock": filtered = [i for i in filtered if i.get("item_type") == "مخزون"]
+            elif mode == "service": filtered = [i for i in filtered if i.get("item_type") == "خدمة"]
+            elif mode == "low": filtered = [i for i in filtered if i.get("item_type") == "مخزون" and float(i.get("quantity") or 0) < LOW_STOCK]
+            inventory_value = sum(float(i.get("quantity") or 0) * float(i.get("average_cost") or 0) for i in all_items if i.get("item_type") == "مخزون")
+            low_count = sum(1 for i in all_items if i.get("item_type") == "مخزون" and float(i.get("quantity") or 0) < LOW_STOCK)
+            service_count = sum(1 for i in all_items if i.get("item_type") == "خدمة")
+            summary_row.controls = [
+                ft.Container(stat_card("عدد المواد", str(len(all_items)), ft.Icons.INVENTORY_2_OUTLINED, "#0B63F6"), col={"xs": 6, "md": 3}),
+                ft.Container(stat_card("قيمة المخزون", money(inventory_value), ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, "#16A34A"), col={"xs": 6, "md": 3}),
+                ft.Container(stat_card("مخزون منخفض", str(low_count), ft.Icons.WARNING_AMBER_ROUNDED, "#EF4444"), col={"xs": 6, "md": 3}),
+                ft.Container(stat_card("الخدمات", str(service_count), ft.Icons.HANDYMAN_OUTLINED, "#7C3AED"), col={"xs": 6, "md": 3}),
+            ]
+            rows.controls = []
+            if low_count and mode != "low":
+                rows.controls.append(ft.Container(ft.Row([ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color="#B91C1C"), ft.Text(f"يوجد {low_count} مواد منخفضة المخزون", expand=True, size=11, weight=ft.FontWeight.W_600), ft.Text("عرضها", size=10, color="#B91C1C")]), padding=11, bgcolor="#FEF2F2", border=ft.border.all(1, "#FECACA"), border_radius=14, on_click=lambda _: set_filter("low"), ink=True))
+            for item in filtered:
+                qty = float(item.get("quantity") or 0)
+                stock = item.get("item_type") == "مخزون"
+                status = "خدمة" if not stock else "نفد" if qty <= 0 else "منخفض" if qty < LOW_STOCK else "متوفر"
+                status_color = "#7C3AED" if not stock else "#DC2626" if qty <= 0 else "#D97706" if qty < LOW_STOCK else "#16A34A"
+                rows.controls.append(ft.Container(
+                    ft.Row([
+                        ft.Container(ft.Icon(ft.Icons.HANDYMAN_OUTLINED if not stock else ft.Icons.INVENTORY_2_OUTLINED, color="#0B63F6", size=20), width=44, height=44, alignment=ft.alignment.center, bgcolor="#EFF6FF", border_radius=14),
+                        ft.Column([ft.Text(item["name"], weight=ft.FontWeight.BOLD, size=13), ft.Text(f"{item.get('category_name') or 'بلا تصنيف'} • {item.get('unit_name') or 'بلا وحدة'}", size=9, color="#64748B")], expand=True, spacing=2),
+                        ft.Column([ft.Text("—" if not stock else f"{qty:,.2f}", size=13, weight=ft.FontWeight.BOLD), ft.Text(status, size=9, color=status_color, weight=ft.FontWeight.W_600)], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                        ft.Column([ft.Text(money(item.get("selling_price")), size=12, weight=ft.FontWeight.BOLD), ft.Text("سعر البيع", size=8, color="#64748B")], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END),
+                        ft.Icon(ft.Icons.CHEVRON_LEFT, color="#94A3B8", size=18),
+                    ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    padding=11, bgcolor="#FFFFFF", border=ft.border.all(1, "#E2E8F0"), border_radius=16, on_click=lambda _, i=dict(item): show_item_detail(i), ink=True,
+                ))
+            if not filtered:
+                rows.controls.append(ft.Container(ft.Column([ft.Icon(ft.Icons.INVENTORY_2_OUTLINED, size=46, color="#CBD5E1"), ft.Text("لا توجد مواد مطابقة", color="#64748B")], horizontal_alignment=ft.CrossAxisAlignment.CENTER), alignment=ft.alignment.center, padding=30))
+            update_filter_styles(); page.update()
+
+        search.on_change = refresh
+        filters = ft.Row([
+            filter_box("all", "الكل", ft.Icons.APPS_ROUNDED), filter_box("stock", "مخزون", ft.Icons.INVENTORY_2_OUTLINED),
+            filter_box("service", "خدمات", ft.Icons.HANDYMAN_OUTLINED), filter_box("low", "منخفض", ft.Icons.WARNING_AMBER_ROUNDED),
+        ], wrap=True, spacing=6)
+        content.content = ft.Column([
+            summary_row,
+            ft.ResponsiveRow([
+                ft.Container(ft.FilledButton("مادة جديدة", icon=ft.Icons.ADD, on_click=lambda _: open_item_editor()), col={"xs": 6, "md": 3}),
+                ft.Container(ft.OutlinedButton("التصنيفات والوحدات", icon=ft.Icons.TUNE, on_click=lambda _: page.open(definitions_dialog)), col={"xs": 6, "md": 3}),
+            ], spacing=7, run_spacing=7),
+            search, filters, rows,
+        ], spacing=12, scroll=ft.ScrollMode.AUTO)
         refresh()
-        content.content = ft.Column(
-            [
-                ft.Text("المواد", size=24, weight=ft.FontWeight.BOLD),
-                ft.ResponsiveRow(
-                    [
-                        ft.Container(
-                            ft.FilledButton("مادة جديدة", icon=ft.Icons.ADD, on_click=show_form),
-                            col={"xs": 6, "md": 3},
-                        ),
-                        ft.Container(
-                            ft.OutlinedButton("التصنيفات والوحدات", icon=ft.Icons.SETTINGS_OUTLINED, on_click=show_definitions),
-                            col={"xs": 6, "md": 3},
-                        ),
-                    ],
-                    spacing=8,
-                    run_spacing=8,
-                ),
-                form_panel,
-                search,
-                rows,
-            ],
-            spacing=12,
-            scroll=ft.ScrollMode.AUTO,
-        )
-        page.update()
 
     def show_security():
+        set_header("الأمان والدخول", "إدارة PIN والنمط والجلسة المحفوظة على هذا الجهاز")
         session = ctx.auth.current()
         if session is None:
             raise RuntimeError("لا توجد جلسة مستخدم")
@@ -484,7 +807,6 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
 
         content.content = ft.Column(
             [
-                ft.Text("الأمان والدخول", size=24, weight=ft.FontWeight.BOLD),
                 ft.Container(
                     ft.Column(
                         [
@@ -519,107 +841,267 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         )
         page.update()
 
-    invoice_center = InvoiceCenter(page, ctx, content, native_files=native_files)
+    invoice_center = InvoiceCenter(page, ctx, content, native_files=native_files, on_title_change=set_header)
     finance_center = FinanceCenter(page, ctx, content, native_files=native_files)
     reports_center = ReportsCenter(page, ctx, content)
     admin_center = AdminCenter(page, ctx, content, on_logout=on_logout, native_files=native_files)
     session = ctx.auth.current()
     if session is None:
         raise RuntimeError("لا توجد جلسة مستخدم")
-    available_pages = [
-        ("dashboard", ft.Icons.HOME_OUTLINED, ft.Icons.HOME, "الرئيسية", show_dashboard),
-        ("items", ft.Icons.INVENTORY_2_OUTLINED, ft.Icons.INVENTORY_2, "المواد", items_view),
-        ("customers", ft.Icons.PEOPLE_OUTLINE, ft.Icons.PEOPLE, "العملاء", lambda: party_view(ctx.customers, "العملاء")),
-        ("suppliers", ft.Icons.LOCAL_SHIPPING_OUTLINED, ft.Icons.LOCAL_SHIPPING, "الموردون", lambda: party_view(ctx.suppliers, "الموردون")),
-        ("invoices", ft.Icons.RECEIPT_LONG_OUTLINED, ft.Icons.RECEIPT_LONG, "الفواتير", invoice_center.show_center),
-        ("finance", ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, ft.Icons.ACCOUNT_BALANCE_WALLET, "المالية", finance_center.show_center),
-        ("reports", ft.Icons.QUERY_STATS_OUTLINED, ft.Icons.QUERY_STATS, "التقارير", reports_center.show_center),
-        ("security", ft.Icons.LOCK_OUTLINE, ft.Icons.LOCK, "الأمان", show_security),
-        ("admin", ft.Icons.ADMIN_PANEL_SETTINGS_OUTLINED, ft.Icons.ADMIN_PANEL_SETTINGS, "الإدارة", admin_center.show_center),
-    ]
-    allowed_pages = [entry for entry in available_pages if session.can(entry[0])]
 
-    # Desktop keeps the complete navigation rail. On phones, limit the bottom
-    # navigation to the most frequent actions and group master-data/admin
-    # screens under "المزيد" so labels and touch targets remain usable.
-    desktop_destinations = [(entry[1], entry[2], entry[3]) for entry in allowed_pages]
+    page_meta = {
+        "dashboard": ("لوحة التحكم", "نظرة عامة على أداء عملك"),
+        "items": ("المواد", "إدارة المخزون والخدمات والتصنيفات والوحدات"),
+        "customers": ("العملاء", "إدارة العملاء والذمم المدينة"),
+        "suppliers": ("الموردون", "إدارة الموردين والذمم الدائنة"),
+        "invoices": ("الفواتير", "المبيعات والمشتريات وحالات السداد"),
+        "finance": ("المالية", "السندات والمصروفات والحركات المالية"),
+        "reports": ("التقارير", "التقارير المالية والمخزون والربحية"),
+        "security": ("الأمان والدخول", "PIN والنمط والجلسات المحفوظة"),
+        "admin": ("الإدارة", "المستخدمون والنسخ الاحتياطية والترخيص"),
+    }
 
-    def rail_changed(e):
-        index = max(0, min(int(e.control.selected_index), len(allowed_pages) - 1))
-        allowed_pages[index][4]()
+    actions = {
+        "dashboard": show_dashboard,
+        "items": items_view,
+        "customers": lambda: party_view(ctx.customers, "العملاء"),
+        "suppliers": lambda: party_view(ctx.suppliers, "الموردون"),
+        "invoices": invoice_center.show_center,
+        "finance": finance_center.show_center,
+        "reports": reports_center.show_center,
+        "security": show_security,
+        "admin": admin_center.show_center,
+    }
 
-    primary_keys = {"dashboard", "items", "invoices", "finance"}
-    mobile_primary = [entry for entry in allowed_pages if entry[0] in primary_keys]
-    mobile_secondary = [entry for entry in allowed_pages if entry[0] not in primary_keys]
+    icon_map = {
+        "dashboard": ft.Icons.HOME_OUTLINED,
+        "items": ft.Icons.INVENTORY_2_OUTLINED,
+        "customers": ft.Icons.PEOPLE_OUTLINE,
+        "suppliers": ft.Icons.LOCAL_SHIPPING_OUTLINED,
+        "invoices": ft.Icons.RECEIPT_LONG_OUTLINED,
+        "finance": ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED,
+        "reports": ft.Icons.QUERY_STATS_OUTLINED,
+        "security": ft.Icons.LOCK_OUTLINE,
+        "admin": ft.Icons.ADMIN_PANEL_SETTINGS_OUTLINED,
+    }
+    label_map = {k: v[0] for k, v in page_meta.items()}
+    allowed_keys = [k for k in actions if session.can(k)]
+    selected_key = {"value": "dashboard"}
+    sidebar_buttons: dict[str, ft.Container] = {}
+    mobile_buttons: dict[str, tuple[ft.Container, ft.Icon, ft.Text]] = {}
 
-    def show_more():
+    def refresh_navigation_state() -> None:
+        current = selected_key["value"]
+        for key, button in sidebar_buttons.items():
+            active = key == current
+            button.bgcolor = "#EFF6FF" if active else None
+            button.border = ft.border.all(1, "#BFDBFE") if active else None
+            row = button.content
+            if isinstance(row, ft.Row):
+                for ctrl in row.controls:
+                    if isinstance(ctrl, ft.Icon):
+                        ctrl.color = "#0B63F6" if active else "#64748B"
+                    elif isinstance(ctrl, ft.Text):
+                        ctrl.color = "#0B63F6" if active else "#334155"
+        for key, (box, icon, label) in mobile_buttons.items():
+            active = key == current
+            icon.color = "#0B63F6" if active else "#94A3B8"
+            label.color = "#0B63F6" if active else "#64748B"
+            label.weight = ft.FontWeight.BOLD if active else ft.FontWeight.W_500
+            box.bgcolor = "#EFF6FF" if active else None
+
+    def navigate(key: str) -> None:
+        action = actions.get(key)
+        if action is None or key not in allowed_keys:
+            return
+        selected_key["value"] = key
+        title, subtitle = page_meta[key]
+        set_header(title, subtitle)
+        refresh_navigation_state()
+        action()
+
+    def open_sale(_=None) -> None:
+        if not session.can("invoices"):
+            notify("لا تملك صلاحية الفواتير")
+            return
+        selected_key["value"] = "sale"
+        set_header("فاتورة بيع", "إنشاء فاتورة بيع جديدة — النقدي افتراضيًا")
+        refresh_navigation_state()
+        invoice_center.show_editor(None, "sale")
+
+    def open_purchase(_=None) -> None:
+        if not session.can("invoices"):
+            notify("لا تملك صلاحية الفواتير")
+            return
+        selected_key["value"] = "purchase"
+        set_header("فاتورة شراء", "إنشاء فاتورة شراء جديدة — النقدي افتراضيًا")
+        refresh_navigation_state()
+        invoice_center.show_editor(None, "purchase")
+
+    def nav_button(key: str, label: str, icon, on_click):
+        icon_ctrl = ft.Icon(icon, size=21, color="#64748B")
+        text_ctrl = ft.Text(label, size=13, weight=ft.FontWeight.W_600, color="#334155", expand=True)
+        box = ft.Container(
+            ft.Row([icon_ctrl, text_ctrl, ft.Icon(ft.Icons.CHEVRON_LEFT, size=15, color="#CBD5E1")], spacing=12),
+            padding=ft.padding.symmetric(horizontal=14, vertical=12),
+            border_radius=14,
+            on_click=on_click,
+            ink=True,
+        )
+        if key in actions:
+            sidebar_buttons[key] = box
+        return box
+
+    sidebar_controls: list[ft.Control] = []
+    for key in allowed_keys:
+        sidebar_controls.append(nav_button(key, label_map[key], icon_map[key], lambda _, k=key: navigate(k)))
+        if key == "items" and session.can("invoices"):
+            sidebar_controls.append(nav_button("sale", "فاتورة بيع", ft.Icons.SHOPPING_CART_CHECKOUT, open_sale))
+            sidebar_controls.append(nav_button("purchase", "فاتورة شراء", ft.Icons.ADD_SHOPPING_CART, open_purchase))
+
+    avatar_text = "".join(part[:1] for part in (session.full_name or session.username).split()[:2]).upper() or "N"
+    sidebar = ft.Container(
+        ft.Column(
+            [
+                ft.Container(
+                    ft.Row(
+                        [
+                            ft.Image(src="icon.png", width=48, height=48, fit=ft.ImageFit.CONTAIN),
+                            ft.Column([ft.Text("Nano | نانو", size=19, weight=ft.FontWeight.BOLD, color="#0F172A"), ft.Text("نظام المحاسبة الذكي", size=10, color="#64748B")], spacing=1, expand=True),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    padding=ft.padding.only(left=18, right=18, top=18, bottom=14),
+                    border=ft.border.only(bottom=ft.BorderSide(1, "#E2E8F0")),
+                ),
+                ft.Container(ft.Column(sidebar_controls, spacing=5, scroll=ft.ScrollMode.AUTO), padding=12, expand=True),
+                ft.Container(
+                    ft.Row(
+                        [
+                            ft.Container(ft.Text(avatar_text, color="#FFFFFF", weight=ft.FontWeight.BOLD), width=40, height=40, alignment=ft.alignment.center, bgcolor="#0B63F6", border_radius=14),
+                            ft.Column([ft.Text(session.full_name, size=12, weight=ft.FontWeight.BOLD), ft.Text(session.username, size=10, color="#64748B")], spacing=1, expand=True),
+                            ft.IconButton(icon=ft.Icons.LOGOUT, tooltip="تسجيل الخروج", icon_color="#64748B", on_click=lambda _: on_logout()),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    padding=12,
+                    border=ft.border.only(top=ft.BorderSide(1, "#E2E8F0")),
+                ),
+            ],
+            spacing=0,
+            expand=True,
+        ),
+        width=280,
+        bgcolor="#FFFFFF",
+        border=ft.border.only(left=ft.BorderSide(1, "#E2E8F0")),
+        visible=False,
+    )
+
+    body = ft.Column([top_bar, content], spacing=0, expand=True)
+
+    def mobile_item(key: str, label: str, icon_data, on_click):
+        icon = ft.Icon(icon_data, size=23, color="#94A3B8")
+        label_ctrl = ft.Text(label, size=10, color="#64748B", text_align=ft.TextAlign.CENTER)
+        box = ft.Container(
+            ft.Column([icon, label_ctrl], spacing=3, horizontal_alignment=ft.CrossAxisAlignment.CENTER, alignment=ft.MainAxisAlignment.CENTER),
+            width=62, height=58, alignment=ft.alignment.center, border_radius=15, on_click=on_click, ink=True,
+        )
+        mobile_buttons[key] = (box, icon, label_ctrl)
+        return box
+
+    sale_fab = ft.Container(
+        ft.Column(
+            [
+                ft.Container(
+                    ft.Icon(ft.Icons.SHOPPING_CART_CHECKOUT, color="#FFFFFF", size=25),
+                    width=58, height=58, alignment=ft.alignment.center,
+                    gradient=ft.LinearGradient(colors=["#0B63F6", "#8B5CF6"], begin=ft.alignment.top_left, end=ft.alignment.bottom_right),
+                    border_radius=30,
+                    border=ft.border.all(4, "#F8FAFC"),
+                    shadow=ft.BoxShadow(blur_radius=20, spread_radius=1, color="#BFDBFE", offset=ft.Offset(0, 7)),
+                ),
+                ft.Text("بيع", size=10, color="#0B63F6", weight=ft.FontWeight.BOLD),
+            ],
+            spacing=0, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        width=72, height=78, margin=ft.margin.only(top=-25), on_click=open_sale, ink=True, border_radius=30,
+    )
+
+    more_sheet = ft.BottomSheet(content=ft.Container())
+
+    def show_more(_=None):
+        entries: list[tuple[str, str, object, object]] = []
+        if session.can("invoices"):
+            entries.append(("purchase", "شراء", ft.Icons.ADD_SHOPPING_CART, lambda _: (page.close(more_sheet), open_purchase())))
+        for key in ["customers", "suppliers", "finance", "reports", "security", "admin"]:
+            if key in allowed_keys:
+                entries.append((key, label_map[key], icon_map[key], lambda _, k=key: (page.close(more_sheet), navigate(k))))
+
         cards = []
-        for entry in mobile_secondary:
-            action = entry[4]
+        for key, label, icon_data, action in entries:
             cards.append(
                 ft.Container(
-                    ft.OutlinedButton(
-                        entry[3],
-                        icon=entry[1],
-                        on_click=lambda _, fn=action: fn(),
-                        width=220,
+                    ft.Column(
+                        [
+                            ft.Container(ft.Icon(icon_data, color="#0B63F6", size=24), width=48, height=48, alignment=ft.alignment.center, bgcolor="#EFF6FF", border_radius=16),
+                            ft.Text(label, size=12, weight=ft.FontWeight.W_600, text_align=ft.TextAlign.CENTER),
+                        ],
+                        spacing=7, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
-                    col={"xs": 6, "sm": 4},
+                    col={"xs": 4}, padding=9, border_radius=18, on_click=action, ink=True,
                 )
             )
-        content.content = ft.Column(
-            [
-                ft.Text("المزيد", size=24, weight=ft.FontWeight.BOLD),
-                ft.Text("العملاء والموردون والتقارير والأمان والإدارة حسب صلاحيات المستخدم.", size=12, color="#64748B"),
-                ft.ResponsiveRow(cards) if cards else ft.Text("لا توجد أقسام إضافية لهذا المستخدم.", color="#64748B"),
-            ],
-            spacing=12,
-            scroll=ft.ScrollMode.AUTO,
+        more_sheet.content = ft.Container(
+            ft.Column(
+                [
+                    ft.Container(width=44, height=5, bgcolor="#CBD5E1", border_radius=10, alignment=ft.alignment.center),
+                    ft.Text("المزيد", size=20, weight=ft.FontWeight.BOLD),
+                    ft.Text("الوصول السريع إلى بقية أقسام Nano", size=11, color="#64748B"),
+                    ft.ResponsiveRow(cards, spacing=8, run_spacing=8),
+                    ft.OutlinedButton("تسجيل الخروج", icon=ft.Icons.LOGOUT, on_click=lambda _: (page.close(more_sheet), on_logout()), width=260),
+                ],
+                spacing=12, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.padding.only(left=18, right=18, top=12, bottom=24),
+            bgcolor="#FFFFFF",
+            border_radius=ft.border_radius.only(top_left=28, top_right=28),
         )
-        page.update()
+        page.open(more_sheet)
 
-    mobile_actions = [entry[4] for entry in mobile_primary]
-    mobile_destinations = [(entry[1], entry[2], entry[3]) for entry in mobile_primary]
-    if mobile_secondary:
-        mobile_actions.append(show_more)
-        mobile_destinations.append((ft.Icons.MORE_HORIZ, ft.Icons.MORE_HORIZ, "المزيد"))
-
-    def nav_changed(e):
-        index = max(0, min(int(e.control.selected_index), len(mobile_actions) - 1))
-        mobile_actions[index]()
-
-    nav = ft.NavigationBar(
-        selected_index=0,
-        on_change=nav_changed,
-        destinations=[
-            ft.NavigationBarDestination(icon=icon, selected_icon=selected, label=label)
-            for icon, selected, label in mobile_destinations
-        ],
-    )
-    rail = ft.NavigationRail(
-        selected_index=0,
-        label_type=ft.NavigationRailLabelType.ALL,
-        on_change=rail_changed,
-        destinations=[
-            ft.NavigationRailDestination(icon=icon, selected_icon=selected, label=label)
-            for icon, selected, label in desktop_destinations
-        ],
+    mobile_bar = ft.Container(
+        ft.Row(
+            [
+                mobile_item("dashboard", "الرئيسية", ft.Icons.HOME_OUTLINED, lambda _: navigate("dashboard")),
+                mobile_item("items", "المواد", ft.Icons.INVENTORY_2_OUTLINED, lambda _: navigate("items")),
+                sale_fab,
+                mobile_item("invoices", "الفواتير", ft.Icons.RECEIPT_LONG_OUTLINED, lambda _: navigate("invoices")),
+                mobile_item("more", "المزيد", ft.Icons.MORE_HORIZ, show_more),
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_AROUND,
+            vertical_alignment=ft.CrossAxisAlignment.END,
+        ),
+        height=78,
+        padding=ft.padding.only(left=5, right=5, top=7, bottom=5),
+        bgcolor="#FFFFFF",
+        border=ft.border.only(top=ft.BorderSide(1, "#E2E8F0")),
+        shadow=ft.BoxShadow(blur_radius=20, color="#E2E8F0", offset=ft.Offset(0, -5)),
     )
 
-    page.navigation_bar = nav
-    root = ft.Row([rail, ft.VerticalDivider(width=1), content], expand=True, spacing=0)
-    # Keep page content below Android/iOS status bars while the bottom NavigationBar
-    # continues to use the platform-safe inset managed by Flet.
+    # The v0.8 shell intentionally replaces the old NavigationRail / NavigationBar
+    # with a branded desktop sidebar and a five-action mobile bottom bar.
+    main_row = ft.Row([sidebar, body], expand=True, spacing=0)
+    root = ft.Column([main_row, mobile_bar], expand=True, spacing=0)
     page.add(ft.SafeArea(root, expand=True))
 
     def adapt_navigation(_=None):
         desktop = bool(page.width and page.width >= 900)
-        rail.visible = desktop
-        nav.visible = not desktop
+        sidebar.visible = desktop
+        mobile_bar.visible = not desktop
+        content.padding = ft.padding.only(left=24 if desktop else 16, right=24 if desktop else 16, top=18 if desktop else 12, bottom=24 if desktop else 16)
         page.update()
 
     page.on_resize = adapt_navigation
-    show_dashboard()
+    navigate("dashboard")
     adapt_navigation()
 
 

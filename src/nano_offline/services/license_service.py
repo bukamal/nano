@@ -236,6 +236,10 @@ class LicenseService:
             payload_part, signature_part = signed_token.split(".", 1)
             payload_bytes = _b64url_decode(payload_part)
             signature = _b64url_decode(signature_part)
+            # Require canonical Base64URL spellings. Otherwise a mutation of
+            # unused trailing Base64 bits can decode to the exact same signature.
+            if _b64url_encode(payload_bytes) != payload_part or _b64url_encode(signature) != signature_part:
+                raise ValueError("رمز التفعيل غير صالح")
             payload = json.loads(payload_bytes.decode("utf-8"))
         except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError("رمز التفعيل غير صالح") from exc

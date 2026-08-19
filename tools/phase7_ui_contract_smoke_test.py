@@ -10,8 +10,8 @@ docs = (ROOT / "src/nano_offline/services/document_service.py").read_text(encodi
 for needle in [
     "NativeFiles()",
     "page.overlay.append(native_files)",
-    "mobile_primary",
-    "mobile_secondary",
+    "mobile_bar",
+    "sale_fab",
     'ft.Text("المزيد"',
     'ft.Icons.MORE_HORIZ',
 ]:

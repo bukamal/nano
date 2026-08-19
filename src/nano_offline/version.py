@@ -1,0 +1,4 @@
+APP_VERSION = "0.8.1"
+BUILD_NUMBER = 13
+
+__all__ = ["APP_VERSION", "BUILD_NUMBER"]

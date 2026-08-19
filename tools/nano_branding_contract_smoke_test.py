@@ -20,11 +20,11 @@ for name in [
 ]:
     assert (assets / name).is_file(), name
 
-# Navigation contract: materials must be directly after home and mobile-primary.
-home = main.index('("dashboard", ft.Icons.HOME_OUTLINED')
-items = main.index('("items", ft.Icons.INVENTORY_2_OUTLINED')
-customers = main.index('("customers", ft.Icons.PEOPLE_OUTLINE')
-assert home < items < customers
-assert 'primary_keys = {"dashboard", "items", "invoices", "finance"}' in main
+# Navigation contract: materials are next to home and sale is the central mobile action.
+assert 'mobile_item("dashboard", "الرئيسية"' in main
+assert 'mobile_item("items", "المواد"' in main
+assert 'sale_fab' in main
+assert 'mobile_item("invoices", "الفواتير"' in main
+assert 'mobile_item("more", "المزيد"' in main
 
 print("nano_branding_contract_smoke_test passed")
