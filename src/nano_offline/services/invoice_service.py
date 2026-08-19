@@ -111,6 +111,9 @@ class InvoiceService:
                 supplier_id=supplier_id,
                 paid_amount=paid_amount,
             )
+            paid_amount = self._cash_paid_without_party(
+                invoice_type, total, paid_amount, customer_id, supplier_id
+            )
             self._require_party_for_credit(invoice_type, total, paid_amount, customer_id, supplier_id)
             cur = conn.execute(
                 """INSERT INTO invoices(type,customer_id,supplier_id,invoice_date,reference,notes,total,initial_paid_amount,paid_amount)
@@ -160,6 +163,9 @@ class InvoiceService:
                 customer_id=customer_id,
                 supplier_id=supplier_id,
                 paid_amount=paid_amount,
+            )
+            paid_amount = self._cash_paid_without_party(
+                invoice_type, total, paid_amount, customer_id, supplier_id
             )
             self._require_party_for_credit(invoice_type, total, paid_amount, customer_id, supplier_id)
             conn.execute(
@@ -279,6 +285,25 @@ class InvoiceService:
         if paid > total + EPSILON:
             raise ValueError("المبلغ المدفوع لا يمكن أن يتجاوز إجمالي الفاتورة")
         return prepared, total, paid
+
+    @staticmethod
+    def _cash_paid_without_party(
+        invoice_type: str,
+        total: float,
+        paid_amount: float,
+        customer_id: int | None,
+        supplier_id: int | None,
+    ) -> float:
+        """Anonymous sale/purchase is always a fully-settled cash invoice.
+
+        This rule lives in the accounting service rather than only in the UI so
+        imports, future integrations, and alternate screens cannot create an
+        anonymous receivable/payable accidentally.
+        """
+        missing_party = (invoice_type == "sale" and customer_id is None) or (
+            invoice_type == "purchase" and supplier_id is None
+        )
+        return float(total) if missing_party else float(paid_amount or 0)
 
     @staticmethod
     def _require_party_for_credit(

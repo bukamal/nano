@@ -1,7 +1,7 @@
 name: flet_native_files
-description: Native file sharing, picking and print/PDF bridge for Qeid.
+description: Native file sharing, picking and print/PDF bridge for Nano.
 version: 0.1.1
-homepage: https://example.invalid/qeid
+homepage: https://example.invalid/nano
 
 environment:
   sdk: '>=3.2.0 <4.0.0'

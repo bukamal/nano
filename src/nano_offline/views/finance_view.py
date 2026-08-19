@@ -4,6 +4,8 @@ from datetime import date
 
 import flet as ft
 
+from nano_offline.components import SearchSelect
+
 
 class FinanceCenter:
     def __init__(self, page: ft.Page, ctx, content: ft.Container, on_changed=None, native_files=None):
@@ -115,26 +117,28 @@ class FinanceCenter:
             return
 
         current_type = existing["voucher_type"] if existing else voucher_type
-        type_dd = ft.Dropdown(
+        type_dd = SearchSelect(
             label="نوع السند",
             value=current_type,
-            options=[ft.dropdown.Option("receipt", "قبض من عميل"), ft.dropdown.Option("payment", "صرف لمورد")],
+            choices=[("receipt", "قبض من عميل"), ("payment", "صرف لمورد")],
+            allow_clear=False,
         )
-        party_dd = ft.Dropdown(label="الحساب", enable_search=True, enable_filter=True)
+        party_dd = SearchSelect(label="الحساب")
         amount = ft.TextField(label="المبلغ", value=str(existing["amount"] if existing else 0), keyboard_type=ft.KeyboardType.NUMBER)
         vdate = ft.TextField(label="التاريخ", value=str(existing["voucher_date"] if existing else date.today().isoformat()))
         reference = ft.TextField(label="المرجع", value=(existing.get("reference") or "") if existing else "")
         notes = ft.TextField(label="ملاحظات", value=(existing.get("notes") or "") if existing else "", multiline=True, min_lines=1, max_lines=3)
         existing_allocations = {int(a["invoice_id"]): float(a["amount"]) for a in (existing.get("allocations") or [])} if existing else {}
         default_mode = "manual" if existing_allocations else "none" if existing else "oldest"
-        allocation_mode = ft.Dropdown(
+        allocation_mode = SearchSelect(
             label="توزيع الدفعة",
             value=default_mode,
-            options=[
-                ft.dropdown.Option("oldest", "الأقدم أولًا تلقائيًا"),
-                ft.dropdown.Option("manual", "توزيع يدوي"),
-                ft.dropdown.Option("none", "رصيد على الحساب دون توزيع"),
+            choices=[
+                ("oldest", "الأقدم أولًا تلقائيًا"),
+                ("manual", "توزيع يدوي"),
+                ("none", "رصيد على الحساب دون توزيع"),
             ],
+            allow_clear=False,
         )
         manual_column = ft.Column(spacing=6)
         manual_fields: dict[int, ft.TextField] = {}
@@ -145,7 +149,7 @@ class FinanceCenter:
         def load_parties(reset: bool = False) -> None:
             source = self.ctx.customers.list() if type_dd.value == "receipt" else self.ctx.suppliers.list()
             party_dd.label = "العميل" if type_dd.value == "receipt" else "المورد"
-            party_dd.options = [ft.dropdown.Option(str(p["id"]), p["name"]) for p in source]
+            party_dd.set_choices([(str(p["id"]), p["name"]) for p in source])
             if reset:
                 party_dd.value = None
             elif existing and existing["voucher_type"] == type_dd.value:
@@ -342,10 +346,10 @@ class FinanceCenter:
     def show_expense_dialog(self, expense_id: int | None = None) -> None:
         existing = self.ctx.expenses.get_expense(expense_id) if expense_id else None
         categories = self.ctx.expenses.list_categories()
-        category = ft.Dropdown(
+        category = SearchSelect(
             label="التصنيف",
             value=str(existing["category_id"]) if existing and existing.get("category_id") else None,
-            options=[ft.dropdown.Option(str(c["id"]), c["name"]) for c in categories],
+            choices=[(str(c["id"]), c["name"]) for c in categories],
         )
         new_category = ft.TextField(label="تصنيف جديد")
         description = ft.TextField(label="البيان", value=(existing["description"] if existing else ""))
@@ -416,11 +420,9 @@ class FinanceCenter:
         source = self.ctx.customers.list() if party_type == "customer" else self.ctx.suppliers.list()
         title = "كشف حساب العملاء" if party_type == "customer" else "كشف حساب الموردين"
         active = "customers" if party_type == "customer" else "suppliers"
-        party_dd = ft.Dropdown(
+        party_dd = SearchSelect(
             label="العميل" if party_type == "customer" else "المورد",
-            enable_search=True,
-            enable_filter=True,
-            options=[ft.dropdown.Option(str(p["id"]), p["name"]) for p in source],
+            choices=[(str(p["id"]), p["name"]) for p in source],
         )
         date_from = ft.TextField(label="من تاريخ", hint_text="YYYY-MM-DD")
         date_to = ft.TextField(label="إلى تاريخ", hint_text="YYYY-MM-DD")

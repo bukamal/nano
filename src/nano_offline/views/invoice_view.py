@@ -4,6 +4,8 @@ from datetime import date
 
 import flet as ft
 
+from nano_offline.components import SearchSelect
+
 from nano_offline.services.invoice_service import InvoiceLineInput
 
 
@@ -136,24 +138,17 @@ class InvoiceCenter:
                 label="بحث برقم الفاتورة أو العميل / المورد",
                 prefix_icon=ft.Icons.SEARCH,
             )
-            type_filter = ft.Dropdown(
+            type_filter = SearchSelect(
                 label="النوع",
                 value="all",
-                options=[
-                    ft.dropdown.Option("all", "الكل"),
-                    ft.dropdown.Option("sale", "بيع"),
-                    ft.dropdown.Option("purchase", "شراء"),
-                ],
+                choices=[("all", "الكل"), ("sale", "بيع"), ("purchase", "شراء")],
+                allow_clear=False,
             )
-            status_filter = ft.Dropdown(
+            status_filter = SearchSelect(
                 label="السداد",
                 value="all",
-                options=[
-                    ft.dropdown.Option("all", "الكل"),
-                    ft.dropdown.Option("unpaid", "غير مدفوعة"),
-                    ft.dropdown.Option("partial", "جزئية"),
-                    ft.dropdown.Option("paid", "مدفوعة"),
-                ],
+                choices=[("all", "الكل"), ("unpaid", "غير مدفوعة"), ("partial", "جزئية"), ("paid", "مدفوعة")],
+                allow_clear=False,
             )
             cards = ft.Column(spacing=8)
 
@@ -456,12 +451,13 @@ class InvoiceCenter:
         items = self.ctx.items.list()
         item_map = {int(i["id"]): i for i in items}
 
-        type_dd = ft.Dropdown(
+        type_dd = SearchSelect(
             label="نوع الفاتورة",
             value=self.invoice_type,
-            options=[ft.dropdown.Option("sale", "بيع"), ft.dropdown.Option("purchase", "شراء")],
+            choices=[("sale", "بيع"), ("purchase", "شراء")],
+            allow_clear=False,
         )
-        party_dd = ft.Dropdown(label="العميل", enable_search=True, enable_filter=True)
+        party_dd = SearchSelect(label="العميل")
         invoice_date = ft.TextField(label="التاريخ", value=str(existing["invoice_date"] if existing else date.today().isoformat()))
         reference = ft.TextField(label="المرجع", value=(existing.get("reference") or "") if existing else "")
         notes = ft.TextField(label="ملاحظات", value=(existing.get("notes") or "") if existing else "", multiline=True, min_lines=1, max_lines=3)
@@ -478,11 +474,11 @@ class InvoiceCenter:
             is_sale = type_dd.value == "sale"
             source = customers if is_sale else suppliers
             party_dd.label = "العميل" if is_sale else "المورد"
-            party_dd.options = [ft.dropdown.Option(str(p["id"]), p["name"]) for p in source]
+            party_dd.set_choices([(str(p["id"]), p["name"]) for p in source])
             if existing and existing["type"] == type_dd.value:
                 pid = existing.get("customer_id") if is_sale else existing.get("supplier_id")
                 party_dd.value = str(pid) if pid else None
-            elif party_dd.value and not any(o.key == party_dd.value for o in party_dd.options):
+            elif party_dd.value and not any(str(p["id"]) == party_dd.value for p in source):
                 party_dd.value = None
 
         def parse_number(control, label: str, allow_zero: bool = True) -> float:
@@ -505,16 +501,26 @@ class InvoiceCenter:
                     line_total = 0.0
                 state["total"].value = self.money(line_total)
                 total += line_total
-            try:
-                paid_value = float(paid.value or 0)
-            except Exception:
-                paid_value = 0.0
+
+            # Anonymous invoices are cash by definition: if no customer/supplier
+            # is selected, Nano settles the invoice in full automatically.
+            cash_without_party = not bool(party_dd.value)
+            paid.disabled = cash_without_party
+            paid.label = "مدفوع نقدًا (تلقائي)" if cash_without_party else "الدفعة الأولى"
+            if cash_without_party:
+                paid.value = f"{total:.2f}"
+                paid_value = total
+            else:
+                try:
+                    paid_value = float(paid.value or 0)
+                except Exception:
+                    paid_value = 0.0
             total_text.value = self.money(total)
             remaining_text.value = self.money(max(0, total - paid_value))
             self.page.update()
 
         def update_line_units(state: dict, selected_unit_id: int | None = None) -> None:
-            state["unit"].options = []
+            state["unit"].set_choices([])
             state["unit"].value = None
             state["factor"] = 1.0
             if not state["item"].value:
@@ -522,9 +528,9 @@ class InvoiceCenter:
             item_id_value = int(state["item"].value)
             units = self.ctx.items.units(item_id_value)
             state["units"] = {int(u["id"]): u for u in units}
-            state["unit"].options = [
-                ft.dropdown.Option(str(u["id"]), f"{u['name']} × {self.money(u['conversion_factor'])}") for u in units
-            ]
+            state["unit"].set_choices([
+                (str(u["id"]), f"{u['name']} × {self.money(u['conversion_factor'])}") for u in units
+            ])
             chosen = selected_unit_id if selected_unit_id in state["units"] else None
             if chosen is None and units:
                 chosen = int(units[0]["id"])
@@ -569,15 +575,13 @@ class InvoiceCenter:
                     if initial_item else None
                 ),
             }
-            item_dd = ft.Dropdown(
+            item_dd = SearchSelect(
                 label="المادة / الخدمة",
-                options=[ft.dropdown.Option(str(i["id"]), i["name"]) for i in items],
+                choices=[(str(i["id"]), i["name"]) for i in items],
                 value=str(initial["item_id"]) if initial.get("item_id") else None,
-                enable_search=True,
-                enable_filter=True,
             )
             description = ft.TextField(label="البيان", value=initial.get("description") or "")
-            unit_dd = ft.Dropdown(label="الوحدة")
+            unit_dd = SearchSelect(label="الوحدة")
             qty = ft.TextField(label="الكمية", value=str(initial.get("quantity") or 1), keyboard_type=ft.KeyboardType.NUMBER)
             price = ft.TextField(label="السعر", value=str(initial.get("unit_price") or 0), keyboard_type=ft.KeyboardType.NUMBER)
             line_total = ft.Text("0.00", weight=ft.FontWeight.BOLD)
@@ -647,6 +651,7 @@ class InvoiceCenter:
             recalc()
 
         type_dd.on_change = type_changed
+        party_dd.on_change = recalc
         paid.on_change = recalc
 
         def save(_):
@@ -706,7 +711,20 @@ class InvoiceCenter:
                 ft.ResponsiveRow(
                     [
                         ft.Container(type_dd, col={"xs": 12, "md": 3}),
-                        ft.Container(party_dd, col={"xs": 12, "md": 4}),
+                        ft.Container(
+                            ft.Column(
+                                [
+                                    party_dd,
+                                    ft.Text(
+                                        "بدون عميل/مورد = فاتورة نقدية مسددة بالكامل تلقائيًا",
+                                        size=10,
+                                        color="#64748B",
+                                    ),
+                                ],
+                                spacing=2,
+                            ),
+                            col={"xs": 12, "md": 4},
+                        ),
                         ft.Container(invoice_date, col={"xs": 6, "md": 2}),
                         ft.Container(reference, col={"xs": 6, "md": 3}),
                     ]

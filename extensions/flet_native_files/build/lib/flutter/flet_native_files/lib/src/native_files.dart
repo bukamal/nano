@@ -52,9 +52,26 @@ class _FletNativeFilesControlState extends State<FletNativeFilesControl> {
     if (file.bytes == null) return null;
     final dir = await getTemporaryDirectory();
     final safeName = file.name.replaceAll(RegExp(r'[^A-Za-z0-9._\-\u0600-\u06FF]'), '_');
-    final out = File('${dir.path}/qeid_import_${DateTime.now().millisecondsSinceEpoch}_$safeName');
+    final out = File('${dir.path}/nano_import_${DateTime.now().millisecondsSinceEpoch}_$safeName');
     await out.writeAsBytes(file.bytes!, flush: true);
     return out.path;
+  }
+
+  Future<File> createPdfFile(String html, String requestedName) async {
+    if (html.isEmpty) {
+      throw Exception('محتوى التقرير فارغ');
+    }
+    final bytes = await Printing.convertHtml(format: PdfPageFormat.a4, html: html);
+    final dir = await getTemporaryDirectory();
+    var safeName = requestedName.trim().isEmpty ? 'nano-report.pdf' : requestedName.trim();
+    if (!safeName.toLowerCase().endsWith('.pdf')) safeName = '$safeName.pdf';
+    safeName = safeName.replaceAll(RegExp(r'[^A-Za-z0-9._\-\u0600-\u06FF]'), '_');
+    final out = File('${dir.path}/nano_pdf_${DateTime.now().millisecondsSinceEpoch}_$safeName');
+    await out.writeAsBytes(bytes, flush: true);
+    if (!await out.exists() || await out.length() == 0) {
+      throw Exception('تعذر إنشاء ملف PDF');
+    }
+    return out;
   }
 
   Future<String?> handleMethod(String method, Map<String, String> args) async {
@@ -94,20 +111,25 @@ class _FletNativeFilesControlState extends State<FletNativeFilesControl> {
           final html = args['html'] ?? '';
           if (html.isEmpty) return 'error:محتوى التقرير فارغ';
           await Printing.layoutPdf(
-            name: (args['name'] ?? 'qeid-report').isEmpty ? 'qeid-report' : args['name']!,
+            name: (args['name'] ?? 'nano-report').isEmpty ? 'nano-report' : args['name']!,
             onLayout: (PdfPageFormat format) => Printing.convertHtml(format: format, html: html),
           );
           return 'ok';
 
+        case 'create_pdf':
+          final file = await createPdfFile(args['html'] ?? '', args['filename'] ?? 'nano-report.pdf');
+          return file.path;
+
         case 'share_pdf':
-          final html = args['html'] ?? '';
-          if (html.isEmpty) return 'error:محتوى التقرير فارغ';
-          final bytes = await Printing.convertHtml(format: PdfPageFormat.a4, html: html);
-          await Printing.sharePdf(
-            bytes: bytes,
-            filename: (args['filename'] ?? 'qeid-report.pdf').isEmpty ? 'qeid-report.pdf' : args['filename']!,
+          // Backward-compatible native method. New Python code calls create_pdf
+          // then share_file, but this path deliberately uses the same shareXFiles
+          // mechanism as backup sharing too.
+          final file = await createPdfFile(args['html'] ?? '', args['filename'] ?? 'nano-report.pdf');
+          final result = await Share.shareXFiles(
+            [XFile(file.path, mimeType: 'application/pdf')],
+            subject: args['filename'],
           );
-          return 'ok';
+          return result.status == ShareResultStatus.dismissed ? 'cancelled' : 'ok';
         default:
           return null;
       }

@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA_SQL = r"""
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -198,6 +198,11 @@ CREATE TABLE IF NOT EXISTS users (
     failed_attempts INTEGER NOT NULL DEFAULT 0,
     locked_until TEXT,
     last_login_at TEXT,
+    quick_auth_type TEXT,
+    quick_auth_hash TEXT,
+    quick_auth_salt TEXT,
+    quick_auth_key_id TEXT,
+    remember_token_hash TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -323,6 +328,11 @@ class Database:
                 conn.execute("ALTER TABLE audit_log ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
             if not self._has_column(conn, "audit_log", "username"):
                 conn.execute("ALTER TABLE audit_log ADD COLUMN username TEXT")
+
+        if self._table_exists(conn, "users"):
+            for column in ("quick_auth_type", "quick_auth_hash", "quick_auth_salt", "quick_auth_key_id", "remember_token_hash"):
+                if not self._has_column(conn, "users", column):
+                    conn.execute(f"ALTER TABLE users ADD COLUMN {column} TEXT")
 
         if self._table_exists(conn, "expenses"):
             if not self._has_column(conn, "expenses", "category_id"):

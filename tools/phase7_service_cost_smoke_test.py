@@ -73,11 +73,11 @@ with tempfile.TemporaryDirectory(prefix="qeid-phase7-service-cost-") as td:
         conn.execute("UPDATE items SET purchase_price=40 WHERE id=?", (service_id,))
     migrated = Database(db_path)
     migrated.initialize()
-    assert SCHEMA_VERSION == 5
+    assert SCHEMA_VERSION == 6
     with migrated.connect() as conn:
         schema = int(conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0])
         line = conn.execute("SELECT unit_cost,cost_amount FROM invoice_lines WHERE invoice_id=?", (inv1,)).fetchone()
-    assert schema == 5
+    assert schema == 6
     approx(line["unit_cost"], 40)
     approx(line["cost_amount"], 80)
 

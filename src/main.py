@@ -6,6 +6,7 @@ import flet as ft
 from flet_native_files import NativeFiles
 
 from nano_offline.app_context import AppContext
+from nano_offline.components import PatternPad, SearchSelect
 from nano_offline.core.paths import database_path, migrate_legacy_database
 from nano_offline.views.activation_view import ActivationGate
 from nano_offline.views.admin_view import AdminCenter
@@ -162,21 +163,23 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         purchase = ft.TextField(label="سعر الشراء / تكلفة الخدمة", value="0", keyboard_type=ft.KeyboardType.NUMBER)
         selling = ft.TextField(label="سعر البيع", value="0", keyboard_type=ft.KeyboardType.NUMBER)
         qty = ft.TextField(label="الرصيد الافتتاحي", value="0", keyboard_type=ft.KeyboardType.NUMBER)
-        kind = ft.Dropdown(label="النوع", value="مخزون", options=[ft.dropdown.Option("مخزون"), ft.dropdown.Option("خدمة")])
-        category = ft.Dropdown(
+        kind = SearchSelect(
+            label="النوع",
+            choices=[("مخزون", "مخزون"), ("خدمة", "خدمة")],
+            value="مخزون",
+            allow_clear=False,
+        )
+        category = SearchSelect(
             label="التصنيف",
-            options=[ft.dropdown.Option(str(c["id"]), c["name"]) for c in categories],
-            enable_search=True,
+            choices=[(str(c["id"]), c["name"]) for c in categories],
         )
-        base_unit = ft.Dropdown(
+        base_unit = SearchSelect(
             label="الوحدة الأساسية",
-            options=[ft.dropdown.Option(str(u["id"]), u["name"]) for u in units],
-            enable_search=True,
+            choices=[(str(u["id"]), u["name"]) for u in units],
         )
-        alt_unit = ft.Dropdown(
+        alt_unit = SearchSelect(
             label="وحدة إضافية",
-            options=[ft.dropdown.Option(str(u["id"]), u["name"]) for u in units],
-            enable_search=True,
+            choices=[(str(u["id"]), u["name"]) for u in units],
         )
         alt_factor = ft.TextField(label="معامل التحويل", value="1", keyboard_type=ft.KeyboardType.NUMBER)
         search = ft.TextField(label="بحث في المواد", prefix_icon=ft.Icons.SEARCH)
@@ -379,6 +382,143 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         )
         page.update()
 
+    def show_security():
+        session = ctx.auth.current()
+        if session is None:
+            raise RuntimeError("لا توجد جلسة مستخدم")
+        quick_kind = ctx.auth.quick_auth_info(session.username)
+        quick_label = {"pin": "PIN", "pattern": "نمط"}.get(quick_kind, "غير مفعّل")
+        quick_status = ft.Text(f"الدخول السريع الحالي: {quick_label}", color="#475569")
+        saved_status = ft.Text(
+            "الدخول التلقائي مفعّل على هذا الجهاز" if ctx.auth.saved_login_enabled(session.username) else "الدخول التلقائي غير مفعّل",
+            color="#475569",
+        )
+
+        def refresh_security():
+            kind = ctx.auth.quick_auth_info(session.username)
+            quick_status.value = "الدخول السريع الحالي: " + {"pin": "PIN", "pattern": "نمط"}.get(kind, "غير مفعّل")
+            saved_status.value = "الدخول التلقائي مفعّل على هذا الجهاز" if ctx.auth.saved_login_enabled(session.username) else "الدخول التلقائي غير مفعّل"
+            page.update()
+
+        def pin_dialog(_=None):
+            current_password = ft.TextField(label="كلمة المرور الحالية", password=True, can_reveal_password=True)
+            pin = ft.TextField(label="PIN جديد (4–8 أرقام)", password=True, can_reveal_password=True, keyboard_type=ft.KeyboardType.NUMBER)
+            confirm = ft.TextField(label="تأكيد PIN", password=True, can_reveal_password=True, keyboard_type=ft.KeyboardType.NUMBER)
+            dialog = ft.AlertDialog(modal=True, title=ft.Text("إعداد الدخول بـ PIN"))
+
+            def close(_=None):
+                page.close(dialog)
+
+            def save(_=None):
+                try:
+                    if (pin.value or "") != (confirm.value or ""):
+                        raise ValueError("تأكيد PIN غير مطابق")
+                    ctx.auth.set_quick_auth("pin", pin.value or "", current_password.value or "")
+                    page.close(dialog)
+                    notify("تم تفعيل الدخول بـ PIN")
+                    refresh_security()
+                except Exception as exc:
+                    notify(str(exc))
+
+            dialog.content = ft.Column([current_password, pin, confirm], tight=True, spacing=10)
+            dialog.actions = [ft.TextButton("إلغاء", on_click=close), ft.FilledButton("حفظ PIN", on_click=save)]
+            page.open(dialog)
+
+        def pattern_dialog(_=None):
+            current_password = ft.TextField(label="كلمة المرور الحالية", password=True, can_reveal_password=True)
+            first = PatternPad()
+            second = PatternPad()
+            dialog = ft.AlertDialog(modal=True, title=ft.Text("إعداد نمط الدخول"))
+
+            def close(_=None):
+                page.close(dialog)
+
+            def save(_=None):
+                try:
+                    if first.value != second.value:
+                        raise ValueError("تأكيد النمط غير مطابق")
+                    ctx.auth.set_quick_auth("pattern", first.value, current_password.value or "")
+                    page.close(dialog)
+                    notify("تم تفعيل الدخول بالنمط")
+                    refresh_security()
+                except Exception as exc:
+                    notify(str(exc))
+
+            dialog.content = ft.Container(
+                ft.Column(
+                    [
+                        current_password,
+                        ft.Text("النمط الجديد: اختر 4 نقاط مختلفة على الأقل", weight=ft.FontWeight.BOLD),
+                        first,
+                        ft.Divider(),
+                        ft.Text("تأكيد النمط", weight=ft.FontWeight.BOLD),
+                        second,
+                    ],
+                    scroll=ft.ScrollMode.AUTO,
+                    spacing=10,
+                ),
+                width=420,
+                height=560,
+            )
+            dialog.actions = [ft.TextButton("إلغاء", on_click=close), ft.FilledButton("حفظ النمط", on_click=save)]
+            page.open(dialog)
+
+        def clear_dialog(_=None):
+            current_password = ft.TextField(label="كلمة المرور الحالية", password=True, can_reveal_password=True)
+            dialog = ft.AlertDialog(modal=True, title=ft.Text("إلغاء الدخول السريع"), content=current_password)
+
+            def close(_=None):
+                page.close(dialog)
+
+            def clear(_=None):
+                try:
+                    ctx.auth.clear_quick_auth(current_password.value or "")
+                    page.close(dialog)
+                    notify("تم إلغاء PIN / النمط")
+                    refresh_security()
+                except Exception as exc:
+                    notify(str(exc))
+
+            dialog.actions = [ft.TextButton("إلغاء", on_click=close), ft.FilledButton("إلغاء الدخول السريع", on_click=clear)]
+            page.open(dialog)
+
+        content.content = ft.Column(
+            [
+                ft.Text("الأمان والدخول", size=24, weight=ft.FontWeight.BOLD),
+                ft.Container(
+                    ft.Column(
+                        [
+                            ft.Text(f"المستخدم: {session.full_name} ({session.username})", weight=ft.FontWeight.BOLD),
+                            quick_status,
+                            saved_status,
+                            ft.Text(
+                                "لا يتم حفظ كلمة المرور كنص. خيار البقاء مسجلاً يستخدم رمز جلسة عشوائيًا محليًا، بينما PIN والنمط يحفظان كبصمة مشفرة مرتبطة بهذا الجهاز.",
+                                size=11,
+                                color="#64748B",
+                            ),
+                        ],
+                        spacing=6,
+                    ),
+                    padding=14,
+                    border=ft.border.all(1, "#E2E8F0"),
+                    border_radius=14,
+                    bgcolor="#FFFFFF",
+                ),
+                ft.ResponsiveRow(
+                    [
+                        ft.Container(ft.FilledButton("إعداد PIN", icon=ft.Icons.LOCK, on_click=pin_dialog), col={"xs": 6, "md": 3}),
+                        ft.Container(ft.OutlinedButton("إعداد نمط", icon=ft.Icons.APPS_ROUNDED, on_click=pattern_dialog), col={"xs": 6, "md": 3}),
+                        ft.Container(ft.TextButton("إلغاء PIN / النمط", icon=ft.Icons.REFRESH, on_click=clear_dialog), col={"xs": 12, "md": 3}),
+                    ],
+                    spacing=8,
+                    run_spacing=8,
+                ),
+            ],
+            spacing=12,
+            scroll=ft.ScrollMode.AUTO,
+        )
+        page.update()
+
     invoice_center = InvoiceCenter(page, ctx, content, native_files=native_files)
     finance_center = FinanceCenter(page, ctx, content, native_files=native_files)
     reports_center = ReportsCenter(page, ctx, content)
@@ -394,6 +534,7 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         ("invoices", ft.Icons.RECEIPT_LONG_OUTLINED, ft.Icons.RECEIPT_LONG, "الفواتير", invoice_center.show_center),
         ("finance", ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, ft.Icons.ACCOUNT_BALANCE_WALLET, "المالية", finance_center.show_center),
         ("reports", ft.Icons.QUERY_STATS_OUTLINED, ft.Icons.QUERY_STATS, "التقارير", reports_center.show_center),
+        ("security", ft.Icons.LOCK_OUTLINE, ft.Icons.LOCK, "الأمان", show_security),
         ("admin", ft.Icons.ADMIN_PANEL_SETTINGS_OUTLINED, ft.Icons.ADMIN_PANEL_SETTINGS, "الإدارة", admin_center.show_center),
     ]
     allowed_pages = [entry for entry in available_pages if session.can(entry[0])]
@@ -429,7 +570,7 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         content.content = ft.Column(
             [
                 ft.Text("المزيد", size=24, weight=ft.FontWeight.BOLD),
-                ft.Text("العملاء والموردون والتقارير والإدارة حسب صلاحيات المستخدم.", size=12, color="#64748B"),
+                ft.Text("العملاء والموردون والتقارير والأمان والإدارة حسب صلاحيات المستخدم.", size=12, color="#64748B"),
                 ft.ResponsiveRow(cards) if cards else ft.Text("لا توجد أقسام إضافية لهذا المستخدم.", color="#64748B"),
             ],
             spacing=12,
@@ -518,10 +659,33 @@ def main(page: ft.Page):
     def show_auth():
         reset_page()
         first_run = not ctx.auth.has_users()
-        username = ft.TextField(label="اسم المستخدم", autofocus=True)
+        remembered = ctx.auth.remembered_username() if not first_run else ""
+        username = ft.TextField(label="اسم المستخدم", value=remembered, autofocus=not bool(remembered))
         full_name = ft.TextField(label="الاسم الكامل") if first_run else None
         password = ft.TextField(label="كلمة المرور", password=True, can_reveal_password=True, on_submit=lambda _: submit(None))
         confirm = ft.TextField(label="تأكيد كلمة المرور", password=True, can_reveal_password=True) if first_run else None
+        remember_name = ft.Checkbox(label="تذكر اسم المستخدم", value=bool(remembered) or first_run)
+        stay_signed = ft.Checkbox(
+            label="البقاء مسجلاً على هذا الجهاز",
+            value=False,
+            tooltip="يحفظ رمز جلسة محليًا بدل حفظ كلمة المرور نفسها",
+        )
+        quick_button = ft.OutlinedButton("الدخول السريع", icon=ft.Icons.LOCK_OPEN, visible=False, width=320)
+        security_note = ft.Text(
+            "يمكن تفعيل PIN أو نمط من قسم الأمان بعد تسجيل الدخول. كلمة المرور لا تُحفظ كنص صريح.",
+            size=11,
+            color="#64748B",
+            text_align=ft.TextAlign.CENTER,
+        )
+
+        def refresh_quick(_=None):
+            if first_run:
+                quick_button.visible = False
+            else:
+                kind = ctx.auth.quick_auth_info(username.value or "")
+                quick_button.visible = kind in {"pin", "pattern"}
+                quick_button.text = "الدخول بـ PIN" if kind == "pin" else "الدخول بالنمط" if kind == "pattern" else "الدخول السريع"
+            page.update()
 
         def submit(_):
             try:
@@ -529,10 +693,66 @@ def main(page: ft.Page):
                     if (password.value or "") != (confirm.value or ""):
                         raise ValueError("تأكيد كلمة المرور غير مطابق")
                     ctx.auth.create_initial_admin(username.value or "", full_name.value or "", password.value or "")
-                ctx.auth.login(username.value or "", password.value or "")
+                ctx.auth.login(
+                    username.value or "",
+                    password.value or "",
+                    remember_login=bool(stay_signed.value),
+                    remember_username=bool(remember_name.value),
+                )
                 open_shell()
             except Exception as exc:
                 notify(str(exc))
+
+        def quick_login(_=None):
+            kind = ctx.auth.quick_auth_info(username.value or "")
+            if not kind:
+                notify("لا يوجد PIN أو نمط مفعّل لهذا المستخدم")
+                return
+            dialog = ft.AlertDialog(modal=True, title=ft.Text("الدخول السريع"))
+
+            def close(_=None):
+                page.close(dialog)
+
+            if kind == "pin":
+                secret = ft.TextField(
+                    label="PIN",
+                    password=True,
+                    can_reveal_password=True,
+                    keyboard_type=ft.KeyboardType.NUMBER,
+                    autofocus=True,
+                )
+
+                def do_login(_=None):
+                    try:
+                        ctx.auth.login_quick(username.value or "", "pin", secret.value or "")
+                        page.close(dialog)
+                        open_shell()
+                    except Exception as exc:
+                        notify(str(exc))
+
+                secret.on_submit = do_login
+                dialog.content = secret
+                dialog.actions = [ft.TextButton("إلغاء", on_click=close), ft.FilledButton("دخول", on_click=do_login)]
+            else:
+                pad = PatternPad()
+
+                def do_login(_=None):
+                    try:
+                        ctx.auth.login_quick(username.value or "", "pattern", pad.value)
+                        page.close(dialog)
+                        open_shell()
+                    except Exception as exc:
+                        notify(str(exc))
+
+                dialog.content = ft.Container(
+                    ft.Column([ft.Text("أدخل النمط المسجل"), pad], tight=True, spacing=8),
+                    width=380,
+                )
+                dialog.actions = [ft.TextButton("إلغاء", on_click=close), ft.FilledButton("دخول", on_click=do_login)]
+            page.open(dialog)
+
+        username.on_change = refresh_quick
+        quick_button.on_click = quick_login
 
         controls = [
             ft.Image(src="icon.png", width=84, height=84, fit=ft.ImageFit.CONTAIN),
@@ -548,14 +768,18 @@ def main(page: ft.Page):
         controls.append(password)
         if confirm is not None:
             controls.append(confirm)
+        if not first_run:
+            controls.extend([remember_name, stay_signed])
         controls.extend(
             [
                 ft.FilledButton(
-                    "إنشاء المدير والدخول" if first_run else "دخول",
+                    "إنشاء المدير والدخول" if first_run else "دخول بكلمة المرور",
                     icon=ft.Icons.LOGIN,
                     on_click=submit,
                     width=320,
                 ),
+                quick_button,
+                security_note,
                 ft.Text(
                     "كل المستخدمين والبيانات محليون على هذا الجهاز. لا يعتمد التشغيل المحاسبي على خدمات خارجية أو قاعدة بيانات أونلاين.",
                     size=11,
@@ -565,7 +789,7 @@ def main(page: ft.Page):
             ]
         )
         card = ft.Container(
-            ft.Column(controls, horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=12),
+            ft.Column(controls, horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10, scroll=ft.ScrollMode.AUTO),
             width=390,
             padding=24,
             border=ft.border.all(1, "#E5E7EB"),
@@ -573,16 +797,22 @@ def main(page: ft.Page):
             bgcolor="#FFFFFF",
         )
         page.add(
-            ft.Container(
-                ft.Column([card], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+            ft.SafeArea(
+                ft.Container(
+                    ft.Column([card], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                    expand=True,
+                    padding=16,
+                ),
                 expand=True,
-                padding=16,
             )
         )
-        page.update()
+        refresh_quick()
 
     if ctx.license.status().valid:
-        show_auth()
+        if ctx.auth.has_users() and ctx.auth.restore_saved_session() is not None:
+            open_shell()
+        else:
+            show_auth()
     else:
         show_activation()
 

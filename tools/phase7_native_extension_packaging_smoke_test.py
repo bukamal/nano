@@ -25,7 +25,7 @@ for needle in ["flet: 0.28.3", "file_picker: 10.1.9", "share_plus:", "printing:"
     assert needle in pubspec, needle
 
 dart = (EXT / "src/flutter/flet_native_files/lib/src/native_files.dart").read_text(encoding="utf-8")
-for needle in ["FilePicker.platform.pickFiles", "Share.shareXFiles", "Printing.layoutPdf", "Printing.convertHtml", "Printing.sharePdf"]:
+for needle in ["FilePicker.platform.pickFiles", "Share.shareXFiles", "Printing.layoutPdf", "Printing.convertHtml", "createPdfFile", "case 'create_pdf'"]:
     assert needle in dart, needle
 
 with tempfile.TemporaryDirectory(prefix="qeid-native-wheel-") as td:

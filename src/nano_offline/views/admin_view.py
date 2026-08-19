@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
 import asyncio
+import shutil
 
 import flet as ft
 
+from nano_offline.components import SearchSelect
 from nano_offline.services.auth_service import ROLE_LABELS
 
 
@@ -37,10 +40,11 @@ class AdminCenter:
         username = ft.TextField(label="اسم المستخدم")
         full_name = ft.TextField(label="الاسم الكامل")
         password = ft.TextField(label="كلمة المرور", password=True, can_reveal_password=True)
-        role = ft.Dropdown(
+        role = SearchSelect(
             label="الدور",
             value="accountant",
-            options=[ft.dropdown.Option(k, v) for k, v in ROLE_LABELS.items()],
+            choices=[(k, v) for k, v in ROLE_LABELS.items()],
+            allow_clear=False,
         )
         users_list = ft.Column(spacing=8)
 
@@ -102,24 +106,54 @@ class AdminCenter:
         refresh_users()
 
         backup_name = ft.TextField(label="اسم النسخة", value="nano_backup")
-        backup_choice = ft.Dropdown(label="نسخة للاسترجاع", options=[])
+        backup_choice = SearchSelect(label="نسخة للاسترجاع")
         backup_info = ft.Text("", size=12, color="#64748B")
 
         def refresh_backups():
             files = sorted(list(backups_dir.glob("*.nanobackup")) + list(backups_dir.glob("*.qeidbackup")), reverse=True)
-            backup_choice.options = [ft.dropdown.Option(str(p), p.name) for p in files]
+            backup_choice.set_choices([(str(p), p.name) for p in files])
             if files and not backup_choice.value:
                 backup_choice.value = str(files[0])
 
-        def make_backup(_):
+        def _backup_target() -> Path:
+            stem = (backup_name.value or "nano_backup").strip().replace("/", "_").replace("\\", "_")
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            return backups_dir / f"{stem}_{stamp}.nanobackup"
+
+        async def _create_backup_file() -> Path:
+            target = _backup_target()
+            result = await asyncio.to_thread(self.ctx.backup.create_backup, target)
+            validation = await asyncio.to_thread(self.ctx.backup.validate_backup, result)
+            backup_info.value = (
+                f"تم إنشاء {result.name} • schema {validation.schema_version} • "
+                f"البصمة {validation.db_sha256[:12]}…"
+            )
+            refresh_backups()
+            backup_choice.value = str(result)
+            self.page.update()
+            return result
+
+        async def make_backup(_):
             try:
-                stem = (backup_name.value or "nano_backup").strip().replace("/", "_").replace("\\", "_")
-                target = backups_dir / f"{stem}.nanobackup"
-                result = self.ctx.backup.create_backup(target)
-                validation = self.ctx.backup.validate_backup(result)
-                backup_info.value = f"تم إنشاء {result.name} • schema {validation.schema_version} • البصمة {validation.db_sha256[:12]}…"
-                refresh_backups()
-                self.page.update()
+                await _create_backup_file()
+                self._notify("تم إنشاء النسخة الاحتياطية بنجاح")
+            except Exception as exc:
+                self._notify(str(exc))
+
+        async def make_and_share_backup(_):
+            try:
+                result = await _create_backup_file()
+                if self.native_files is None:
+                    self._notify(f"تم إنشاء النسخة محليًا: {result.name}")
+                    return
+                shared = await self.native_files.share_file(
+                    str(result),
+                    mime_type="application/zip",
+                    text="نسخة احتياطية من Nano | نانو",
+                    subject=result.name,
+                )
+                if not shared:
+                    self._notify(f"تم إنشاء النسخة محليًا: {result.name}")
             except Exception as exc:
                 self._notify(str(exc))
 
@@ -186,14 +220,30 @@ class AdminCenter:
                 self._notify("استيراد الملفات الأصلي غير مهيأ في هذا البناء")
                 return
             try:
+                # Android document providers are inconsistent with custom file
+                # extensions, so open all files and validate Nano's container
+                # ourselves before copying it into persistent local storage.
                 picked = await self.native_files.pick_file(
-                    extensions=["nanobackup", "qeidbackup"],
+                    extensions=None,
                     dialog_title="اختر النسخة الاحتياطية لـ Nano",
                 )
                 if not picked:
                     return
-                path = Path(str(picked["path"]))
-                open_restore_dialog(path, external_name=str(picked.get("name") or path.name))
+                source = Path(str(picked["path"]))
+                validation = await asyncio.to_thread(self.ctx.backup.validate_backup, source)
+                original_name = str(picked.get("name") or source.name or "imported_backup")
+                safe_stem = Path(original_name).stem.replace("/", "_").replace("\\", "_") or "imported_backup"
+                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                target = backups_dir / f"{safe_stem}_{stamp}.nanobackup"
+                await asyncio.to_thread(shutil.copy2, source, target)
+                # Validate the persisted copy too; restore never depends on the
+                # transient Android picker cache path.
+                await asyncio.to_thread(self.ctx.backup.validate_backup, target)
+                refresh_backups()
+                backup_choice.value = str(target)
+                backup_info.value = f"تم استيراد {target.name} • schema {validation.schema_version}"
+                self.page.update()
+                open_restore_dialog(target, external_name=original_name)
             except Exception as exc:
                 self._notify(str(exc))
 
@@ -221,7 +271,7 @@ class AdminCenter:
             activation_progress.visible = True
             self.page.update()
             try:
-                status = await asyncio.to_thread(self.ctx.license.activate_online, license_key.value or "", "0.7.2")
+                status = await asyncio.to_thread(self.ctx.license.activate_online, license_key.value or "", "0.7.4")
                 refresh_license()
                 self._notify("تم التفعيل عبر سيرفر هوى الشام" if status.valid else (status.reason or "فشل التفعيل"))
             except Exception as exc:
@@ -298,16 +348,31 @@ class AdminCenter:
                         ft.Text("النسخة تحتوي البيانات والمستخدمين، ولا تحتوي ترخيص الجهاز. يمكن مشاركتها عبر Android واستيراد ملف .nanobackup أو .qeidbackup من أي مزود مستندات. النسخة غير مشفرة؛ احفظها في مكان آمن.", size=12, color="#B45309"),
                         ft.ResponsiveRow(
                             [
-                                ft.Container(backup_name, col={"xs": 12, "md": 6}),
-                                ft.Container(ft.FilledButton("إنشاء نسخة", icon=ft.Icons.BACKUP, on_click=make_backup), col={"xs": 12, "md": 3}),
+                                ft.Container(backup_name, col={"xs": 12, "md": 5}),
+                                ft.Container(
+                                    ft.FilledButton(
+                                        "إنشاء ومشاركة نسخة",
+                                        icon=ft.Icons.BACKUP,
+                                        on_click=make_and_share_backup,
+                                    ),
+                                    col={"xs": 12, "md": 4},
+                                ),
+                                ft.Container(
+                                    ft.OutlinedButton("إنشاء محليًا", icon=ft.Icons.SAVE_OUTLINED, on_click=make_backup),
+                                    col={"xs": 12, "md": 3},
+                                ),
                             ]
+                        ),
+                        ft.FilledButton(
+                            "استيراد نسخة من الجهاز",
+                            icon=ft.Icons.UPLOAD_FILE,
+                            on_click=import_external_backup,
                         ),
                         backup_choice,
                         ft.Row(
                             [
                                 ft.OutlinedButton("مشاركة النسخة", icon=ft.Icons.SHARE_OUTLINED, on_click=share_backup),
                                 ft.OutlinedButton("استرجاع النسخة المحلية", icon=ft.Icons.RESTORE, on_click=restore_backup),
-                                ft.FilledButton("استيراد نسخة من الجهاز", icon=ft.Icons.UPLOAD_FILE, on_click=import_external_backup),
                             ],
                             wrap=True,
                         ),

@@ -17,10 +17,10 @@ assert "file_picker: ^8.3.7" not in ext_pubspec
 assert "FilePicker.platform.pickFiles" in dart
 
 # Bump the local package so stale editable/wheel metadata cannot silently win.
-assert 'version = "0.7.2"' in root_pyproject
-assert 'build_number = 9' in root_pyproject
+assert 'version = "0.7.4"' in root_pyproject
+assert 'build_number = 11' in root_pyproject
 assert '"flet-native-files==0.1.1"' in root_pyproject
-assert "--build-number 9" in workflow
-assert "--build-version 0.7.2" in workflow
+assert "--build-number 11" in workflow
+assert "--build-version 0.7.4" in workflow
 
 print("phase7_2_flutter_dependency_alignment_smoke_test passed")

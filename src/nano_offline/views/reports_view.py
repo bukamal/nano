@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import flet as ft
 
+from nano_offline.components import SearchSelect
+
 
 class ReportsCenter:
     def __init__(self, page: ft.Page, ctx, content: ft.Container):
         self.page = page
         self.ctx = ctx
         self.content = content
-        self.report_type: ft.Dropdown | None = None
+        self.report_type: SearchSelect | None = None
         self.date_from: ft.TextField | None = None
         self.date_to: ft.TextField | None = None
         self.body = ft.Column(spacing=10)
@@ -49,16 +51,17 @@ class ReportsCenter:
         )
 
     def show_center(self) -> None:
-        self.report_type = ft.Dropdown(
+        self.report_type = SearchSelect(
             label="التقرير",
             value="pnl",
-            options=[
-                ft.dropdown.Option("pnl", "قائمة الدخل والربحية"),
-                ft.dropdown.Option("profitability", "ربحية الفواتير والمواد"),
-                ft.dropdown.Option("inventory", "حركة وتقييم المخزون"),
-                ft.dropdown.Option("balances", "ذمم العملاء والموردين"),
-                ft.dropdown.Option("cash", "حركة الصندوق"),
+            choices=[
+                ("pnl", "قائمة الدخل والربحية"),
+                ("profitability", "ربحية الفواتير والمواد"),
+                ("inventory", "حركة وتقييم المخزون"),
+                ("balances", "ذمم العملاء والموردين"),
+                ("cash", "حركة الصندوق"),
             ],
+            allow_clear=False,
         )
         self.date_from = ft.TextField(label="من تاريخ YYYY-MM-DD", hint_text="اتركه فارغًا لكل الفترة")
         self.date_to = ft.TextField(label="إلى تاريخ / كما في YYYY-MM-DD", hint_text="اتركه فارغًا حتى آخر حركة")
