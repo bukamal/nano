@@ -9,6 +9,14 @@
   same as PHASE9's notification check. The instant push_home_widget path
   (app open, right after a sale/voucher save) is what keeps it feeling live
   the rest of the time.
+
+  Lock screen (Glanceable Hub, Android 16 QPR1+): no change needed here.
+  That surface uses an opt-OUT model; every widget is eligible by
+  default unless android:widgetCategory explicitly includes
+  "not_keyguard". The older Android 4.2-5.0 keyguard widget API
+  (widgetCategory="keyguard" + initialKeyguardLayout) is deprecated and
+  irrelevant to Glance-based widgets like this one, which has no
+  res/layout to point a keyguard layout at.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="250dp"
