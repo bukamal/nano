@@ -4,7 +4,7 @@
 
   updatePeriodMin=30 is Android's *minimum-guaranteed* floor for this
   mechanism (the OS clamps anything lower to 30 anyway) and is only the
-  closed-app safety net -- the periodic WorkManager pass in
+  closed-app safety net; the periodic WorkManager pass in
   native_files.dart's _pushHomeWidgetSnapshot is what actually drives it,
   same as PHASE9's notification check. The instant push_home_widget path
   (app open, right after a sale/voucher save) is what keeps it feeling live

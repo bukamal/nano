@@ -3,12 +3,12 @@
 
     <!--
       PHASE10: home screen widget (Glance). This is a *plugin library*
-      manifest -- Gradle's manifest merger folds the <receiver> below into
+      manifest; Gradle's manifest merger folds the <receiver> below into
       the generated app's final AndroidManifest.xml automatically, the same
       standard mechanism flutter_local_notifications and workmanager already
       rely on elsewhere in this project. Nothing here touches (or needs to
       survive regeneration of) build/flutter/android/app/.../AndroidManifest.xml
-      directly -- see build_nano_apk.sh's core-library-desugaring comment for
+      directly; see build_nano_apk.sh's core-library-desugaring comment for
       why editing that generated file directly is the approach to avoid.
     -->
     <application>
