@@ -1,8 +1,11 @@
 package com.nano.homewidget
 
+import android.app.Activity
 import android.content.Context
+import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.glance.ColorProvider
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.action.actionStartActivity
@@ -20,7 +23,6 @@ import androidx.glance.layout.padding
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
-import androidx.glance.unit.ColorProvider
 import org.json.JSONObject
 
 /**
@@ -52,7 +54,7 @@ class NanoGlanceWidget : GlanceAppWidget() {
                 modifier = GlanceModifier
                     .fillMaxSize()
                     .padding(12.dp)
-                    .clickable(actionStartActivity(componentClass = mainActivityClass(context)))
+                    .clickable(actionStartActivity(activity = mainActivityClass(context)))
             ) {
                 Text("Nano | نانو", style = TextStyle(fontWeight = FontWeight.Medium))
                 Spacer(modifier = GlanceModifier.height(8.dp))
@@ -81,8 +83,9 @@ class NanoGlanceWidget : GlanceAppWidget() {
  * by name instead of a compile-time import so this plugin module doesn't
  * need to depend on the generated app module.
  */
-internal fun mainActivityClass(context: Context): Class<*> =
-    Class.forName("${context.packageName}.MainActivity")
+@Suppress("UNCHECKED_CAST")
+internal fun mainActivityClass(context: Context): Class<out Activity> =
+    Class.forName("${context.packageName}.MainActivity") as Class<out Activity>
 
 private fun formatMoney(v: Double): String =
     v.toLong().toString().reversed().chunked(3).joinToString(",").reversed()
