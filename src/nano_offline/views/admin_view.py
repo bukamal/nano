@@ -1159,20 +1159,26 @@ class AdminCenter:
             else:
                 rows.append(_diag_row(True, f"عدد نسخ الودجت المضافة للشاشة الرئيسية: {widget_count}."))
 
+            last_at = diag.get("last_provide_glance_at")
+            ever_rendered = bool(last_at)
+
             state_err = diag.get("last_state_read_error")
             if state_err:
                 rows.append(_diag_row(False, f"فشل قراءة بيانات الودجت المخزَّنة (DataStore) — {state_err} — هذا يُسقط الودجت بالكامل قبل أي محاولة رسم، وهو أكثر سبب متوقَّع لظهور \"يتعذّر عرض المحتوى\" رغم تطبيق إصلاحات 0.8.3."))
-            else:
+            elif ever_rendered:
                 rows.append(_diag_row(True, "آخر قراءة لبيانات الودجت المخزَّنة نجحت بلا استثناء."))
+            else:
+                rows.append(_diag_row(None, "لم تُنفَّذ قراءة بيانات الودجت بعد — لا يوجد حكم بنجاح أو فشل، فقط لم يحدث."))
 
             render_err = diag.get("last_render_error")
             if render_err:
                 rows.append(_diag_row(False, f"فشل رسم محتوى الودجت رغم نجاح قراءة البيانات — {render_err} — الودجت تعرض حاليًا نص \"تعذّر تحميل الأرقام\" بدل الأرقام الفعلية."))
-            else:
+            elif ever_rendered:
                 rows.append(_diag_row(True, "آخر محاولة رسم لمحتوى الودجت نجحت بلا استثناء."))
+            else:
+                rows.append(_diag_row(None, "لم تُنفَّذ محاولة رسم بعد — لا يوجد حكم بنجاح أو فشل، فقط لم يحدث."))
 
-            last_at = diag.get("last_provide_glance_at")
-            rows.append(_diag_row(None, f"آخر مرة أُعيد فيها بناء محتوى الودجت: {_fmt_widget_ts(last_at)}."))
+            rows.append(_diag_row(None, f"آخر مرة أُعيد فيها بناء محتوى الودجت (provideGlance): {_fmt_widget_ts(last_at)}."))
 
             push_ok = diag.get("last_push_ok")
             push_err = diag.get("last_push_error")
@@ -1183,6 +1189,18 @@ class AdminCenter:
                 rows.append(_diag_row(True, f"آخر تحديث فوري نجح في {_fmt_widget_ts(push_at)}."))
             else:
                 rows.append(_diag_row(False, f"فشل آخر تحديث فوري في {_fmt_widget_ts(push_at)} — {push_err}."))
+
+            # The critical combination: data was pushed successfully and the
+            # widget IS present on the home screen, yet provideGlance itself
+            # never ran even once. Every try/catch added in 0.8.3/0.8.4 lives
+            # *inside* provideGlance -- none of it runs if the failure is a
+            # level above, inside Glance's own session/receiver dispatch
+            # (GlanceAppWidgetReceiver -> AppWidgetSession -> provideGlance)
+            # before our code is ever reached. This is not something a
+            # try/catch inside NanoGlanceWidget can catch or explain further
+            # from here; adb logcat at the moment of failure is required.
+            if not ever_rendered and widget_count and widget_count > 0 and push_ok:
+                rows.append(_diag_row(False, "الودجت مضافة والبيانات وصلتها بنجاح، لكن Android لم يستدعِ provideGlance ولو مرة واحدة — أي أن العطل يقع في طبقة أعلى من الكود الذي عولج في 0.8.3/0.8.4 (داخل آلية جلسة Glance نفسها قبل الوصول لهذا الملف). لا يمكن تشخيصه أكثر من هنا؛ الخطوة التالية الوحيدة المفيدة هي adb logcat وقت ظهور \"يتعذّر عرض المحتوى\" فعليًا على الشاشة."))
 
             snapshot = diag.get("last_snapshot_json")
             if snapshot:
