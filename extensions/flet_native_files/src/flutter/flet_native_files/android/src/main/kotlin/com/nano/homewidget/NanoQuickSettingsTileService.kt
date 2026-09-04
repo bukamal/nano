@@ -40,7 +40,19 @@ class NanoQuickSettingsTileService : TileService() {
 
     override fun onClick() {
         super.onClick()
-        val launchIntent = Intent(this, mainActivityClass(this)).apply {
+        // mainActivityClass() throws if it can't resolve the generated
+        // app's launcher Activity by name (see its own doc comment in
+        // NanoGlanceWidget.kt). A tile tap is user-initiated and not on any
+        // hot rendering path like the widget is, so an uncaught exception
+        // here would just crash the System UI process's tile interaction --
+        // still worth swallowing rather than letting a resolution failure
+        // surface as a crash instead of a silent no-op tap.
+        val activityClass = try {
+            mainActivityClass(this)
+        } catch (_: Exception) {
+            return
+        }
+        val launchIntent = Intent(this, activityClass).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {

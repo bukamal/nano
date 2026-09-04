@@ -52,37 +52,71 @@ class NanoGlanceWidget : GlanceAppWidget() {
         // identical and avoids the inliner entirely.
         val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, id)
         provideContent {
-            val data = try {
-                JSONObject(prefs[KEY_SNAPSHOT] ?: "{}")
-            } catch (_: Exception) {
-                JSONObject()
-            }
-            val salesToday = data.optDouble("sales_today", 0.0)
-            val cashBalance = data.optDouble("cash_balance", 0.0)
-            val overdueCount = data.optInt("overdue_count", 0)
-            val lowStockCount = data.optInt("low_stock_count", 0)
+            try {
+                val data = try {
+                    JSONObject(prefs[KEY_SNAPSHOT] ?: "{}")
+                } catch (_: Exception) {
+                    JSONObject()
+                }
+                val salesToday = data.optDouble("sales_today", 0.0)
+                val cashBalance = data.optDouble("cash_balance", 0.0)
+                val overdueCount = data.optInt("overdue_count", 0)
+                val lowStockCount = data.optInt("low_stock_count", 0)
 
-            Column(
-                modifier = GlanceModifier
-                    .fillMaxSize()
-                    .padding(12.dp)
-                    .clickable(actionStartActivity(activity = mainActivityClass(context)))
-            ) {
-                Text("Nano | نانو", style = TextStyle(fontWeight = FontWeight.Medium))
-                Spacer(modifier = GlanceModifier.height(8.dp))
-                Row(modifier = GlanceModifier.fillMaxWidth()) {
-                    Column(modifier = GlanceModifier.defaultWeight()) {
-                        Text("مبيعات اليوم", style = TextStyle(color = MutedColor))
-                        Text(formatMoney(salesToday), style = TextStyle(fontWeight = FontWeight.Medium))
+                // mainActivityClass() resolves the generated app's launcher
+                // Activity by name via reflection (see its own doc comment
+                // below for why). That reflection call runs on *every*
+                // provideGlance recomposition -- not lazily on tap -- so if
+                // it ever throws (ClassNotFoundException from a renamed/
+                // missing class, a SecurityException from a restricted
+                // ClassLoader, etc.) it previously took the whole
+                // `provideContent` block down with it. An uncaught
+                // exception here is exactly what makes Android fall back to
+                // its generic "يتعذّر عرض المحتوى" / "Couldn't load widget"
+                // placeholder -- indistinguishable from a real crash, and
+                // it would repeat identically on every recomposition
+                // (periodic tick, app-open push, or a fresh delete +
+                // re-add), which matches a failure that persists across
+                // re-adding the widget rather than a one-off stale bind.
+                // Losing the tap-to-open shortcut is a far better outcome
+                // than losing the entire widget, so this degrades instead
+                // of propagating.
+                val baseModifier = GlanceModifier.fillMaxSize().padding(12.dp)
+                val modifier = try {
+                    baseModifier.clickable(actionStartActivity(activity = mainActivityClass(context)))
+                } catch (_: Exception) {
+                    baseModifier
+                }
+
+                Column(modifier = modifier) {
+                    Text("Nano | نانو", style = TextStyle(fontWeight = FontWeight.Medium))
+                    Spacer(modifier = GlanceModifier.height(8.dp))
+                    Row(modifier = GlanceModifier.fillMaxWidth()) {
+                        Column(modifier = GlanceModifier.defaultWeight()) {
+                            Text("مبيعات اليوم", style = TextStyle(color = MutedColor))
+                            Text(formatMoney(salesToday), style = TextStyle(fontWeight = FontWeight.Medium))
+                        }
+                        Column(modifier = GlanceModifier.defaultWeight()) {
+                            Text("رصيد الصندوق", style = TextStyle(color = MutedColor))
+                            Text(formatMoney(cashBalance), style = TextStyle(fontWeight = FontWeight.Medium))
+                        }
                     }
-                    Column(modifier = GlanceModifier.defaultWeight()) {
-                        Text("رصيد الصندوق", style = TextStyle(color = MutedColor))
-                        Text(formatMoney(cashBalance), style = TextStyle(fontWeight = FontWeight.Medium))
+                    if (overdueCount > 0 || lowStockCount > 0) {
+                        Spacer(modifier = GlanceModifier.height(6.dp))
+                        Text(alertLine(overdueCount, lowStockCount), style = TextStyle(color = WarningColor))
                     }
                 }
-                if (overdueCount > 0 || lowStockCount > 0) {
-                    Spacer(modifier = GlanceModifier.height(6.dp))
-                    Text(alertLine(overdueCount, lowStockCount), style = TextStyle(color = WarningColor))
+            } catch (error: Exception) {
+                // Absolute last resort. Anything unexpected here must still
+                // leave legible content on the home screen instead of
+                // Android's placeholder -- a widget that only ever shows
+                // "تعذّر تحميل الأرقام" is diagnosable and recoverable (open
+                // the app, wait for the next periodic tick); one that shows
+                // the system's opaque error is neither.
+                Column(modifier = GlanceModifier.fillMaxSize().padding(12.dp)) {
+                    Text("Nano | نانو", style = TextStyle(fontWeight = FontWeight.Medium))
+                    Spacer(modifier = GlanceModifier.height(8.dp))
+                    Text("تعذّر تحميل الأرقام، افتح التطبيق للتحديث", style = TextStyle(color = MutedColor))
                 }
             }
         }
@@ -99,8 +133,12 @@ class NanoGlanceWidget : GlanceAppWidget() {
 internal fun mainActivityClass(context: Context): Class<out Activity> =
     Class.forName("${context.packageName}.MainActivity") as Class<out Activity>
 
-private fun formatMoney(v: Double): String =
-    v.toLong().toString().reversed().chunked(3).joinToString(",").reversed()
+private fun formatMoney(v: Double): String {
+    val n = v.toLong()
+    val sign = if (n < 0) "-" else ""
+    val grouped = kotlin.math.abs(n).toString().reversed().chunked(3).joinToString(",").reversed()
+    return sign + grouped
+}
 
 private fun alertLine(overdue: Int, lowStock: Int): String = when {
     overdue > 0 && lowStock > 0 -> "$overdue ذمم متأخرة \u00b7 $lowStock صنف منخفض"
