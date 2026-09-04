@@ -12,7 +12,7 @@ import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.provideContent
-import androidx.glance.currentState
+import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
@@ -23,6 +23,7 @@ import androidx.glance.layout.padding
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import org.json.JSONObject
 
 /**
@@ -38,8 +39,19 @@ private val MutedColor = ColorProvider(day = androidx.compose.ui.graphics.Color(
 
 class NanoGlanceWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
+        // NOTE: deliberately NOT using the `currentState<Preferences>()`
+        // composable here. That helper is `inline fun <reified T>`, and the
+        // Kotlin 1.9.22 JVM (K1) backend has a known bug inlining reified
+        // Compose/Glance functions pulled from a precompiled AAR: the
+        // release build crashes with "Internal compiler error: Couldn't
+        // inline method call ... couldn't find inline method
+        // Landroidx/glance/CompositionLocalsKt;.currentState()" in
+        // :flet_native_files:compileReleaseKotlin. getAppWidgetState() is a
+        // plain (non-inline) suspend function that reads the exact same
+        // PreferencesGlanceStateDefinition state, so this is behaviourally
+        // identical and avoids the inliner entirely.
+        val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, id)
         provideContent {
-            val prefs = currentState<Preferences>()
             val data = try {
                 JSONObject(prefs[KEY_SNAPSHOT] ?: "{}")
             } catch (_: Exception) {
