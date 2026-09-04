@@ -1,0 +1,85 @@
+--- /tmp/orig/src/nano_offline/services/document_service.py	2026-09-03 08:23:08.000000000 +0000
++++ /home/claude/work/src/nano_offline/services/document_service.py	2026-09-03 22:31:07.439571723 +0000
+@@ -36,8 +36,29 @@
+         with self.db.connect() as conn:
+             return {str(r["key"]): str(r["value"]) for r in conn.execute("SELECT key,value FROM settings").fetchall()}
+ 
++    def _money_parts(self, value: float | int | None, inv: dict | None = None) -> tuple[str, str]:
++        """Return ``(amount_text, symbol)`` for a stored USD amount, at whichever
++        rate/symbol applies (see :meth:`_money`), with no formatting glue between
++        them -- the caller decides how to lay the two out.
++        """
++        if inv is not None and inv.get("invoice_exchange_rate") is not None:
++            rate = float(inv["invoice_exchange_rate"])
++            symbol = inv.get("invoice_currency_symbol") or currency.DEFAULT_DISPLAY_SYMBOL
++            decimals = 2 if (inv.get("invoice_currency_code") == currency.DISPLAY_CURRENCY_USD) else 0
++            amount_text = currency.format_amount(value, rate=rate, symbol=symbol, decimals=decimals, with_symbol=False)
++        else:
++            settings = self._settings()
++            symbol = currency.get_display_symbol(settings)
++            amount_text = currency.format_amount(value, settings, with_symbol=False)
++        return amount_text, symbol
++
++    def _money_text(self, value: float | int | None, inv: dict | None = None) -> str:
++        """Plain "amount symbol" text, for contexts that can't hold HTML (e.g. QR payloads)."""
++        amount_text, symbol = self._money_parts(value, inv)
++        return f"{amount_text} {symbol}"
++
+     def _money(self, value: float | int | None, inv: dict | None = None) -> str:
+-        """Format a stored USD amount for printing.
++        """Format a stored USD amount for printing, as HTML.
+ 
+         When ``inv`` is given and carries a historical rate/currency snapshot
+         (see ``invoice_exchange_rate`` on the ``invoices`` table), the amount
+@@ -46,15 +67,21 @@
+         invoice never silently re-prices itself after the admin updates the
+         exchange rate. Falls back to the live settings for documents with no
+         such snapshot (statements, barcode labels, legacy rows).
++
++        The amount and the currency symbol are wrapped in their own ``<span>``
++        elements inside an inline-flex ``.money-wrap`` container instead of
++        being written as one plain "amount symbol" text run. Some print
++        layouts (three-up totals rows in particular) mix this right-to-left
++        page with left-to-right amount text closely enough that the browser's
++        automatic bidi reordering places the symbol on the wrong side of the
++        number -- flex layout order doesn't depend on that reordering, so the
++        symbol always lands after the amount as intended.
+         """
+-        if inv is not None and inv.get("invoice_exchange_rate") is not None:
+-            return currency.format_amount(
+-                value,
+-                rate=float(inv["invoice_exchange_rate"]),
+-                symbol=inv.get("invoice_currency_symbol") or currency.DEFAULT_DISPLAY_SYMBOL,
+-                decimals=2 if (inv.get("invoice_currency_code") == currency.DISPLAY_CURRENCY_USD) else 0,
+-            )
+-        return currency.format_amount(value, self._settings())
++        amount_text, symbol = self._money_parts(value, inv)
++        return (
++            '<span class="money-wrap"><span class="amt">'
++            f'{amount_text}</span><span class="sym">{self._e(symbol)}</span></span>'
++        )
+ 
+     @staticmethod
+     def _qty(value: float | int | None) -> str:
+@@ -174,7 +201,11 @@
+ td {{ padding:7px 6px; border-bottom:1px solid #E9EEF3; vertical-align:top; font-size:11.5px; }}
+ tbody tr:nth-child(even) td {{ background:#F8FAFC; }}
+ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
+-.money {{ direction:ltr; unicode-bidi:isolate; white-space:nowrap; text-align:end; font-variant-numeric:tabular-nums; }}
++.money {{ white-space:nowrap; text-align:end; }}
++.money-wrap {{
++  display:inline-flex; align-items:baseline; gap:3px;
++  direction:ltr; unicode-bidi:isolate; white-space:nowrap; font-variant-numeric:tabular-nums;
++}}
+ .note {{ border:1px solid #BFD5E8; background:#EEF6FC; border-radius:10px; padding:10px 12px; margin-top:14px; font-size:11.5px; }}
+ .note b {{ color:{accent_deep}; }}
+ .footer {{
+@@ -456,7 +487,7 @@
+             if price is not None:
+                 price_html = f'<div class="lbl-price">{self._money(price)}</div>'
+                 if include_price_qr:
+-                    qr_text = f"{label.get('name') or ''}\nالسعر: {self._money(price)}"
++                    qr_text = f"{label.get('name') or ''}\nالسعر: {self._money_text(price)}"
+                     price_qr = qr_svg(qr_text, size=60, level="M", quiet_zone=1, dark="#0F172A")
+                     price_qr_html = f'<div class="lbl-price-row">{price_html}<div class="lbl-price-qr">{price_qr}</div></div>'
+                 else:

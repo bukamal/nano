@@ -1,0 +1,160 @@
+name: Build Nano Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+env:
+  PYTHONUTF8: "1"
+  FLET_CLI_NO_RICH_OUTPUT: "1"
+  FLET_CLI_SKIP_FLUTTER_DOCTOR: "1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip "setuptools>=65" wheel
+          python -m pip install -e extensions/flet_native_files
+          python -m pip install -e .
+          python - <<'PY'
+          import flet, sys
+          print("Python:", sys.version)
+          print("Flet:", getattr(flet, "__version__", "unknown"))
+          PY
+
+      - name: Prepare Android SDK and accept licenses
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
+            echo "Android SDK root is not available."
+            echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
+            echo "ANDROID_HOME=${ANDROID_HOME:-<unset>}"
+            exit 1
+          fi
+
+          export ANDROID_HOME="$SDK_ROOT"
+          export ANDROID_SDK_ROOT="$SDK_ROOT"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+
+          SDKMANAGER=""
+          for candidate in \
+            "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "$SDK_ROOT/cmdline-tools/bin/sdkmanager" \
+            "$SDK_ROOT/tools/bin/sdkmanager"; do
+            if [ -x "$candidate" ]; then
+              SDKMANAGER="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager -perm -111 2>/dev/null | sort -V | tail -n 1 || true)"
+          fi
+
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "sdkmanager was not found under $SDK_ROOT"
+            find "$SDK_ROOT" -maxdepth 4 -name sdkmanager -print || true
+            exit 1
+          fi
+
+          echo "Using sdkmanager: $SDKMANAGER"
+
+          # Accept licenses before installing/verifying packages; sdkmanager can
+          # otherwise reject package installation before Flet even starts.
+          set +o pipefail
+          yes | "$SDKMANAGER" --licenses >/tmp/android-licenses.log 2>&1
+          LICENSE_RC=$?
+          set -o pipefail
+          if [ "$LICENSE_RC" -ne 0 ]; then
+            echo "sdkmanager --licenses returned $LICENSE_RC"
+            cat /tmp/android-licenses.log
+            exit "$LICENSE_RC"
+          fi
+
+          echo "Android SDK licenses accepted."
+          find "$SDK_ROOT/licenses" -maxdepth 1 -type f -print 2>/dev/null || true
+
+          # Flet 0.28.3 / Flutter 3.29.2 Android build prerequisites.
+          "$SDKMANAGER" --install \
+            "cmdline-tools;latest" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;34.0.0"
+
+          "$SDKMANAGER" --list_installed | grep -E 'platform-tools|platforms;android-35|build-tools;34.0.0|cmdline-tools' || true
+
+      - name: Quality gate
+        run: |
+          PYTHONPATH=src python tools/quality_gate.py
+
+      - name: Android release preflight
+        run: |
+          PYTHONPATH=src python tools/apk_release_preflight.py
+
+      - name: Build APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/flutter build/apk
+          rm -f flet-build.log
+
+          # --skip-flutter-doctor prevents Flet from spending many minutes
+          # re-running Flutter Doctor after an unrelated build failure. The
+          # complete first failure is preserved in flet-build.log instead.
+          flet build apk --verbose --clear-cache --skip-flutter-doctor \
+            --product "Nano | نانو" \
+            --org com.nano \
+            --build-number 14 \
+            --build-version 0.8.1 \
+            2>&1 | tee flet-build.log
+
+      - name: Verify native files extension registration
+        run: |
+          python tools/verify_flet_native_files_registration.py build/flutter
+
+      - name: Collect APK
+        run: |
+          APK_PATH=$(find build -name "*.apk" -type f | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK found"
+            find build -maxdepth 6 -type f || true
+            exit 1
+          fi
+          mkdir -p build/apk/release
+          cp "$APK_PATH" build/apk/release/nano-release.apk
+          ls -lh build/apk/release/nano-release.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nano-apk
+          path: build/apk/release/nano-release.apk
+
+      - name: Upload Flet build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nano-flet-build-log
+          path: flet-build.log
+          if-no-files-found: ignore

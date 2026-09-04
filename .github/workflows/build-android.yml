@@ -1,0 +1,39 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # NOTE: intentionally no ~/.pub-cache caching here. A cached pub-cache
+      # is a common source of the misleading
+      # "depends on <pkg> any which doesn't exist (authorization failed)"
+      # error from Dart's pub resolver -- a stale/partial cache entry gets
+      # restored and pub can't resolve against it. Each run starts clean;
+      # build_nano_apk.sh also retries with `dart pub cache repair` if the
+      # error still shows up (it's usually a transient pub.dev hiccup).
+
+      - name: Build APK
+        run: |
+          chmod +x build_nano_apk.sh
+          ./build_nano_apk.sh
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nano-release-apk
+          path: dist/nano-release.apk

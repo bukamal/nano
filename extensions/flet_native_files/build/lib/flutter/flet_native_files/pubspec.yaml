@@ -1,0 +1,72 @@
+name: flet_native_files
+description: Native file sharing, picking, print/PDF, background-notification and sound bridge for Nano.
+version: 0.1.7
+homepage: https://example.invalid/nano
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+  flutter: '>=3.16.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flet: 0.28.3
+  file_picker: 10.1.9
+  share_plus: ^10.1.4
+  cross_file: ^0.3.4+2
+  path_provider: ^2.1.5
+  printing: ^5.14.2
+  pdf: ^3.11.3
+  mobile_scanner: 6.0.10
+  # Added for the closed-app smart-notification check (PHASE9 follow-up):
+  # workmanager runs the periodic background isolate, flutter_local_notifications
+  # posts the actual system notification, and sqlite3/sqlite3_flutter_libs let
+  # that isolate read Nano's own database file directly (same file the app
+  # already writes -- see core/paths.database_path()) without any plugin
+  # channel back to a Python side that isn't running while the app is closed.
+  workmanager: ^0.6.0
+  flutter_local_notifications: ^18.0.1
+  sqlite3: ^2.4.6
+  sqlite3_flutter_libs: ^0.5.24
+  # App-wide sound-cue system (core/sound.py): replaces the earlier
+  # flet-audio==0.1.0 dependency entirely. flet-audio wrapped a single
+  # reused fta.Audio *Flet control* per tone, which has no way to restart
+  # itself once it reaches end-of-track (see the old core/sound.py
+  # docstring history), needed an explicit [tool.flet.flutter] declaration
+  # in pyproject.toml just to make it into the built APK (easy to forget --
+  # see https://github.com/flet-dev/flet/issues/2663), and was pinned to a
+  # dead 0.1.0 release because flet-audio 0.80.0+ ships in lockstep with
+  # core flet and cannot resolve against this project's flet==0.28.3.
+  #
+  # audioplayers has none of that: it's an actively maintained, mainstream
+  # package (not a thin Flet-specific wrapper) with an `AudioPool` class
+  # built for exactly this "short UI sound, fired repeatedly/rapidly"
+  # scenario (see sound_pool.dart) -- each tone gets its own pool of
+  # pre-loaded native players, so back-to-back plays (e.g. rapid barcode
+  # scans in stocktake) never hit the old "plays once then goes silent"
+  # bug. Being a normal Flutter plugin declared in *this* extension's own
+  # pubspec.yaml, `flet build apk` picks it up automatically -- no
+  # pyproject.toml [tool.flet.flutter] workaround needed at all.
+  audioplayers: '>=6.6.0 <6.7.0'
+
+# The four bundled sound-cue tones (see sound_pool.dart / core/sound.py),
+# copied into this package's own assets/sounds/ folder and declared here.
+#
+# Root cause of "sound never plays, admin diagnostics shows 'Unable to
+# load asset: assets/sounds/<x>.wav' for every tone even though the files
+# genuinely exist at src/assets/sounds/ on the Python side": those files
+# are Flet-managed assets, served through Flet's own asset mechanism to
+# Flet controls (ft.Image, fonts, etc.) -- they were never added to
+# Flutter's own native asset bundle (the pubspec.yaml `assets:` list),
+# which is the only thing audioplayers' AssetSource/rootBundle can see.
+# No pyproject.toml [tool.flet.app] assets_dir setting reaches this
+# either, since that's the same Flet-managed mechanism, not a Flutter
+# one. Bundling the wav files directly inside this already-registered
+# Flutter plugin (see kSoundAssetPaths in sound_pool.dart, now pointing
+# at packages/flet_native_files/assets/sounds/<x>.wav) sidesteps that
+# gap entirely -- `flet build apk` packages a normal plugin's declared
+# assets automatically, same as it already does for the plugin's Dart
+# code, no separate Python-side asset wiring required.
+flutter:
+  assets:
+    - assets/sounds/
