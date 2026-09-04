@@ -37,6 +37,18 @@ KIND_SAVE_KEY = "sound_kind_save_enabled"
 # want the two audibly distinct, since one is routine and the other is
 # irreversible) with its own on/off switch, same reasoning as scan/save.
 KIND_DELETE_KEY = "sound_kind_delete_enabled"
+# Three more event-specific kinds layered on top of scan/save/delete --
+# same reasoning, own on/off switch each. 'login' fires once a session
+# actually starts (login_view.py); 'notify' fires when a genuinely new
+# alert lands in the notification center (low stock, backup due,
+# license, receivables, insights -- see notifications_view.py's
+# refresh_badge()), not on every badge refresh; 'barcode_error' fires on
+# a scan that matched nothing, split off from the generic 'error' tone
+# so a cashier scanning fast hears "no match" as its own short, distinct
+# cue rather than the same tone any other failure produces.
+KIND_LOGIN_KEY = "sound_kind_login_enabled"
+KIND_NOTIFY_KEY = "sound_kind_notify_enabled"
+KIND_BARCODE_ERROR_KEY = "sound_kind_barcode_error_enabled"
 
 DEFAULT_ENABLED = True
 DEFAULT_VOLUME = 70  # percent, 0-100
@@ -56,6 +68,15 @@ DEFAULT_KIND_SAVE = True
 # Default on, same reasoning as scan/save: this update specifically added
 # a distinct tone for delete actions, so a fresh install should hear it.
 DEFAULT_KIND_DELETE = True
+# All three default on for the same reason as scan/save/delete above: a
+# fresh install should actually hear the tones this update specifically
+# added distinct assets for. barcode_error in particular should not be
+# silent by default -- it's the audible cue a cashier relies on to notice
+# a failed scan without looking at the screen, same role 'scan' plays for
+# a successful one.
+DEFAULT_KIND_LOGIN = True
+DEFAULT_KIND_NOTIFY = True
+DEFAULT_KIND_BARCODE_ERROR = True
 
 VALID_VOLUME_RANGE = (0, 100)
 
@@ -67,6 +88,9 @@ _KIND_KEYS = {
     "scan": (KIND_SCAN_KEY, DEFAULT_KIND_SCAN),
     "save": (KIND_SAVE_KEY, DEFAULT_KIND_SAVE),
     "delete": (KIND_DELETE_KEY, DEFAULT_KIND_DELETE),
+    "login": (KIND_LOGIN_KEY, DEFAULT_KIND_LOGIN),
+    "notify": (KIND_NOTIFY_KEY, DEFAULT_KIND_NOTIFY),
+    "barcode_error": (KIND_BARCODE_ERROR_KEY, DEFAULT_KIND_BARCODE_ERROR),
 }
 
 
@@ -106,9 +130,11 @@ __all__ = [
     "ENABLED_KEY", "VOLUME_KEY",
     "KIND_SUCCESS_KEY", "KIND_ERROR_KEY", "KIND_WARNING_KEY", "KIND_INFO_KEY",
     "KIND_SCAN_KEY", "KIND_SAVE_KEY", "KIND_DELETE_KEY",
+    "KIND_LOGIN_KEY", "KIND_NOTIFY_KEY", "KIND_BARCODE_ERROR_KEY",
     "DEFAULT_ENABLED", "DEFAULT_VOLUME",
     "DEFAULT_KIND_SUCCESS", "DEFAULT_KIND_ERROR", "DEFAULT_KIND_WARNING", "DEFAULT_KIND_INFO",
     "DEFAULT_KIND_SCAN", "DEFAULT_KIND_SAVE", "DEFAULT_KIND_DELETE",
+    "DEFAULT_KIND_LOGIN", "DEFAULT_KIND_NOTIFY", "DEFAULT_KIND_BARCODE_ERROR",
     "VALID_VOLUME_RANGE",
     "sound_enabled", "sound_volume_percent", "sound_volume", "kind_enabled",
 ]

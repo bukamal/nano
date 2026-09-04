@@ -98,7 +98,10 @@ import flet as ft
 
 from nano_offline.core import sound_settings
 
-SoundKind = Literal["success", "error", "warning", "info", "scan", "save", "delete"]
+SoundKind = Literal[
+    "success", "error", "warning", "info", "scan", "save", "delete",
+    "login", "notify", "barcode_error",
+]
 
 # Kept here (rather than only in sound_pool.dart) as the single source of
 # truth Python-side code and the smoke test can check against, and so a
@@ -106,7 +109,20 @@ SoundKind = Literal["success", "error", "warning", "info", "scan", "save", "dele
 # in sync with kSoundAssetPaths' keys in
 # extensions/flet_native_files/.../lib/src/sound_pool.dart, which is what
 # actually resolves these to "sounds/<kind>.wav" under src/assets/.
-_SOUND_KINDS: frozenset[str] = frozenset({"success", "error", "warning", "info", "scan", "save", "delete"})
+#
+# Three more event-specific kinds on top of the original seven (see this
+# module's history section above for success/error/warning/info/scan/save,
+# and SOUND_BARCODE_DELETE_FIX_AR.md for delete): 'login' (a session
+# actually starting -- login_view.py's on_success paths), 'notify' (a
+# genuinely new alert landing in the notification center -- low stock,
+# backup due, license, receivables, insights; see
+# notifications_view.py's refresh_badge()), and 'barcode_error' (a scan
+# that matched nothing -- split off from the generic 'error' tone so a
+# cashier mid-scan hears "no match" as a distinct, shorter cue rather than
+# the same tone a database/validation failure would produce).
+_SOUND_KINDS: frozenset[str] = frozenset(
+    {"success", "error", "warning", "info", "scan", "save", "delete", "login", "notify", "barcode_error"}
+)
 
 _CTX_ATTR = "_nano_ctx"
 _NATIVE_FILES_ATTR = "_nano_native_files"

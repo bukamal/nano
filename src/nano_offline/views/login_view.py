@@ -3,6 +3,7 @@ from __future__ import annotations
 import flet as ft
 
 from nano_offline.core.toast import toast
+from nano_offline.core import sound as sound_engine
 
 from nano_offline.components import PatternPad, SelectAllTextField
 from nano_offline.version import APP_VERSION
@@ -234,6 +235,7 @@ class LoginGate:
                     toast(self.page, str(exc), kind="error", duration=1800)
                     return False
                 self.page.close(sheet)
+                sound_engine.play(self.page, "login")
                 self.on_success()
                 return True
 
@@ -256,6 +258,7 @@ class LoginGate:
                     toast(self.page, str(exc), kind="error", duration=1800)
                     return
                 self.page.close(sheet)
+                sound_engine.play(self.page, "login")
                 self.on_success()
 
             pad = PatternPad(on_complete=attempt_pattern)
@@ -438,6 +441,7 @@ class LoginGate:
                 remember_login=bool(self.stay_signed_switch.value),
                 remember_username=bool(self.remember_name_switch.value),
             )
+            sound_engine.play(self.page, "login")
             self.on_success()
         except Exception as exc:
             self._set_busy(False)

@@ -990,6 +990,18 @@ class AdminCenter:
             label="صوت عند حذف فاتورة/مادة/طرف (نغمة مخصصة منخفضة)",
             value=sound_settings.kind_enabled(sset, "delete"),
         )
+        sound_kind_login_switch = ft.Switch(
+            label="صوت عند تسجيل الدخول (نغمة ترحيب)",
+            value=sound_settings.kind_enabled(sset, "login"),
+        )
+        sound_kind_notify_switch = ft.Switch(
+            label="صوت عند وصول تنبيه جديد لمركز الإشعارات",
+            value=sound_settings.kind_enabled(sset, "notify"),
+        )
+        sound_kind_barcode_error_switch = ft.Switch(
+            label="صوت عند مسح باركود غير موجود (نغمة مختلفة عن الخطأ العام)",
+            value=sound_settings.kind_enabled(sset, "barcode_error"),
+        )
 
         def preview_sound(kind: str):
             # Plays directly at whatever the volume slider is set to right
@@ -1013,6 +1025,9 @@ class AdminCenter:
                     sound_settings.KIND_SCAN_KEY: "1" if sound_kind_scan_switch.value else "0",
                     sound_settings.KIND_SAVE_KEY: "1" if sound_kind_save_switch.value else "0",
                     sound_settings.KIND_DELETE_KEY: "1" if sound_kind_delete_switch.value else "0",
+                    sound_settings.KIND_LOGIN_KEY: "1" if sound_kind_login_switch.value else "0",
+                    sound_settings.KIND_NOTIFY_KEY: "1" if sound_kind_notify_switch.value else "0",
+                    sound_settings.KIND_BARCODE_ERROR_KEY: "1" if sound_kind_barcode_error_switch.value else "0",
                 })
                 self._notify("تم حفظ إعدادات الصوت — تُطبَّق فورًا في كل أنحاء التطبيق")
                 self.page.update()
@@ -1029,6 +1044,7 @@ class AdminCenter:
         _KIND_LABELS_AR = {
             "success": "نجاح", "error": "خطأ", "warning": "تنبيه", "info": "عادي",
             "scan": "مسح باركود", "save": "حفظ فاتورة/دفعة", "delete": "حذف",
+            "login": "تسجيل دخول", "notify": "تنبيه جديد بمركز الإشعارات", "barcode_error": "باركود غير موجود",
         }
 
         def _diag_row(ok: bool | None, text: str) -> ft.Row:
@@ -1514,9 +1530,10 @@ class AdminCenter:
                 [
                     ft.Text(
                         "نغمات قصيرة تصاحب كل رسالة نجاح/خطأ/تنبيه في التطبيق تلقائيًا "
-                        "(نقطة البيع، الجرد، الفواتير، تسجيل الدخول، إلخ)، بالإضافة إلى ثلاث نغمات "
-                        "مخصصة لأكثر الأحداث تكرارًا: مسح الباركود، حفظ الفاتورة/الدفعة، وحذف "
-                        "فاتورة/مادة/طرف — تُطبَّق فورًا دون إعادة تشغيل.",
+                        "(نقطة البيع، الجرد، الفواتير، تسجيل الدخول، إلخ)، بالإضافة إلى ست نغمات "
+                        "مخصصة لأكثر الأحداث تكرارًا: مسح الباركود، حفظ الفاتورة/الدفعة، حذف "
+                        "فاتورة/مادة/طرف، تسجيل الدخول، تنبيه جديد بمركز الإشعارات، وباركود غير "
+                        "موجود — تُطبَّق فورًا دون إعادة تشغيل.",
                         size=12, color=Colors.TEXT_SECONDARY,
                     ),
                     sound_enabled_switch,
@@ -1533,6 +1550,9 @@ class AdminCenter:
                     sound_kind_scan_switch,
                     sound_kind_save_switch,
                     sound_kind_delete_switch,
+                    sound_kind_login_switch,
+                    sound_kind_notify_switch,
+                    sound_kind_barcode_error_switch,
                     ft.Divider(height=1, color=Colors.BACKGROUND_ALT),
                     ft.Text("معاينة", size=12, weight=ft.FontWeight.W_600),
                     ft.Row(
@@ -1544,6 +1564,9 @@ class AdminCenter:
                             ft.OutlinedButton("مسح باركود", icon=ft.Icons.QR_CODE_SCANNER, on_click=preview_sound("scan")),
                             ft.OutlinedButton("حفظ", icon=ft.Icons.SAVE_OUTLINED, on_click=preview_sound("save")),
                             ft.OutlinedButton("حذف", icon=ft.Icons.DELETE_OUTLINE, on_click=preview_sound("delete")),
+                            ft.OutlinedButton("تسجيل دخول", icon=ft.Icons.LOGIN_ROUNDED, on_click=preview_sound("login")),
+                            ft.OutlinedButton("تنبيه جديد", icon=ft.Icons.NOTIFICATIONS_ACTIVE_OUTLINED, on_click=preview_sound("notify")),
+                            ft.OutlinedButton("باركود غير موجود", icon=ft.Icons.QR_CODE_2_OUTLINED, on_click=preview_sound("barcode_error")),
                         ],
                         spacing=8, wrap=True,
                     ),

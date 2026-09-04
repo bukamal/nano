@@ -6,6 +6,7 @@ from typing import Callable
 import flet as ft
 
 from nano_offline.core.toast import toast
+from nano_offline.core import sound as sound_engine
 
 from nano_offline.components import SelectAllTextField
 from nano_offline.components.buttons import header_close_button
@@ -62,6 +63,15 @@ class NotificationCenter:
             alignment=ft.alignment.center,
             content=ft.Text("", size=9, weight=ft.FontWeight.BOLD, color=Colors.WHITE),
         )
+        # Tracks the last unread total refresh_badge() saw, so the 'notify'
+        # tone only fires when a genuinely *new* alert has landed -- not on
+        # every refresh_badge() call, which also fires on every ordinary
+        # tab navigation in main.py (would otherwise ding on every click).
+        # None means "not yet observed this session" -- the very first
+        # refresh just establishes the baseline silently, since whatever
+        # is unread at that point isn't new, it's just however many alerts
+        # already existed before this screen/session started watching.
+        self._last_unread_total: int | None = None
 
     def _set_header(self, title: str, subtitle: str = "") -> None:
         if self.on_title_change:
@@ -99,6 +109,15 @@ class NotificationCenter:
         except Exception:
             summary = {"total": 0, "urgent": 0, "warning": 0, "info": 0}
         total = int(summary.get("total") or 0)
+        # Only the *first* increase over what we last saw counts as "a new
+        # alert arrived" -- a rule going from unmatched to matched and
+        # generating a fresh row bumps total up; the admin reading/
+        # dismissing one bumps it back down, which should stay silent, not
+        # ding on the way down too. See _last_unread_total's docstring for
+        # why the very first call in a session never plays anything.
+        if self._last_unread_total is not None and total > self._last_unread_total:
+            sound_engine.play(self.page, "notify")
+        self._last_unread_total = total
         self.badge.visible = total > 0
         if summary.get("urgent"):
             self.badge.bgcolor = Colors.DANGER

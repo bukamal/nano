@@ -220,7 +220,7 @@ class StocktakeCenter:
                 # audible cue at all that the scan failed, only a silent
                 # card update easy to miss without looking at the screen.
                 if barcode_settings.stocktake_sound_enabled(ctx.settings):
-                    self.notify("لا توجد مادة بهذا الباركود", kind="error", sound_kind="error")
+                    self.notify("لا توجد مادة بهذا الباركود", kind="error", sound_kind="barcode_error")
             last_scan_card.padding = 12
             last_scan_card.border_radius = 14
             last_scan_card.visible = True

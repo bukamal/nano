@@ -1195,7 +1195,7 @@ class InvoiceCenter:
                 return
             found = self.ctx.items.find_by_barcode(code)
             if not found:
-                self.notify("لا توجد مادة بهذا الباركود", kind="error", sound_kind="error")
+                self.notify("لا توجد مادة بهذا الباركود", kind="error", sound_kind="barcode_error")
                 return
             # Same audible/visual scan feedback as the POS screen's barcode
             # path (core/sound.py's dedicated "scan" tone, gated by the

@@ -15,6 +15,7 @@ from nano_offline.core.theme import Colors, IconSize, LazyPalette, Radius, Shado
 from nano_offline.core import currency
 from nano_offline.core import barcode_settings
 from nano_offline.core import pos_settings
+from nano_offline.core import sound as sound_engine
 
 # A small fixed palette so category chips get a stable, distinguishable
 # color per category without needing a "color" column on the categories
@@ -1041,9 +1042,15 @@ class POSCenter:
         self._add_item(item_id, qty_delta)
 
     def _offer_create_item(self, code: str) -> None:
+        # A scan that matched nothing gets its own dedicated tone
+        # (sound_kind="barcode_error") rather than the generic 'error'
+        # chime -- distinct and short enough that a cashier scanning fast
+        # immediately reads it as "no match" instead of "something broke",
+        # whether or not this ends in the "create item?" dialog below.
         if self.on_create_item is None:
-            self.notify("لا توجد مادة بهذا الباركود")
+            self.notify("لا توجد مادة بهذا الباركود", kind="error", sound_kind="barcode_error")
             return
+        sound_engine.play(self.page, "barcode_error")
         dialog = ft.AlertDialog(modal=True, title=ft.Text("لا توجد مادة بهذا الباركود"))
 
         def create(_=None) -> None:

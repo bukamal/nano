@@ -26,6 +26,9 @@ with tempfile.TemporaryDirectory(prefix="nano-sound-") as td:
     assert sound_settings.kind_enabled(settings, "scan") is True
     assert sound_settings.kind_enabled(settings, "save") is True
     assert sound_settings.kind_enabled(settings, "delete") is True
+    assert sound_settings.kind_enabled(settings, "login") is True
+    assert sound_settings.kind_enabled(settings, "notify") is True
+    assert sound_settings.kind_enabled(settings, "barcode_error") is True
     # An unknown kind is never enabled -- fails closed, not open.
     assert sound_settings.kind_enabled(settings, "bogus") is False
 
@@ -56,11 +59,14 @@ with tempfile.TemporaryDirectory(prefix="nano-sound-") as td:
     settings.set(sound_settings.VOLUME_KEY, "not-a-number")
     assert sound_settings.sound_volume_percent(settings) == sound_settings.DEFAULT_VOLUME
 
-    # The six bundled tone files core/sound.py references by relative
+    # The ten bundled tone files core/sound.py references by relative
     # path must actually exist and be non-empty WAV data, or the whole
     # feature silently does nothing on a real device.
     sounds_dir = ROOT / "src" / "assets" / "sounds"
-    for name in ("success.wav", "error.wav", "warning.wav", "info.wav", "scan.wav", "save.wav", "delete.wav"):
+    for name in (
+        "success.wav", "error.wav", "warning.wav", "info.wav", "scan.wav", "save.wav", "delete.wav",
+        "login.wav", "notify.wav", "barcode_error.wav",
+    ):
         path = sounds_dir / name
         assert path.is_file(), f"missing sound asset: {path}"
         data = path.read_bytes()
@@ -80,7 +86,9 @@ with tempfile.TemporaryDirectory(prefix="nano-sound-") as td:
     except ImportError as exc:
         print(f"sound_system_smoke_test: skipped core/sound.py import check ({exc})")
     else:
-        assert sound_engine._SOUND_KINDS == frozenset({"success", "error", "warning", "info", "scan", "save", "delete"})
+        assert sound_engine._SOUND_KINDS == frozenset(
+            {"success", "error", "warning", "info", "scan", "save", "delete", "login", "notify", "barcode_error"}
+        )
         # attach_context()'s signature changed when sound playback moved off
         # flet-audio onto the native AudioPool bridge (see sound.py's module
         # docstring) -- it now takes the shared NativeFiles instance as a
@@ -109,24 +117,27 @@ with tempfile.TemporaryDirectory(prefix="nano-sound-") as td:
     )
     assert sound_pool_dart.is_file(), f"missing native sound bridge: {sound_pool_dart}"
     dart_source = sound_pool_dart.read_text(encoding="utf-8")
-    for kind in ("success", "error", "warning", "info", "scan", "save", "delete"):
+    for kind in ("success", "error", "warning", "info", "scan", "save", "delete", "login", "notify", "barcode_error"):
         expected_entry = f"'{kind}': 'packages/flet_native_files/assets/sounds/{kind}.wav'"
         assert expected_entry in dart_source, (
             f"sound_pool.dart is missing or has changed the mapping for {kind!r} "
             f"(expected to find: {expected_entry!r})"
         )
 
-    # The two new event-specific tones must be physically bundled in the
-    # Flutter package's own assets/ dir too (a separate copy from
-    # src/assets/sounds/ -- see pubspec.yaml's "assets: - assets/sounds/"
-    # declaration), or ensureSoundPoolsLoaded() fails to load them on a
-    # real build even though the Python-side asset and the Dart mapping
-    # both look correct.
+    # The five newest event-specific tones (scan/save/delete/login/notify/
+    # barcode_error) must be physically bundled in the Flutter package's
+    # own assets/ dir too (a separate copy from src/assets/sounds/ -- see
+    # pubspec.yaml's "assets: - assets/sounds/" declaration), or
+    # ensureSoundPoolsLoaded() fails to load them on a real build even
+    # though the Python-side asset and the Dart mapping both look correct.
     flutter_sounds_dir = (
         ROOT / "extensions" / "flet_native_files" / "src" / "flutter" / "flet_native_files"
         / "assets" / "sounds"
     )
-    for name in ("success.wav", "error.wav", "warning.wav", "info.wav", "scan.wav", "save.wav", "delete.wav"):
+    for name in (
+        "success.wav", "error.wav", "warning.wav", "info.wav", "scan.wav", "save.wav", "delete.wav",
+        "login.wav", "notify.wav", "barcode_error.wav",
+    ):
         path = flutter_sounds_dir / name
         assert path.is_file(), f"missing bundled Flutter sound asset: {path}"
 
