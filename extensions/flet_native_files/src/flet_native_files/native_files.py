@@ -327,6 +327,31 @@ class NativeFiles(Control):
             subject=filename if filename.lower().endswith(".pdf") else f"{filename}.pdf",
         )
 
+    async def diagnose_home_widget(self) -> dict | None:
+        """Backs the admin "تشخيص ودجت الشاشة الرئيسية" button (see views/admin_view.py).
+
+        Same not-best-effort contract as diagnose_sound(): a failure here
+        (older APK predating this method, no native bridge, malformed
+        response, non-Android platform) is itself meaningful diagnostic
+        information, so it comes back as a dict with a descriptive key for
+        the caller to render as its own line rather than being swallowed.
+        """
+        try:
+            raw = await self.invoke_method_async(
+                "diagnose_home_widget",
+                {},
+                wait_for_result=True,
+                wait_timeout=_QUICK_TIMEOUT,
+            )
+        except Exception as exc:
+            return {"bridge_error": repr(exc)}
+        if raw is None or str(raw).startswith("error:"):
+            return {"bridge_error": str(raw)}
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError) as exc:
+            return {"bridge_error": f"malformed response: {exc!r} raw={raw!r}"}
+
     async def push_home_widget(self, snapshot: dict) -> None:
         """Immediate home-screen-widget refresh (PHASE10), app-open path.
 

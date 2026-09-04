@@ -26,6 +26,7 @@ from nano_offline.core import sound_settings
 from nano_offline.core import sound as sound_engine
 from nano_offline.core import barcode_quality
 from nano_offline.core.barcode128 import code128b_bars
+from nano_offline.core.home_widget import home_widget_snapshot
 
 
 class AdminCenter:
@@ -1117,6 +1118,109 @@ class AdminCenter:
             self.page.open(diag_dialog)
             await refresh_diagnosis(body, False)
 
+        # --- Home screen widget diagnostics -------------------------------
+        # Walks the same failure points documented in PHASE10_HOME_WIDGET_GLANCE_AR.md
+        # and the FIX_0.8.2/0.8.3 notes: manifest/receiver issues can't be
+        # inspected from inside a running APK, but everything the *running*
+        # widget code can see -- whether it's currently placed at all, the
+        # last snapshot it read, and the exact exception (if any) from the
+        # DataStore read or from Compose/Glance rendering -- is captured by
+        # NanoWidgetDiagnostics on the native side and surfaced here, so an
+        # admin stuck on "الودجت تعرض يتعذر عرض المحتوى" gets a concrete
+        # reason instead of guessing.
+        def _fmt_widget_ts(ms) -> str:
+            try:
+                ms_int = int(ms)
+            except (TypeError, ValueError):
+                return "لم يحدث بعد"
+            if ms_int <= 0:
+                return "لم يحدث بعد"
+            return datetime.fromtimestamp(ms_int / 1000).strftime("%Y-%m-%d %H:%M:%S")
+
+        async def build_widget_diagnosis() -> list[ft.Control]:
+            rows: list[ft.Control] = []
+            if self.native_files is None:
+                rows.append(_diag_row(False, "جسر التشغيل الأصلي (native bridge) غير متاح في هذا البناء — لا يمكن فحص الودجت من هنا (بناء سطح مكتب/ويب، أو APK أقدم من PHASE10)."))
+                return rows
+
+            diag = await self.native_files.diagnose_home_widget()
+            if not diag or diag.get("bridge_error") is not None:
+                rows.append(_diag_row(False, "تعذّر الوصول لجسر الودجت: " + str((diag or {}).get("bridge_error") or "لا استجابة — قد تكون تُجرّب نسخة APK أقدم من PHASE10 لا تحتوي هذه الميزة بعد.")))
+                return rows
+            if diag.get("unsupported_platform") is not None:
+                rows.append(_diag_row(None, f"الودجت ميزة أندرويد فقط، والمنصة الحالية: {diag.get('unsupported_platform')}."))
+                return rows
+
+            widget_count = diag.get("widget_count", -1)
+            if widget_count == -1:
+                rows.append(_diag_row(False, "تعذّر معرفة عدد الودجت المضافة فعليًا للشاشة الرئيسية."))
+            elif widget_count == 0:
+                rows.append(_diag_row(None, "لا توجد ودجت \"Nano | نانو\" مضافة للشاشة الرئيسية حاليًا — أضفها أولًا من قائمة ودجت أندرويد قبل تفسير أي نتيجة أخرى هنا."))
+            else:
+                rows.append(_diag_row(True, f"عدد نسخ الودجت المضافة للشاشة الرئيسية: {widget_count}."))
+
+            state_err = diag.get("last_state_read_error")
+            if state_err:
+                rows.append(_diag_row(False, f"فشل قراءة بيانات الودجت المخزَّنة (DataStore) — {state_err} — هذا يُسقط الودجت بالكامل قبل أي محاولة رسم، وهو أكثر سبب متوقَّع لظهور \"يتعذّر عرض المحتوى\" رغم تطبيق إصلاحات 0.8.3."))
+            else:
+                rows.append(_diag_row(True, "آخر قراءة لبيانات الودجت المخزَّنة نجحت بلا استثناء."))
+
+            render_err = diag.get("last_render_error")
+            if render_err:
+                rows.append(_diag_row(False, f"فشل رسم محتوى الودجت رغم نجاح قراءة البيانات — {render_err} — الودجت تعرض حاليًا نص \"تعذّر تحميل الأرقام\" بدل الأرقام الفعلية."))
+            else:
+                rows.append(_diag_row(True, "آخر محاولة رسم لمحتوى الودجت نجحت بلا استثناء."))
+
+            last_at = diag.get("last_provide_glance_at")
+            rows.append(_diag_row(None, f"آخر مرة أُعيد فيها بناء محتوى الودجت: {_fmt_widget_ts(last_at)}."))
+
+            push_ok = diag.get("last_push_ok")
+            push_err = diag.get("last_push_error")
+            push_at = diag.get("last_push_at")
+            if push_ok is None:
+                rows.append(_diag_row(None, "لم يصل أي تحديث فوري (بعد بيع أو سند) للودجت بعد في هذه الجلسة."))
+            elif push_ok:
+                rows.append(_diag_row(True, f"آخر تحديث فوري نجح في {_fmt_widget_ts(push_at)}."))
+            else:
+                rows.append(_diag_row(False, f"فشل آخر تحديث فوري في {_fmt_widget_ts(push_at)} — {push_err}."))
+
+            snapshot = diag.get("last_snapshot_json")
+            if snapshot:
+                rows.append(_diag_row(None, f"آخر بيانات مخزَّنة للودجت: {snapshot}"))
+            return rows
+
+        async def refresh_widget_diagnosis(body: ft.Column):
+            body.controls = [ft.Row([ft.ProgressRing(width=16, height=16), ft.Text("يفحص الآن...", size=12)])]
+            self.page.update()
+            try:
+                rows = await build_widget_diagnosis()
+            except Exception as exc:
+                rows = [_diag_row(False, f"تعذّر إتمام الفحص: {exc!r}")]
+            body.controls = rows
+            self.page.update()
+
+        async def test_widget_now(body: ft.Column):
+            if self.native_files is not None:
+                try:
+                    await self.native_files.push_home_widget(home_widget_snapshot(self.ctx.dashboard))
+                except Exception:
+                    pass
+            await refresh_widget_diagnosis(body)
+
+        async def open_widget_diagnosis(_):
+            body = ft.Column(spacing=10, tight=True, scroll=ft.ScrollMode.AUTO)
+            diag_dialog = ft.AlertDialog(
+                title=ft.Text("تشخيص ودجت الشاشة الرئيسية"),
+                content=ft.Container(body, width=380, height=360),
+                actions=[
+                    ft.TextButton("اختبار الآن (دفع بيانات حديثة)", on_click=lambda e: self.page.run_task(test_widget_now, body)),
+                    ft.TextButton("إعادة الفحص", on_click=lambda e: self.page.run_task(refresh_widget_diagnosis, body)),
+                    ft.FilledButton("حسنًا", on_click=lambda e: self.page.close(diag_dialog)),
+                ],
+            )
+            self.page.open(diag_dialog)
+            await refresh_widget_diagnosis(body)
+
         # --- Backups: automatic creation on login when overdue, and local
         # retention pruning -- admin-tunable and read via core.backup_settings
         # (auto-check happens once per login in main.py; retention pruning
@@ -1579,6 +1683,18 @@ class AdminCenter:
                     ),
                 ],
             ),
+            "widget": self._section(
+                "ودجت الشاشة الرئيسية",
+                [
+                    ft.Text(
+                        "ودجت \"Nano | نانو\" تعرض مبيعات اليوم ورصيد الصندوق على الشاشة الرئيسية لأندرويد، "
+                        "وتتحدّث فورًا بعد كل بيع أو سند، وكل 30 دقيقة عند إغلاق التطبيق. "
+                        "استخدم الفحص أدناه إذا ظهرت رسالة \"يتعذّر عرض المحتوى\" بدل الأرقام.",
+                        size=12, color=Colors.TEXT_SECONDARY,
+                    ),
+                    ft.OutlinedButton("تشخيص الودجت", icon=ft.Icons.HEALTH_AND_SAFETY_OUTLINED, on_click=open_widget_diagnosis),
+                ],
+            ),
             "reports": self._section(
                 "إعدادات التقارير",
                 [
@@ -1603,6 +1719,7 @@ class AdminCenter:
             ("pos", "نقطة البيع", ft.Icons.POINT_OF_SALE_OUTLINED),
             ("stocktake", "الجرد", ft.Icons.FACT_CHECK_OUTLINED),
             ("sound", "الصوت", ft.Icons.VOLUME_UP_OUTLINED),
+            ("widget", "ودجت الشاشة الرئيسية", ft.Icons.WIDGETS_OUTLINED),
             ("reports", "التقارير", ft.Icons.BAR_CHART_OUTLINED),
             ("audit", "سجل التدقيق", ft.Icons.HISTORY),
         ]

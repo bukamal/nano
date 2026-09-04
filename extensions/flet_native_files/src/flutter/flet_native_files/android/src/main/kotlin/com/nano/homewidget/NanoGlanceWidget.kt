@@ -37,6 +37,30 @@ val KEY_SNAPSHOT: Preferences.Key<String> = stringPreferencesKey("nano_widget_sn
 private val WarningColor = ColorProvider(day = androidx.compose.ui.graphics.Color(0xFF993C1D), night = androidx.compose.ui.graphics.Color(0xFFF0997B))
 private val MutedColor = ColorProvider(day = androidx.compose.ui.graphics.Color(0xFF5F5E5A), night = androidx.compose.ui.graphics.Color(0xFFB4B2A9))
 
+/**
+ * In-memory diagnostic breadcrumbs, read back by NanoHomeWidgetPlugin's
+ * "diagnose" method (see admin_view.py's widget diagnostics panel).
+ *
+ * This exists because 0.8.3's two try/catch layers inside provideContent
+ * made *render* failures recoverable and visible on the widget itself
+ * ("تعذّر تحميل الأرقام"), but a failure in getAppWidgetState() -- which
+ * runs *before* provideContent, reading the DataStore off disk -- still
+ * took provideGlance down with no trace anywhere, reproducing the exact
+ * same opaque "يتعذّر عرض المحتوى" placeholder 0.8.3 was meant to end.
+ * Every field here is written from provideGlance/onMethodCall only and
+ * merely read by the admin panel -- never anything the widget itself
+ * depends on to render.
+ */
+object NanoWidgetDiagnostics {
+    @Volatile var lastProvideGlanceAt: Long = 0L
+    @Volatile var lastStateReadError: String? = null
+    @Volatile var lastRenderError: String? = null
+    @Volatile var lastSnapshotJson: String? = null
+    @Volatile var lastPushAt: Long = 0L
+    @Volatile var lastPushOk: Boolean? = null
+    @Volatile var lastPushError: String? = null
+}
+
 class NanoGlanceWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         // NOTE: deliberately NOT using the `currentState<Preferences>()`
@@ -50,11 +74,28 @@ class NanoGlanceWidget : GlanceAppWidget() {
         // plain (non-inline) suspend function that reads the exact same
         // PreferencesGlanceStateDefinition state, so this is behaviourally
         // identical and avoids the inliner entirely.
-        val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, id)
+        //
+        // This call itself was, until now, the one unprotected step in the
+        // whole provideGlance path: it reads the Preferences DataStore off
+        // disk, and any failure there (corrupt file, I/O error, first read
+        // racing a concurrent write) threw straight out of provideGlance
+        // before provideContent's two try/catch layers ever ran -- an
+        // uncaught exception here reproduces the identical "يتعذّر عرض
+        // المحتوى" placeholder the 0.8.3 fix targeted, just one call
+        // earlier than where that fix looked.
+        val snapshotJson: String? = try {
+            val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, id)
+            NanoWidgetDiagnostics.lastStateReadError = null
+            prefs[KEY_SNAPSHOT]
+        } catch (error: Exception) {
+            NanoWidgetDiagnostics.lastStateReadError = error.toString()
+            null
+        }
+        NanoWidgetDiagnostics.lastSnapshotJson = snapshotJson
         provideContent {
             try {
                 val data = try {
-                    JSONObject(prefs[KEY_SNAPSHOT] ?: "{}")
+                    JSONObject(snapshotJson ?: "{}")
                 } catch (_: Exception) {
                     JSONObject()
                 }
@@ -106,6 +147,7 @@ class NanoGlanceWidget : GlanceAppWidget() {
                         Text(alertLine(overdueCount, lowStockCount), style = TextStyle(color = WarningColor))
                     }
                 }
+                NanoWidgetDiagnostics.lastRenderError = null
             } catch (error: Exception) {
                 // Absolute last resort. Anything unexpected here must still
                 // leave legible content on the home screen instead of
@@ -113,11 +155,14 @@ class NanoGlanceWidget : GlanceAppWidget() {
                 // "تعذّر تحميل الأرقام" is diagnosable and recoverable (open
                 // the app, wait for the next periodic tick); one that shows
                 // the system's opaque error is neither.
+                NanoWidgetDiagnostics.lastRenderError = error.toString()
                 Column(modifier = GlanceModifier.fillMaxSize().padding(12.dp)) {
                     Text("Nano | نانو", style = TextStyle(fontWeight = FontWeight.Medium))
                     Spacer(modifier = GlanceModifier.height(8.dp))
                     Text("تعذّر تحميل الأرقام، افتح التطبيق للتحديث", style = TextStyle(color = MutedColor))
                 }
+            } finally {
+                NanoWidgetDiagnostics.lastProvideGlanceAt = System.currentTimeMillis()
             }
         }
     }
