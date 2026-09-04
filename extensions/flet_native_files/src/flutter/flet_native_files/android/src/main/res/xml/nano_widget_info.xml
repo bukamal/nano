@@ -2,8 +2,9 @@
 <!--
   PHASE10 home screen widget sizing/refresh metadata.
 
-  updatePeriodMin=30 is Android's *minimum-guaranteed* floor for this
-  mechanism (the OS clamps anything lower to 30 anyway) and is only the
+  updatePeriodMillis=1800000 (30 min) is Android's *minimum-guaranteed*
+  floor for this mechanism (the OS clamps anything lower to 30 min anyway,
+  per the AppWidgetProviderInfo docs) and is only the
   closed-app safety net; the periodic WorkManager pass in
   native_files.dart's _pushHomeWidgetSnapshot is what actually drives it,
   same as PHASE9's notification check. The instant push_home_widget path
@@ -23,6 +24,6 @@
     android:minHeight="110dp"
     android:targetCellWidth="4"
     android:targetCellHeight="2"
-    android:updatePeriodMin="30"
+    android:updatePeriodMillis="1800000"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen" />
