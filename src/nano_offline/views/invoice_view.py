@@ -6,6 +6,7 @@ from datetime import date, timedelta
 import flet as ft
 
 from nano_offline.core.toast import toast
+from nano_offline.core.home_widget import refresh_home_widget
 
 from nano_offline.components import (
     SearchSelect,
@@ -1282,6 +1283,11 @@ class InvoiceCenter:
                     message = f"تم حفظ الفاتورة #{saved_id}"
                 self.notify(message, sound_kind="save")
                 self.show_center()
+                if type_dd.value == "sale":
+                    # PHASE10: sales move the two numbers on the home screen
+                    # widget (today's total, cash) -- refresh it right away
+                    # instead of waiting for the next periodic pass.
+                    refresh_home_widget(self.page, self.native_files, self.ctx.dashboard)
                 if self.on_saved:
                     self.on_saved()
             except Exception as exc:

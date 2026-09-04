@@ -9,6 +9,7 @@ from nano_offline.core.toast import toast
 from nano_offline.components import SearchSelect, SelectAllTextField, SmartAmountField, SmartDateField, new_form_sheet, render_form_sheet
 from nano_offline.core.theme import Colors, Shadow
 from nano_offline.core import currency
+from nano_offline.core.home_widget import refresh_home_widget
 
 
 # Compatibility terminology: «سند دفع» هو نفسه «سند صرف» في الإصدارات السابقة.
@@ -525,6 +526,9 @@ class FinanceCenter:
                 self.notify(message)
                 self.show_vouchers()
                 self._changed()
+                # PHASE10: receipt/payment vouchers move the cash balance
+                # shown on the home screen widget -- refresh it right away.
+                refresh_home_widget(self.page, self.native_files, self.ctx.dashboard)
             except Exception as exc:
                 self.notify(str(exc), kind="error")
 

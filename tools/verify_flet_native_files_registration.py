@@ -40,6 +40,24 @@ def verify(flutter_root: Path) -> dict[str, str]:
     dart = "\n".join(_read(p) for p in dart_files)
     if "package:flet_native_files/flet_native_files.dart" not in dart and "flet_native_files.createControl" not in dart:
         raise RuntimeError("Generated Dart bootstrap does not register flet_native_files")
+
+    # PHASE10: confirm Gradle's manifest merger actually folded the home
+    # screen widget receiver from android/src/main/AndroidManifest.xml into
+    # the generated app manifest -- a silent merge failure here would leave
+    # push_home_widget()/the periodic WorkManager pass calling into a
+    # channel with nothing listening on the widget side, without any build
+    # error to catch it.
+    merged_manifest = flutter_root / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
+    if merged_manifest.is_file():
+        manifest_text = _read(merged_manifest)
+        if "com.nano.homewidget.NanoWidgetReceiver" not in manifest_text:
+            raise RuntimeError(
+                "Generated AndroidManifest.xml is missing the PHASE10 home widget receiver "
+                "(com.nano.homewidget.NanoWidgetReceiver) -- check "
+                "extensions/flet_native_files/.../android/src/main/AndroidManifest.xml and "
+                "the plugin.platforms.android section of that package's pubspec.yaml"
+            )
+
     return {"flutter_root": str(flutter_root), "extension_root": str(extension_root), "dart_files": str(len(dart_files))}
 
 

@@ -68,5 +68,19 @@ dependencies:
 # assets automatically, same as it already does for the plugin's Dart
 # code, no separate Python-side asset wiring required.
 flutter:
+  # PHASE10: registers this package's new android/ module (Kotlin/Glance
+  # home screen widget) as a real Flutter plugin. `flet build apk` already
+  # discovers and packages flet_native_files as a normal path dependency
+  # (see [tool.flet.dev_packages] in the app's pyproject.toml) -- this
+  # section is what additionally tells Gradle to compile android/ and merge
+  # its AndroidManifest.xml into the generated app, and tells the Flutter
+  # engine to call NanoHomeWidgetPlugin.onAttachedToEngine() at startup so
+  # channel "nano/home_widget" is ready before either update path (the
+  # periodic WorkManager pass or Python's push_home_widget) ever calls it.
+  plugin:
+    platforms:
+      android:
+        package: com.nano.homewidget
+        pluginClass: NanoHomeWidgetPlugin
   assets:
     - assets/sounds/

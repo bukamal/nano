@@ -326,3 +326,25 @@ class NativeFiles(Control):
             mime_type="application/pdf",
             subject=filename if filename.lower().endswith(".pdf") else f"{filename}.pdf",
         )
+
+    async def push_home_widget(self, snapshot: dict) -> None:
+        """Immediate home-screen-widget refresh (PHASE10), app-open path.
+
+        Call this right after a sale/receipt/payment posts, from whichever
+        service already has the fresh numbers in memory (DashboardService/
+        InvoiceService) -- this intentionally does not re-query anything
+        itself. No-op on iOS/desktop/web, and never raises: a widget that
+        fails to refresh must not interrupt the accounting flow that
+        triggered it. The closed-app fallback (periodic WorkManager pass,
+        same DB path used by schedule_notifications) keeps the widget fresh
+        the rest of the time without any further calls from here.
+        """
+        try:
+            await self.invoke_method_async(
+                "push_home_widget",
+                {"snapshot_json": json.dumps(snapshot, ensure_ascii=False)},
+                wait_for_result=False,
+                wait_timeout=_QUICK_TIMEOUT,
+            )
+        except Exception:
+            pass

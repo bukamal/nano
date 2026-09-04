@@ -273,6 +273,58 @@ List<_NativeAlert> _checkLicense(Database db, Map<String, dynamic> config) {
   ];
 }
 
+// -- PHASE10: home screen widget (Glance) -----------------------------------
+//
+// One shared sink for both update paths described in
+// PHASE10_HOME_WIDGET_GLANCE_AR.md:
+//   1. Immediate: 'push_home_widget' case above, called from Python right
+//      after a sale/receipt/payment posts while the app is open.
+//   2. Periodic fallback: _pushHomeWidgetSnapshot below, called from inside
+//      _runNotificationCheck's already-open `db` connection -- the same
+//      WorkManager isolate PHASE9 already uses for closed-app alerts, so
+//      this adds zero new background wake-ups or SQLite opens.
+// Both funnel into the same native channel; NanoHomeWidgetPlugin.kt is the
+// single place that actually touches the Glance widget state.
+const MethodChannel _homeWidgetChannel = MethodChannel('nano/home_widget');
+
+Future<void> _pushHomeWidgetJson(String snapshotJson) async {
+  try {
+    await _homeWidgetChannel.invokeMethod('push', snapshotJson);
+  } catch (error) {
+    // Widgets are a nice-to-have surface, not a critical path -- a device
+    // without the Glance widget dependencies (or a non-Android platform)
+    // must never take down the sale/notification flow that called this.
+    debugPrint('nano home widget push failed: $error');
+  }
+}
+
+Future<void> _pushHomeWidgetSnapshot(Database db) async {
+  final sales = db.select(
+    "SELECT COALESCE(SUM(total),0) s FROM invoices "
+    "WHERE type = 'sale' AND status != 'cancelled' AND date(invoice_date) = date('now','localtime')",
+  ).first['s'] as num? ?? 0;
+  // Same definition DashboardService.summary() uses on the Python side
+  // (sum of debit-credit on the CASH ledger account) -- there is no
+  // separate cash_transactions table in this schema.
+  final cash = db.select(
+    "SELECT COALESCE(SUM(debit-credit),0) c FROM ledger_entries WHERE account_code = 'CASH'",
+  ).first['c'] as num? ?? 0;
+  final overdue = db.select(
+    "SELECT COUNT(*) c FROM invoices WHERE type = 'sale' AND status != 'cancelled' AND (total - paid_amount) > 0.01",
+  ).first['c'] as num? ?? 0;
+  final lowStock = db.select(
+    "SELECT COUNT(*) c FROM items WHERE item_type = 'مخزون' AND quantity <= 5",
+  ).first['c'] as num? ?? 0;
+
+  await _pushHomeWidgetJson(jsonEncode({
+    'sales_today': sales,
+    'cash_balance': cash,
+    'overdue_count': overdue,
+    'low_stock_count': lowStock,
+    'updated_at': DateTime.now().toIso8601String(),
+  }));
+}
+
 Future<void> _runNotificationCheck(Map<String, dynamic> inputData) async {
   final dbPath = (inputData['db_path'] as String?) ?? '';
   if (dbPath.isEmpty || !await File(dbPath).exists()) return;
@@ -293,6 +345,13 @@ Future<void> _runNotificationCheck(Map<String, dynamic> inputData) async {
     alerts.addAll(_checkLowStock(db, config));
     alerts.addAll(_checkBackup(db, config));
     alerts.addAll(_checkLicense(db, config));
+
+    // PHASE10: refresh the home screen widget every periodic pass regardless
+    // of whether any alert fired -- sales/cash numbers change even on a
+    // perfectly healthy day with zero alerts, and this is the only path
+    // that can refresh them while the app is fully closed.
+    await _pushHomeWidgetSnapshot(db);
+
     if (alerts.isEmpty) return;
 
     await _ensureLocalNotificationsInitialized();
@@ -586,6 +645,19 @@ class _FletNativeFilesControlState extends State<FletNativeFilesControl> {
             subject: args['filename'],
           );
           return result.status == ShareResultStatus.dismissed ? 'cancelled' : 'ok';
+
+        case 'push_home_widget':
+          // Immediate (app-open) path for PHASE10's home screen widget --
+          // Python already has the fresh numbers in memory right after a
+          // sale/receipt/payment posts (see DashboardService), so this skips
+          // straight to updating the widget instead of waiting for the
+          // periodic WorkManager pass in _pushHomeWidgetSnapshot below,
+          // which only exists to keep the widget fresh while the app is
+          // closed and nothing else can supply the numbers.
+          if (!Platform.isAndroid) return 'ok';
+          await _pushHomeWidgetJson(args['snapshot_json'] ?? '{}');
+          return 'ok';
+
         default:
           return null;
       }
