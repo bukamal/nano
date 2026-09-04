@@ -7,7 +7,6 @@ import flet as ft
 from nano_offline.core.toast import toast
 
 from nano_offline.components import SelectAllTextField
-from nano_offline.services.license_service import HAWAA_ACTIVATION_URL
 from nano_offline.version import APP_VERSION
 from nano_offline.core.theme import Colors, Radius, Shadow, STATUS_STYLES as _STATUS_STYLES
 
@@ -170,38 +169,6 @@ class ActivationGate:
             shadow=ft.BoxShadow(blur_radius=28, spread_radius=2, color=Colors.PRIMARY_BORDER, offset=ft.Offset(0, 10)),
         )
 
-        server_chip = ft.Container(
-            ft.Row(
-                [
-                    ft.Container(
-                        ft.Icon(ft.Icons.DNS_ROUNDED, color=Colors.PRIMARY, size=20),
-                        width=40,
-                        height=40,
-                        alignment=ft.alignment.center,
-                        bgcolor=Colors.PRIMARY_BG,
-                        border_radius=Radius.SM,
-                    ),
-                    ft.Column(
-                        [
-                            ft.Text("سيرفر التفعيل", size=11, color=Colors.TEXT_SECONDARY),
-                            ft.Text("هوى الشام", weight=ft.FontWeight.BOLD, size=14),
-                            ft.Text(HAWAA_ACTIVATION_URL, size=10, color=Colors.TEXT_FAINT, selectable=True),
-                        ],
-                        spacing=1,
-                        expand=True,
-                    ),
-                    ft.Icon(ft.Icons.CLOUD_DONE_ROUNDED, color=Colors.SUCCESS, size=18),
-                ],
-                spacing=10,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-            padding=12,
-            border=ft.border.all(1, Colors.BORDER_ALT),
-            border_radius=Radius.MD,
-            bgcolor=Colors.BACKGROUND,
-            width=self._content_width,
-        )
-
         device_row = ft.Container(
             ft.Row(
                 [
@@ -227,7 +194,6 @@ class ActivationGate:
                 [
                     icon_badge,
                     ft.Text("تفعيل Nano | نانو", size=24, weight=ft.FontWeight.BOLD, color=Colors.PRIMARY_DARK),
-                    server_chip,
                     device_row,
                     ft.Container(height=2),
                     self.key,
