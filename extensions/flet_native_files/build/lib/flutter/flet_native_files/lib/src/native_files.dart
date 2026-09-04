@@ -5,14 +5,23 @@ import 'dart:io';
 import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flet/flet.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:sqlite3/sqlite3.dart';
+// hide Row: sqlite3 exports its own `Row` (a SQL result row) which
+// collides with Flutter's `Row` widget the moment either file in this
+// package actually uses the widget by that bare name -- as
+// _BarcodeScanPageState._buildHintPill now does. Nothing here references
+// sqlite3's Row type directly (result sets are walked with `for (final row
+// in resultSet)`, never typed as `Row` explicitly), so hiding it is safe
+// and keeps `Row` meaning the widget everywhere in this file.
+import 'package:sqlite3/sqlite3.dart' hide Row;
 import 'package:workmanager/workmanager.dart';
 
 import 'sound_pool.dart';
@@ -264,6 +273,58 @@ List<_NativeAlert> _checkLicense(Database db, Map<String, dynamic> config) {
   ];
 }
 
+// -- PHASE10: home screen widget (Glance) -----------------------------------
+//
+// One shared sink for both update paths described in
+// PHASE10_HOME_WIDGET_GLANCE_AR.md:
+//   1. Immediate: 'push_home_widget' case above, called from Python right
+//      after a sale/receipt/payment posts while the app is open.
+//   2. Periodic fallback: _pushHomeWidgetSnapshot below, called from inside
+//      _runNotificationCheck's already-open `db` connection -- the same
+//      WorkManager isolate PHASE9 already uses for closed-app alerts, so
+//      this adds zero new background wake-ups or SQLite opens.
+// Both funnel into the same native channel; NanoHomeWidgetPlugin.kt is the
+// single place that actually touches the Glance widget state.
+const MethodChannel _homeWidgetChannel = MethodChannel('nano/home_widget');
+
+Future<void> _pushHomeWidgetJson(String snapshotJson) async {
+  try {
+    await _homeWidgetChannel.invokeMethod('push', snapshotJson);
+  } catch (error) {
+    // Widgets are a nice-to-have surface, not a critical path -- a device
+    // without the Glance widget dependencies (or a non-Android platform)
+    // must never take down the sale/notification flow that called this.
+    debugPrint('nano home widget push failed: $error');
+  }
+}
+
+Future<void> _pushHomeWidgetSnapshot(Database db) async {
+  final sales = db.select(
+    "SELECT COALESCE(SUM(total),0) s FROM invoices "
+    "WHERE type = 'sale' AND status != 'cancelled' AND date(invoice_date) = date('now','localtime')",
+  ).first['s'] as num? ?? 0;
+  // Same definition DashboardService.summary() uses on the Python side
+  // (sum of debit-credit on the CASH ledger account) -- there is no
+  // separate cash_transactions table in this schema.
+  final cash = db.select(
+    "SELECT COALESCE(SUM(debit-credit),0) c FROM ledger_entries WHERE account_code = 'CASH'",
+  ).first['c'] as num? ?? 0;
+  final overdue = db.select(
+    "SELECT COUNT(*) c FROM invoices WHERE type = 'sale' AND status != 'cancelled' AND (total - paid_amount) > 0.01",
+  ).first['c'] as num? ?? 0;
+  final lowStock = db.select(
+    "SELECT COUNT(*) c FROM items WHERE item_type = 'مخزون' AND quantity <= 5",
+  ).first['c'] as num? ?? 0;
+
+  await _pushHomeWidgetJson(jsonEncode({
+    'sales_today': sales,
+    'cash_balance': cash,
+    'overdue_count': overdue,
+    'low_stock_count': lowStock,
+    'updated_at': DateTime.now().toIso8601String(),
+  }));
+}
+
 Future<void> _runNotificationCheck(Map<String, dynamic> inputData) async {
   final dbPath = (inputData['db_path'] as String?) ?? '';
   if (dbPath.isEmpty || !await File(dbPath).exists()) return;
@@ -284,6 +345,13 @@ Future<void> _runNotificationCheck(Map<String, dynamic> inputData) async {
     alerts.addAll(_checkLowStock(db, config));
     alerts.addAll(_checkBackup(db, config));
     alerts.addAll(_checkLicense(db, config));
+
+    // PHASE10: refresh the home screen widget every periodic pass regardless
+    // of whether any alert fired -- sales/cash numbers change even on a
+    // perfectly healthy day with zero alerts, and this is the only path
+    // that can refresh them while the app is fully closed.
+    await _pushHomeWidgetSnapshot(db);
+
     if (alerts.isEmpty) return;
 
     await _ensureLocalNotificationsInitialized();
@@ -577,6 +645,19 @@ class _FletNativeFilesControlState extends State<FletNativeFilesControl> {
             subject: args['filename'],
           );
           return result.status == ShareResultStatus.dismissed ? 'cancelled' : 'ok';
+
+        case 'push_home_widget':
+          // Immediate (app-open) path for PHASE10's home screen widget --
+          // Python already has the fresh numbers in memory right after a
+          // sale/receipt/payment posts (see DashboardService), so this skips
+          // straight to updating the widget instead of waiting for the
+          // periodic WorkManager pass in _pushHomeWidgetSnapshot below,
+          // which only exists to keep the widget fresh while the app is
+          // closed and nothing else can supply the numbers.
+          if (!Platform.isAndroid) return 'ok';
+          await _pushHomeWidgetJson(args['snapshot_json'] ?? '{}');
+          return 'ok';
+
         default:
           return null;
       }
@@ -610,7 +691,8 @@ class _BarcodeScanPage extends StatefulWidget {
   State<_BarcodeScanPage> createState() => _BarcodeScanPageState();
 }
 
-class _BarcodeScanPageState extends State<_BarcodeScanPage> {
+class _BarcodeScanPageState extends State<_BarcodeScanPage>
+    with SingleTickerProviderStateMixin {
   // autoStart: false -- we start the camera ourselves in initState() inside
   // a try/catch. With the default autoStart:true, MobileScanner starts the
   // camera internally and (on this package version) swallows a denied/failed
@@ -636,12 +718,35 @@ class _BarcodeScanPageState extends State<_BarcodeScanPage> {
   bool _starting = true;
   String? _startError;
   StreamSubscription<BarcodeCapture>? _subscription;
-  // Diagnostic only, shown on-screen: what the barcode stream actually
-  // delivers. After several rounds of guessing at this from Python-side
-  // symptoms alone, this makes the real Dart/ML-Kit behavior visible
-  // instead of inferring it indirectly through what does or doesn't land
-  // back in the item editor.
+  // Diagnostic only, kept for debug builds (see kDebugMode gate in build()
+  // below): what the barcode stream actually delivers. After several rounds
+  // of guessing at this from Python-side symptoms alone, this makes the
+  // real Dart/ML-Kit behavior visible instead of inferring it indirectly
+  // through what does or doesn't land back in the item editor. Hidden from
+  // release builds now -- it was raw telemetry, not something a cashier
+  // scanning a bag of rice needs to see.
   String _debugInfo = 'بانتظار أول اكتشاف...';
+
+  // Pulsing scan-line inside the viewfinder -- the single biggest visual
+  // cue that separates "a live, working scanner" from "a static camera
+  // preview with a rectangle drawn on it".
+  late final AnimationController _scanLineController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  )..repeat(reverse: true);
+
+  // Pinch-to-zoom. mobile_scanner doesn't wire this up on its own; track a
+  // 0.0-1.0 fraction and forward it to the controller on two-finger scale
+  // gestures over the preview, with a native-camera-style side indicator
+  // that only appears while actively pinching.
+  double _zoom = 0.0;
+  double _zoomAtGestureStart = 0.0;
+  bool _showZoomIndicator = false;
+  Timer? _zoomIndicatorTimer;
+
+  static const Color _accent = Color(0xFF0F766E); // matches Colors.PRIMARY in theme.py
+  static const double _frameWidth = 270;
+  static const double _frameHeight = 200;
 
   @override
   void initState() {
@@ -701,6 +806,11 @@ class _BarcodeScanPageState extends State<_BarcodeScanPage> {
         // Set the guard *before* the first await so a second onDetect
         // firing while we're stopping the camera can't race in here too.
         _handled = true;
+        // Immediate tactile confirmation -- fires before the camera even
+        // finishes stopping, so the person holding the phone feels the hit
+        // the instant a code is recognized instead of waiting on the
+        // teardown/pop round-trip below.
+        HapticFeedback.mediumImpact();
         // Continuous stocktake mode (see stocktake_view.py's scan_loop)
         // pops this page with the code, then *immediately* re-invokes
         // scan_barcode() to push a brand-new _BarcodeScanPage with a
@@ -734,6 +844,29 @@ class _BarcodeScanPageState extends State<_BarcodeScanPage> {
         'تم اكتشاف باركود لكن بلا قيمة نصية -- النوع: $formats (${DateTime.now().toIso8601String().substring(11, 19)})');
   }
 
+  void _onScaleStart(ScaleStartDetails _) {
+    _zoomAtGestureStart = _zoom;
+  }
+
+  void _onScaleUpdate(ScaleUpdateDetails details) {
+    if (details.pointerCount < 2) return; // single-finger drags aren't zoom intent
+    final next = (_zoomAtGestureStart + (details.scale - 1) / 3).clamp(0.0, 1.0);
+    if ((next - _zoom).abs() < 0.004) return;
+    setState(() {
+      _zoom = next;
+      _showZoomIndicator = true;
+    });
+    try {
+      _controller.setZoomScale(_zoom);
+    } catch (error) {
+      debugPrint('nano scan: setZoomScale failed: $error');
+    }
+    _zoomIndicatorTimer?.cancel();
+    _zoomIndicatorTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) setState(() => _showZoomIndicator = false);
+    });
+  }
+
   @override
   void dispose() {
     // _onDetect already cancels the subscription and stops the controller
@@ -742,123 +875,342 @@ class _BarcodeScanPageState extends State<_BarcodeScanPage> {
     // error screen dismissed, etc.), where that explicit stop never ran.
     _subscription?.cancel();
     _controller.dispose();
+    _scanLineController.dispose();
+    _zoomIndicatorTimer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final frame = Rect.fromCenter(
+      center: Offset(size.width / 2, size.height / 2 - 24),
+      width: _frameWidth,
+      height: _frameHeight,
+    );
+
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: const Text('مسح الباركود'),
-        actions: [
-          if (_startError == null)
-            IconButton(
-              icon: ValueListenableBuilder(
-                valueListenable: _controller,
-                builder: (context, state, child) {
-                  return Icon(
-                    state.torchState == TorchState.on ? Icons.flash_on : Icons.flash_off,
-                  );
-                },
-              ),
-              onPressed: () => _controller.toggleTorch(),
+      extendBodyBehindAppBar: true,
+      appBar: _buildAppBar(),
+      body: _startError != null
+          ? _buildErrorBody()
+          : _starting
+              ? const Center(
+                  child: CircularProgressIndicator(color: _accent),
+                )
+              : GestureDetector(
+                  onScaleStart: _onScaleStart,
+                  onScaleUpdate: _onScaleUpdate,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      MobileScanner(
+                        controller: _controller,
+                        // mobile_scanner 6.0.10 has an open upstream bug
+                        // (juliansteenbakker/mobile_scanner#1454) where its
+                        // built-in error overlay ("An unexpected error
+                        // occurred.") pops up intermittently in release
+                        // builds even though the camera stream and onDetect
+                        // keep working fine underneath it -- it's a
+                        // spurious display glitch, not an actual scan
+                        // failure. The default errorBuilder blocks the
+                        // whole preview with an opaque card, making the
+                        // scanner look dead even though it isn't.
+                        // Overriding it to stay out of the way (just log
+                        // for diagnostics) keeps the live camera/
+                        // viewfinder/onDetect visible and usable instead
+                        // of hiding it behind that false error.
+                        errorBuilder: (context, error, child) {
+                          debugPrint('mobile_scanner transient error overlay suppressed: $error');
+                          return const SizedBox.shrink();
+                        },
+                      ),
+                      _buildDimOverlay(frame, size),
+                      _buildViewfinder(frame),
+                      _buildHintPill(frame),
+                      if (_showZoomIndicator) _buildZoomIndicator(),
+                      // Diagnostics stay available to whoever's building/
+                      // debugging the app, but never ship to a release APK
+                      // -- the amber telemetry strip was exactly the kind
+                      // of unfinished-looking clutter that made the old
+                      // screen read as a debug build rather than a
+                      // finished product.
+                      if (kDebugMode) _buildDebugBanner(),
+                    ],
+                  ),
+                ),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      flexibleSpace: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.black.withOpacity(0.75), Colors.transparent],
+          ),
+        ),
+      ),
+      leading: _circleIconButton(
+        icon: Icons.close_rounded,
+        onPressed: () => Navigator.of(context).maybePop(),
+      ),
+      title: const Text(
+        'مسح الباركود',
+        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 17),
+      ),
+      centerTitle: true,
+      actions: [
+        if (_startError == null)
+          ValueListenableBuilder(
+            valueListenable: _controller,
+            builder: (context, state, child) {
+              final on = state.torchState == TorchState.on;
+              return _circleIconButton(
+                icon: on ? Icons.flash_on_rounded : Icons.flash_off_rounded,
+                active: on,
+                onPressed: () => _controller.toggleTorch(),
+              );
+            },
+          ),
+        const SizedBox(width: 6),
+      ],
+    );
+  }
+
+  Widget _circleIconButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+    bool active = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: Material(
+        color: active ? _accent.withOpacity(0.9) : Colors.white.withOpacity(0.16),
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: Padding(
+            padding: const EdgeInsets.all(9),
+            child: Icon(icon, color: Colors.white, size: 20),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorBody() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.no_photography_outlined, color: Colors.white70, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              _startError!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
             ),
+            const SizedBox(height: 20),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: _accent),
+              onPressed: _startCamera,
+              child: const Text('إعادة المحاولة'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Darkens everything outside the scan frame (four strips around it)
+  // instead of a plain unstyled camera feed, so the eye is pulled straight
+  // to the cutout -- the same "spotlight" treatment modern scanners
+  // (Google Lens, banking-app QR pay, WhatsApp Web linking) all use.
+  Widget _buildDimOverlay(Rect frame, Size size) {
+    const dim = Colors.black54;
+    return IgnorePointer(
+      child: Stack(
+        children: [
+          Positioned(left: 0, right: 0, top: 0, height: frame.top, child: Container(color: dim)),
+          Positioned(left: 0, right: 0, top: frame.bottom, bottom: 0, child: Container(color: dim)),
+          Positioned(left: 0, top: frame.top, width: frame.left, height: frame.height, child: Container(color: dim)),
+          Positioned(right: 0, top: frame.top, width: size.width - frame.right, height: frame.height, child: Container(color: dim)),
         ],
       ),
-      body: _startError != null
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+    );
+  }
+
+  Widget _buildViewfinder(Rect frame) {
+    const radius = 20.0;
+    return Positioned.fromRect(
+      rect: frame,
+      child: IgnorePointer(
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white.withOpacity(0.25), width: 1),
+                borderRadius: BorderRadius.circular(radius),
+              ),
+            ),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(radius),
+              child: SizedBox(
+                width: frame.width,
+                height: frame.height,
+                child: Stack(
                   children: [
-                    const Icon(Icons.no_photography_outlined, color: Colors.white70, size: 48),
-                    const SizedBox(height: 16),
-                    Text(
-                      _startError!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white70, fontSize: 13),
-                    ),
-                    const SizedBox(height: 20),
-                    FilledButton(
-                      onPressed: _startCamera,
-                      child: const Text('إعادة المحاولة'),
+                    AnimatedBuilder(
+                      animation: _scanLineController,
+                      builder: (context, child) {
+                        final top = _scanLineController.value * (frame.height - 3);
+                        return Positioned(
+                          top: top,
+                          left: 14,
+                          right: 14,
+                          child: Container(
+                            height: 2.4,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(2),
+                              gradient: LinearGradient(
+                                colors: [_accent.withOpacity(0), _accent, _accent.withOpacity(0)],
+                              ),
+                              boxShadow: [BoxShadow(color: _accent.withOpacity(0.55), blurRadius: 6)],
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),
               ),
-            )
-          : _starting
-              ? const Center(child: CircularProgressIndicator())
-              : Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    MobileScanner(
-                      controller: _controller,
-                      // mobile_scanner 6.0.10 has an open upstream bug
-                      // (juliansteenbakker/mobile_scanner#1454) where its
-                      // built-in error overlay ("An unexpected error
-                      // occurred.") pops up intermittently in release
-                      // builds even though the camera stream and onDetect
-                      // keep working fine underneath it -- it's a spurious
-                      // display glitch, not an actual scan failure. The
-                      // default errorBuilder blocks the whole preview with
-                      // an opaque card, making the scanner look dead even
-                      // though it isn't. Overriding it to stay out of the
-                      // way (just log for diagnostics) keeps the live
-                      // camera/viewfinder/onDetect visible and usable
-                      // instead of hiding it behind that false error.
-                      errorBuilder: (context, error, child) {
-                        debugPrint('mobile_scanner transient error overlay suppressed: $error');
-                        return const SizedBox.shrink();
-                      },
-                    ),
-                    // Simple viewfinder frame -- purely visual guidance, no hit-testing.
-                    Center(
-                      child: Container(
-                        width: 260,
-                        height: 180,
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.white70, width: 2),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 32,
-                      left: 0,
-                      right: 0,
-                      child: Text(
-                        'وجّه الكاميرا نحو الباركود',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white70, fontSize: 14),
-                      ),
-                    ),
-                    // Temporary on-screen diagnostics -- shows exactly what
-                    // ML Kit is seeing per frame, so a failed scan reports
-                    // real information back instead of just "didn't work".
-                    Positioned(
-                      bottom: 8,
-                      left: 8,
-                      right: 8,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          _debugInfo,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.amberAccent, fontSize: 11),
-                        ),
-                      ),
-                    ),
-                  ],
+            ),
+            ..._corners(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Four bracket corners (⌜ ⌝ ⌞ ⌟) built from small paired bars instead of
+  // one plain rectangle border -- the corner-only style is what reads as
+  // "camera/scanner UI" at a glance rather than "a box was drawn here".
+  List<Widget> _corners() {
+    const len = 26.0;
+    const thick = 4.0;
+    Widget bar({required double width, required double height}) => Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(color: _accent, borderRadius: BorderRadius.circular(thick)),
+        );
+    return [
+      Positioned(top: -2, left: -2, child: bar(width: thick, height: len)),
+      Positioned(top: -2, left: -2, child: bar(width: len, height: thick)),
+      Positioned(top: -2, right: -2, child: bar(width: thick, height: len)),
+      Positioned(top: -2, right: -2, child: bar(width: len, height: thick)),
+      Positioned(bottom: -2, left: -2, child: bar(width: thick, height: len)),
+      Positioned(bottom: -2, left: -2, child: bar(width: len, height: thick)),
+      Positioned(bottom: -2, right: -2, child: bar(width: thick, height: len)),
+      Positioned(bottom: -2, right: -2, child: bar(width: len, height: thick)),
+    ];
+  }
+
+  Widget _buildHintPill(Rect frame) {
+    return Positioned(
+      top: frame.bottom + 18,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.5),
+              borderRadius: BorderRadius.circular(30),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.qr_code_scanner_rounded, color: Colors.white70, size: 16),
+                SizedBox(width: 8),
+                Text(
+                  'وجّه الكاميرا نحو الباركود',
+                  style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
                 ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildZoomIndicator() {
+    return Positioned(
+      right: 18,
+      top: 0,
+      bottom: 0,
+      child: IgnorePointer(
+        child: Center(
+          child: Container(
+            width: 34,
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.zoom_in_rounded, color: Colors.white70, size: 16),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 90,
+                  child: RotatedBox(
+                    quarterTurns: 3,
+                    child: LinearProgressIndicator(
+                      value: _zoom,
+                      backgroundColor: Colors.white24,
+                      valueColor: const AlwaysStoppedAnimation(_accent),
+                      minHeight: 4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Temporary on-screen diagnostics -- shows exactly what ML Kit is seeing
+  // per frame, so a failed scan reports real information back instead of
+  // just "didn't work". Debug builds only; see the kDebugMode gate above.
+  Widget _buildDebugBanner() {
+    return Positioned(
+      bottom: 8,
+      left: 8,
+      right: 8,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          _debugInfo,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.amberAccent, fontSize: 11),
+        ),
+      ),
     );
   }
 }

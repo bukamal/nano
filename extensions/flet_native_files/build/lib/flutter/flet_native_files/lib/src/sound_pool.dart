@@ -20,9 +20,9 @@ import 'package:flutter/foundation.dart';
 ///
 /// One pool per tone kind, not one pool shared across kinds: AudioPool's
 /// own docs are explicit that all players in a pool share the same source
-/// -- "If you want multiple sounds use multiple AudioPools." Seven
-/// genuinely different tones (success/error/warning/info/scan/save/delete)
-/// means seven pools.
+/// -- "If you want multiple sounds use multiple AudioPools." Ten
+/// genuinely different tones (success/error/warning/info/scan/save/delete/
+/// login/notify/barcode_error) means ten pools.
 const Map<String, String> kSoundAssetPaths = {
   // Flutter always namespaces a package's own bundled assets as
   // "packages/<package_name>/<path>" in rootBundle -- even for code
@@ -51,6 +51,20 @@ const Map<String, String> kSoundAssetPaths = {
   // wrong, and clearly different from the generic 'success' chime a
   // "تم الحذف" message would otherwise infer.
   'delete': 'packages/flet_native_files/assets/sounds/delete.wav',
+  // Three more event-specific tones, same asset-loading/AudioPool
+  // machinery as every kind above. 'login' fires once a session actually
+  // starts (a warm 3-note rising chime, distinct from the 2-note
+  // 'success' ding). 'notify' fires when a genuinely new alert lands in
+  // the notification center -- low stock, backup due, license,
+  // receivables, insights -- not on every badge refresh (a soft
+  // descending 2-tone ping, calmer than 'warning'). 'barcode_error'
+  // fires on a scan that matched nothing, split off from the generic
+  // 'error' tone so it reads instantly as "no match" during rapid
+  // continuous scanning rather than "something failed" (a short, blunt
+  // double-buzz, shorter and lower-key than 'error').
+  'login': 'packages/flet_native_files/assets/sounds/login.wav',
+  'notify': 'packages/flet_native_files/assets/sounds/notify.wav',
+  'barcode_error': 'packages/flet_native_files/assets/sounds/barcode_error.wav',
 };
 
 // Empty prefix: kSoundAssetPaths above already supplies the full

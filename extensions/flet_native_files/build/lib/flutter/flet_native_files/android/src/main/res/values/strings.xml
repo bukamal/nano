@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      PHASE10 widget picker metadata. android:description on
+      appwidget-provider must reference a @string resource (a raw literal
+      is silently ignored by aapt), which is why nano_widget_info.xml did
+      not previously declare one at all.
+    -->
+    <string name="nano_widget_description">يعرض مبيعات اليوم ورصيد الصندوق وتنبيهات الذمم والمخزون من نانو</string>
+</resources>
