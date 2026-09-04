@@ -23,6 +23,24 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/nano_widget_info" />
         </receiver>
+
+        <!--
+          PHASE10: Quick Settings tile, a fast launcher for Nano from the
+          QS panel. android:icon/android:label below are the static
+          fallback shown before the service first binds;
+          NanoQuickSettingsTileService overrides both at runtime in
+          onStartListening once it's live.
+        -->
+        <service
+            android:name="com.nano.homewidget.NanoQuickSettingsTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_nano_tile"
+            android:label="نانو"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

@@ -81,7 +81,7 @@ class NanoGlanceWidget : GlanceAppWidget() {
  * by name instead of a compile-time import so this plugin module doesn't
  * need to depend on the generated app module.
  */
-private fun mainActivityClass(context: Context): Class<*> =
+internal fun mainActivityClass(context: Context): Class<*> =
     Class.forName("${context.packageName}.MainActivity")
 
 private fun formatMoney(v: Double): String =
