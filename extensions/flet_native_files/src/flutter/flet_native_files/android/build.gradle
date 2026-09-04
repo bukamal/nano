@@ -28,7 +28,16 @@ android {
     compileSdk 34
 
     defaultConfig {
-        minSdk 23
+        // Must not exceed the app module's own minSdkVersion (21, set by
+        // Flet from pyproject.toml) -- Gradle's manifest merger hard-fails
+        // otherwise ("uses-sdk:minSdkVersion 21 cannot be smaller than
+        // version 23 declared in library [:flet_native_files]"). Nothing
+        // in this module actually requires API 23+: the one component
+        // that needs a newer API (NanoQuickSettingsTileService, API 24)
+        // already guards itself with @RequiresApi + a runtime SDK_INT
+        // check, so the OS simply never discovers/binds it on pre-24
+        // devices instead of crashing.
+        minSdk 21
     }
 
     compileOptions {
