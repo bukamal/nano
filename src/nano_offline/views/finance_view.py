@@ -6,7 +6,7 @@ import flet as ft
 
 from nano_offline.core.toast import toast
 
-from nano_offline.components import SearchSelect, SelectAllTextField, SmartAmountField, SmartDateField, new_form_sheet, render_form_sheet
+from nano_offline.components import SearchSelect, SelectAllTextField, SmartAmountField, SmartDateField, empty_state, kpi_card, new_form_sheet, render_form_sheet, status_pill
 from nano_offline.core.theme import Colors, Shadow
 from nano_offline.core import currency
 from nano_offline.core.home_widget import refresh_home_widget
@@ -82,15 +82,6 @@ class FinanceCenter:
         filter_state = {"type": "all"}
         filter_boxes: dict[str, ft.Container] = {}
 
-        def metric(label: str, value: str, icon, accent: str):
-            return ft.Container(
-                ft.Row([
-                    ft.Container(ft.Icon(icon, size=19, color=accent), width=38, height=38, alignment=ft.alignment.center, bgcolor=Colors.BACKGROUND, border_radius=12),
-                    ft.Column([ft.Text(label, size=10, color=Colors.TEXT_SECONDARY), ft.Text(value, size=17, weight=ft.FontWeight.BOLD)], spacing=1, expand=True),
-                ]),
-                padding=11, bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=16, shadow=Shadow.SM,
-            )
-
         def filter_box(key: str, label: str, icon):
             box = ft.Container(
                 ft.Row([ft.Icon(icon, size=15), ft.Text(label, size=11, weight=ft.FontWeight.W_600)], spacing=5),
@@ -122,9 +113,9 @@ class FinanceCenter:
             payments = sum(float(v.get("amount") or 0) for v in vouchers if v.get("voucher_type") == "payment")
             unallocated_total = sum(float(v.get("unallocated_amount") or 0) for v in vouchers)
             summary.controls = [
-                ft.Container(metric("إجمالي القبض", self.money(receipts), ft.Icons.ADD_CARD, Colors.SUCCESS), col={"xs": 6, "md": 4}),
-                ft.Container(metric("إجمالي الدفع", self.money(payments), ft.Icons.PAYMENTS_OUTLINED, Colors.DANGER), col={"xs": 6, "md": 4}),
-                ft.Container(metric("رصيد غير موزع", self.money(unallocated_total), ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.PRIMARY), col={"xs": 12, "md": 4}),
+                ft.Container(kpi_card("إجمالي القبض", self.money(receipts), ft.Icons.ADD_CARD, Colors.SUCCESS, on_tap=lambda _: set_filter("receipt")), col={"xs": 6, "md": 4}),
+                ft.Container(kpi_card("إجمالي الدفع", self.money(payments), ft.Icons.PAYMENTS_OUTLINED, Colors.DANGER, on_tap=lambda _: set_filter("payment")), col={"xs": 6, "md": 4}),
+                ft.Container(kpi_card("رصيد غير موزع", self.money(unallocated_total), ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.PRIMARY), col={"xs": 12, "md": 4}),
             ]
             q = (search.value or "").strip().casefold()
             filtered = []
@@ -142,12 +133,16 @@ class FinanceCenter:
                 accent = Colors.SUCCESS if receipt else Colors.DANGER_DARK
                 allocated = float(voucher.get("allocated_amount") or 0)
                 unallocated = float(voucher.get("unallocated_amount") or 0)
+                # Same "badge next to the title" language as the invoices
+                # list's status/overdue pills -- an unallocated balance is
+                # this row's equivalent of "needs attention".
+                badges = [status_pill("على الحساب", Colors.ORANGE_DARK, Colors.WARNING_BG_ALT)] if unallocated > 1e-9 else []
                 rows.controls.append(
                     ft.Container(
                         ft.Row([
                             ft.Container(ft.Icon(ft.Icons.SOUTH_WEST if receipt else ft.Icons.NORTH_EAST, size=18, color=accent), width=44, height=44, alignment=ft.alignment.center, bgcolor=Colors.SUCCESS_BG if receipt else Colors.DANGER_BG, border_radius=14),
                             ft.Column([
-                                ft.Text(f"{title} #{voucher['id']}", size=13, weight=ft.FontWeight.BOLD),
+                                ft.Row([ft.Text(f"{title} #{voucher['id']}", size=13, weight=ft.FontWeight.BOLD, expand=True), *badges]),
                                 ft.Text(f"{voucher.get('party_name') or '—'} • {voucher.get('voucher_date') or '—'}", size=10, color=Colors.TEXT_SECONDARY),
                                 ft.Text(f"موزع {self.money(allocated)}" + (f" • على الحساب {self.money(unallocated)}" if unallocated else ""), size=9, color=Colors.TEXT_SECONDARY),
                             ], spacing=2, expand=True),
@@ -162,7 +157,20 @@ class FinanceCenter:
                     )
                 )
             if not rows.controls:
-                rows.controls.append(ft.Container(ft.Column([ft.Icon(ft.Icons.RECEIPT_LONG_OUTLINED, size=46, color=Colors.BORDER_STRONG), ft.Text("لا توجد سندات مطابقة", color=Colors.TEXT_SECONDARY)], horizontal_alignment=ft.CrossAxisAlignment.CENTER), alignment=ft.alignment.center, padding=30))
+                if vouchers:
+                    rows.controls.append(empty_state(
+                        "لا توجد سندات مطابقة",
+                        icon=ft.Icons.RECEIPT_LONG_OUTLINED,
+                        hint="جرّب تغيير البحث أو عوامل التصفية",
+                    ))
+                else:
+                    rows.controls.append(empty_state(
+                        "لا توجد سندات بعد",
+                        icon=ft.Icons.RECEIPT_LONG_OUTLINED,
+                        hint="أنشئ أول سند قبض أو دفع لتتبع حركة الصندوق",
+                        action_label="سند قبض جديد",
+                        on_action=lambda _: self.show_voucher_dialog(None, "receipt"),
+                    ))
             update_filter_styles(); self.page.update()
 
         search.on_change = refresh
@@ -258,29 +266,41 @@ class FinanceCenter:
 
         render_fab()
 
-        # Section tabs, summary cards, and search/filters stay pinned above
-        # the scroll -- only the voucher list itself scrolls beneath them,
-        # instead of everything (including the totals the user is trying to
-        # keep an eye on) disappearing together the moment the list is long.
-        pinned_top = ft.Column(
-            [self._section_nav("vouchers"), summary, search, filters],
-            spacing=12,
-        )
-        scrollable_rows = ft.Container(
+        # Same sticky-header / scrolling-body split as invoice_view and
+        # items_view: the section tabs, search, and type filters live in a
+        # bordered white bar that stays put, while the KPI cards and the
+        # voucher list scroll together underneath it.
+        sticky_header = ft.Container(
             ft.Column(
                 [
+                    self._section_nav("vouchers"),
+                    search,
+                    ft.Column([ft.Text("نوع السند", size=10, color=Colors.TEXT_SECONDARY), filters], spacing=4),
+                ],
+                spacing=10,
+            ),
+            padding=ft.padding.only(left=16, right=16, top=14, bottom=12),
+            bgcolor=Colors.WHITE,
+            border=ft.border.only(bottom=ft.BorderSide(1, Colors.BORDER)),
+            shadow=Shadow.SM,
+        )
+        scroll_body = ft.Container(
+            ft.Column(
+                [
+                    summary,
                     rows,
                     # Breathing room so the last card never sits directly under
                     # the floating action button.
                     ft.Container(height=84),
                 ],
+                spacing=12,
                 scroll=ft.ScrollMode.AUTO,
                 expand=True,
             ),
             expand=True,
-            padding=ft.padding.only(top=12),
+            padding=ft.padding.only(top=12, left=16, right=16),
         )
-        body = ft.Column([pinned_top, scrollable_rows], spacing=0, expand=True)
+        body = ft.Column([sticky_header, scroll_body], spacing=0, expand=True)
         self.content.content = ft.Stack([body, scrim, fab_container], expand=True)
         refresh()
 
@@ -581,34 +601,41 @@ class FinanceCenter:
         search = SelectAllTextField(label="بحث في المصروفات", hint_text="البيان، التصنيف أو المرجع", prefix_icon=ft.Icons.SEARCH)
         rows = ft.Column(spacing=9)
         summary = ft.ResponsiveRow(spacing=8, run_spacing=8)
+        filter_state = {"month_only": False}
 
-        def metric(label: str, value: str, icon, accent: str):
-            return ft.Container(
-                ft.Row([
-                    ft.Container(ft.Icon(icon, size=19, color=accent), width=38, height=38, alignment=ft.alignment.center, bgcolor=Colors.BACKGROUND, border_radius=12),
-                    ft.Column([ft.Text(label, size=10, color=Colors.TEXT_SECONDARY), ft.Text(value, size=17, weight=ft.FontWeight.BOLD)], spacing=1, expand=True),
-                ]), padding=11, bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=16, shadow=Shadow.SM,
-            )
+        def toggle_month(_=None):
+            filter_state["month_only"] = not filter_state["month_only"]
+            refresh()
 
         def refresh(_=None):
             expenses = self.ctx.expenses.list_expenses()
             q = (search.value or "").strip().casefold()
-            filtered = [e for e in expenses if not q or q in f"{e.get('description','')} {e.get('category_name','')} {e.get('reference','')}".casefold()]
+            current_month = date.today().isoformat()[:7]
+            filtered = [
+                e for e in expenses
+                if (not q or q in f"{e.get('description','')} {e.get('category_name','')} {e.get('reference','')}".casefold())
+                and (not filter_state["month_only"] or str(e.get("expense_date") or "").startswith(current_month))
+            ]
             total = sum(float(e.get("amount") or 0) for e in expenses)
             categories = {str(e.get("category_name") or "بلا تصنيف") for e in expenses}
-            current_month = date.today().isoformat()[:7]
             month_total = sum(float(e.get("amount") or 0) for e in expenses if str(e.get("expense_date") or "").startswith(current_month))
             summary.controls = [
-                ft.Container(metric("إجمالي المصروفات", self.money(total), ft.Icons.PAYMENTS_OUTLINED, Colors.DANGER_DARK), col={"xs": 6, "md": 4}),
-                ft.Container(metric("هذا الشهر", self.money(month_total), ft.Icons.CALENDAR_MONTH_OUTLINED, Colors.ORANGE), col={"xs": 6, "md": 4}),
-                ft.Container(metric("التصنيفات", str(len(categories)), ft.Icons.CATEGORY_OUTLINED, Colors.PURPLE), col={"xs": 12, "md": 4}),
+                ft.Container(kpi_card("إجمالي المصروفات", self.money(total), ft.Icons.PAYMENTS_OUTLINED, Colors.DANGER_DARK), col={"xs": 6, "md": 4}),
+                ft.Container(kpi_card("هذا الشهر", self.money(month_total), ft.Icons.CALENDAR_MONTH_OUTLINED, Colors.ORANGE, on_tap=lambda _: toggle_month()), col={"xs": 6, "md": 4}),
+                ft.Container(kpi_card("التصنيفات", str(len(categories)), ft.Icons.CATEGORY_OUTLINED, Colors.PURPLE), col={"xs": 12, "md": 4}),
             ]
             rows.controls = []
             for exp in filtered:
                 rows.controls.append(ft.Container(
                     ft.Row([
                         ft.Container(ft.Icon(ft.Icons.RECEIPT_OUTLINED, size=18, color=Colors.ORANGE), width=44, height=44, alignment=ft.alignment.center, bgcolor=Colors.WARNING_BG_ALT, border_radius=14),
-                        ft.Column([ft.Text(exp["description"], size=13, weight=ft.FontWeight.BOLD), ft.Text(f"{exp.get('category_name') or 'بلا تصنيف'} • {exp.get('expense_date') or '—'}", size=10, color=Colors.TEXT_SECONDARY)], spacing=2, expand=True),
+                        ft.Column([
+                            ft.Row([
+                                ft.Text(exp["description"], size=13, weight=ft.FontWeight.BOLD, expand=True),
+                                status_pill(exp.get("category_name") or "بلا تصنيف", Colors.PURPLE, Colors.PURPLE_BG),
+                            ]),
+                            ft.Text(exp.get("expense_date") or "—", size=10, color=Colors.TEXT_SECONDARY),
+                        ], spacing=2, expand=True),
                         ft.Column([ft.Text(self.money(exp.get("amount")), size=15, weight=ft.FontWeight.BOLD, color=Colors.DANGER_DARK), ft.Text(exp.get("reference") or "بدون مرجع", size=9, color=Colors.TEXT_FAINT)], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END),
                         ft.PopupMenuButton(items=[
                             ft.PopupMenuItem(text="تعديل", icon=ft.Icons.EDIT_OUTLINED, on_click=lambda _, eid=int(exp["id"]): self.show_expense_dialog(eid)),
@@ -618,15 +645,49 @@ class FinanceCenter:
                     padding=12, bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=16, shadow=Shadow.SM,
                 ))
             if not rows.controls:
-                rows.controls.append(ft.Container(ft.Column([ft.Icon(ft.Icons.RECEIPT_OUTLINED, size=46, color=Colors.BORDER_STRONG), ft.Text("لا توجد مصروفات مطابقة", color=Colors.TEXT_SECONDARY)], horizontal_alignment=ft.CrossAxisAlignment.CENTER), alignment=ft.alignment.center, padding=30))
+                if expenses:
+                    rows.controls.append(empty_state(
+                        "لا توجد مصروفات مطابقة",
+                        icon=ft.Icons.RECEIPT_OUTLINED,
+                        hint="جرّب تغيير البحث أو عوامل التصفية",
+                    ))
+                else:
+                    rows.controls.append(empty_state(
+                        "لا توجد مصروفات بعد",
+                        icon=ft.Icons.RECEIPT_OUTLINED,
+                        hint="سجّل أول مصروف لمتابعة تكاليف النشاط",
+                        action_label="مصروف جديد",
+                        on_action=lambda _: self.show_expense_dialog(),
+                    ))
             self.page.update()
 
         search.on_change = refresh
-        self.content.content = ft.Column([
-            self._section_nav("expenses"), summary,
-            ft.Row([ft.FilledButton("سند مصروف", icon=ft.Icons.ADD, on_click=lambda _: self.show_expense_dialog())]),
-            search, rows,
-        ], spacing=12, scroll=ft.ScrollMode.AUTO)
+        # Same sticky-header / scrolling-body split as show_vouchers and
+        # invoice_view: section tabs + search stay pinned, KPI cards and the
+        # expense list scroll together beneath them.
+        sticky_header = ft.Container(
+            ft.Column([self._section_nav("expenses"), search], spacing=10),
+            padding=ft.padding.only(left=16, right=16, top=14, bottom=12),
+            bgcolor=Colors.WHITE,
+            border=ft.border.only(bottom=ft.BorderSide(1, Colors.BORDER)),
+            shadow=Shadow.SM,
+        )
+        scroll_body = ft.Container(
+            ft.Column(
+                [
+                    summary,
+                    ft.Row([ft.FilledButton("مصروف جديد", icon=ft.Icons.ADD, on_click=lambda _: self.show_expense_dialog())]),
+                    rows,
+                    ft.Container(height=24),
+                ],
+                spacing=12,
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+            ),
+            expand=True,
+            padding=ft.padding.only(top=12, left=16, right=16),
+        )
+        self.content.content = ft.Column([sticky_header, scroll_body], spacing=0, expand=True)
         refresh()
 
     def show_expense_dialog(self, expense_id: int | None = None) -> None:
@@ -781,75 +842,86 @@ class FinanceCenter:
                 result.controls.append(
                     ft.ResponsiveRow(
                         [
-                            ft.Container(self._metric("الرصيد الحالي", f"{self.money(abs(balance))} — {balance_label}"), col={"xs": 12, "md": 4}),
-                            ft.Container(self._metric("الرصيد الافتتاحي للفترة", self.money(data["opening_balance"])), col={"xs": 6, "md": 4}),
-                            ft.Container(self._metric("فواتير مفتوحة", str(len(data["open_invoices"]))), col={"xs": 6, "md": 4}),
-                        ]
+                            ft.Container(kpi_card("الرصيد الحالي", f"{self.money(abs(balance))} — {balance_label}", ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.PRIMARY if balance >= 0 else Colors.SUCCESS), col={"xs": 12, "md": 4}),
+                            ft.Container(kpi_card("الرصيد الافتتاحي للفترة", self.money(data["opening_balance"]), ft.Icons.HISTORY_OUTLINED, Colors.PURPLE), col={"xs": 6, "md": 4}),
+                            ft.Container(kpi_card("فواتير مفتوحة", str(len(data["open_invoices"])), ft.Icons.RECEIPT_LONG_OUTLINED, Colors.ORANGE), col={"xs": 6, "md": 4}),
+                        ],
+                        spacing=8, run_spacing=8,
                     )
                 )
+                # Same icon-badge card language as the vouchers/invoices
+                # list rows -- an inflow is styled like a "قبض" row, an
+                # outflow like a "دفع" row, instead of a plain bordered line.
                 for row in data["rows"]:
                     movement = float(row["movement"])
-                    movement_text = f"+{self.money(movement)}" if movement >= 0 else f"-{self.money(abs(movement))}"
+                    inflow = movement >= 0
+                    movement_text = f"+{self.money(movement)}" if inflow else f"-{self.money(abs(movement))}"
+                    accent = Colors.SUCCESS if inflow else Colors.DANGER_DARK
                     result.controls.append(
                         ft.Container(
                             ft.Row(
                                 [
+                                    ft.Container(ft.Icon(ft.Icons.SOUTH_WEST if inflow else ft.Icons.NORTH_EAST, size=18, color=accent), width=44, height=44, alignment=ft.alignment.center, bgcolor=Colors.SUCCESS_BG if inflow else Colors.DANGER_BG, border_radius=14),
                                     ft.Column(
                                         [
-                                            ft.Text(row["description"] or row["source_label"], weight=ft.FontWeight.BOLD),
-                                            ft.Text(f"{row['entry_date']} • {row['source_label']} #{row['source_id'] or '—'}", size=11, color=Colors.TEXT_SECONDARY),
+                                            ft.Text(row["description"] or row["source_label"], size=13, weight=ft.FontWeight.BOLD),
+                                            ft.Text(f"{row['entry_date']} • {row['source_label']} #{row['source_id'] or '—'}", size=10, color=Colors.TEXT_SECONDARY),
                                         ],
                                         expand=True,
                                         spacing=2,
                                     ),
                                     ft.Column(
                                         [
-                                            ft.Text(movement_text, weight=ft.FontWeight.BOLD),
-                                            ft.Text(f"الرصيد {self.money(row['balance'])}", size=11, color=Colors.TEXT_SECONDARY),
+                                            ft.Text(movement_text, size=15, weight=ft.FontWeight.BOLD, color=accent),
+                                            ft.Text(f"الرصيد {self.money(row['balance'])}", size=9, color=Colors.TEXT_FAINT),
                                         ],
-                                        horizontal_alignment=ft.CrossAxisAlignment.END,
+                                        spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END,
                                     ),
-                                ]
+                                ],
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
                             ),
-                            padding=10,
-                            border=ft.border.all(1, Colors.BORDER_ALT),
-                            border_radius=10,
-                            bgcolor=Colors.WHITE,
-                            shadow=Shadow.SM,
+                            padding=12, bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=16, shadow=Shadow.SM,
                         )
                     )
                 if not data["rows"]:
-                    result.controls.append(ft.Text("لا توجد حركات في الفترة المحددة.", color=Colors.TEXT_SECONDARY))
+                    result.controls.append(empty_state(
+                        "لا توجد حركات في الفترة المحددة",
+                        icon=ft.Icons.SWAP_VERT_ROUNDED,
+                        hint="جرّب توسيع نطاق التاريخ",
+                    ))
             except Exception as exc:
                 export_actions.visible = False
                 self.notify(str(exc), kind="error")
             self.page.update()
 
         party_dd.on_change = render
-        self.content.content = ft.Column(
-            [
-                self._section_nav(active),
-                ft.ResponsiveRow(
-                    [
-                        ft.Container(party_dd, col={"xs": 12, "md": 6}),
-                        ft.Container(date_from, col={"xs": 6, "md": 3}),
-                        ft.Container(date_to, col={"xs": 6, "md": 3}),
-                    ]
-                ),
-                ft.Row([ft.FilledButton("عرض الكشف", icon=ft.Icons.SEARCH, on_click=render), export_actions], wrap=True),
-                result,
-            ],
-            spacing=12,
-            scroll=ft.ScrollMode.AUTO,
-        )
-        self.page.update()
-
-    def _metric(self, title: str, value: str) -> ft.Container:
-        return ft.Container(
-            ft.Column([ft.Text(title, size=11, color=Colors.TEXT_SECONDARY), ft.Text(value, size=17, weight=ft.FontWeight.BOLD)], spacing=3),
-            padding=10,
-            border=ft.border.all(1, Colors.BORDER_ALT),
-            border_radius=10,
+        # Same sticky-header / scrolling-body split as the other finance
+        # sections: section tabs and the account/date filters stay pinned,
+        # the KPI cards and statement rows scroll beneath them.
+        sticky_header = ft.Container(
+            ft.Column(
+                [
+                    self._section_nav(active),
+                    ft.ResponsiveRow(
+                        [
+                            ft.Container(party_dd, col={"xs": 12, "md": 6}),
+                            ft.Container(date_from, col={"xs": 6, "md": 3}),
+                            ft.Container(date_to, col={"xs": 6, "md": 3}),
+                        ]
+                    ),
+                    ft.Row([ft.FilledButton("عرض الكشف", icon=ft.Icons.SEARCH, on_click=render), export_actions], wrap=True),
+                ],
+                spacing=10,
+            ),
+            padding=ft.padding.only(left=16, right=16, top=14, bottom=12),
             bgcolor=Colors.WHITE,
+            border=ft.border.only(bottom=ft.BorderSide(1, Colors.BORDER)),
             shadow=Shadow.SM,
         )
+        scroll_body = ft.Container(
+            ft.Column([result, ft.Container(height=24)], spacing=12, scroll=ft.ScrollMode.AUTO, expand=True),
+            expand=True,
+            padding=ft.padding.only(top=12, left=16, right=16),
+        )
+        self.content.content = ft.Column([sticky_header, scroll_body], spacing=0, expand=True)
+        self.page.update()
