@@ -268,10 +268,7 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
 
     def navigate(key: str) -> None:
         action = actions.get(key)
-        if action is None:
-            return
-        if key not in allowed_keys:
-            notify(f"لا تملك صلاحية الوصول إلى «{label_map.get(key, key)}»")
+        if action is None or key not in allowed_keys:
             return
         selected_key["value"] = key
         title, subtitle = page_meta[key]
@@ -288,7 +285,6 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         try:
             action()
         except Exception as exc:
-            # Never leave the shell stuck at opacity 0 if a view fails to build.
             content.opacity = 1
             try:
                 content.update()

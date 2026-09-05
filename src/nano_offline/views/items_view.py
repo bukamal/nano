@@ -1198,8 +1198,7 @@ class ItemsCenter:
                                 ft.Text("سعر البيع: ", size=11, color=Colors.TEXT_SECONDARY),
                                 ft.Text(self.money(item.get("selling_price")), size=11, weight=ft.FontWeight.BOLD, color=Colors.TEXT_SECONDARY),
                             ],
-                            spacing=0,
-                            tight=True,
+                            spacing=0, tight=True,
                         )
                     )
                 if include_purchase.value:
@@ -1209,8 +1208,7 @@ class ItemsCenter:
                                 ft.Text("سعر الشراء: ", size=11, color=Colors.TEXT_SECONDARY),
                                 ft.Text(self.money(item.get("purchase_price")), size=11, weight=ft.FontWeight.BOLD, color=Colors.TEXT_SECONDARY),
                             ],
-                            spacing=0,
-                            tight=True,
+                            spacing=0, tight=True,
                         )
                     )
                 if include_category.value and item.get("category_name"):
@@ -1360,8 +1358,7 @@ class ItemsCenter:
                                 ft.Text("سعر البيع: ", size=11, color=Colors.TEXT_SECONDARY),
                                 ft.Text(self.money(parsed["selling_price"]), size=11, weight=ft.FontWeight.BOLD, color=Colors.TEXT_SECONDARY),
                             ],
-                            spacing=0,
-                            tight=True,
+                            spacing=0, tight=True,
                         )
                     )
                 if parsed.get("purchase_price") is not None:
@@ -1371,8 +1368,7 @@ class ItemsCenter:
                                 ft.Text("سعر الشراء: ", size=11, color=Colors.TEXT_SECONDARY),
                                 ft.Text(self.money(parsed["purchase_price"]), size=11, weight=ft.FontWeight.BOLD, color=Colors.TEXT_SECONDARY),
                             ],
-                            spacing=0,
-                            tight=True,
+                            spacing=0, tight=True,
                         )
                     )
                 if parsed.get("category"):

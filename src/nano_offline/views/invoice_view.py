@@ -20,8 +20,6 @@ from nano_offline.components import (
     new_form_sheet,
     render_form_sheet,
     status_pill,
-    money_text_from_str,
-    labeled_money_from_str,
 )
 
 from nano_offline.services.invoice_service import InvoiceLineInput
@@ -272,14 +270,10 @@ class InvoiceCenter:
                             ft.Column(
                                 [
                                     ft.Text(name, size=12, weight=ft.FontWeight.W_600),
-                                    # Split qty/unit from unit_price so the currency
-                                    # symbol keeps the same order as on list cards
-                                    # (amount then symbol) instead of being reordered
-                                    # by RTL/bidi inside an Arabic phrase.
                                     ft.Row(
                                         [
                                             ft.Text(f"{self._qty(qty)} {unit} × ", size=10, color=Colors.TEXT_SECONDARY),
-                                            money_text_from_str(self.money(unit_price), size=10, color=Colors.TEXT_SECONDARY),
+                                            ft.Text(self.money(unit_price), size=10, color=Colors.TEXT_SECONDARY),
                                         ],
                                         spacing=0,
                                         tight=True,
@@ -287,7 +281,7 @@ class InvoiceCenter:
                                 ],
                                 spacing=1, expand=True,
                             ),
-                            money_text_from_str(self.money(line_total), size=12, weight=ft.FontWeight.BOLD),
+                            ft.Text(self.money(line_total), size=12, weight=ft.FontWeight.BOLD),
                         ],
                     ),
                     padding=8, bgcolor=Colors.BACKGROUND, border_radius=11,
@@ -459,14 +453,14 @@ class InvoiceCenter:
                     secondary_control = ft.Text("مسددة بالكامل", size=10, color=Colors.TEXT_SECONDARY)
                 else:
                     highlight_label, highlight_value, highlight_color = "المتبقي", self.money(remaining), (Colors.ORANGE if remaining > 1e-9 else Colors.SUCCESS)
-                    secondary_parts: list[ft.Control] = [
+                    secondary_parts = [
                         ft.Text("من إجمالي ", size=10, color=Colors.TEXT_SECONDARY),
-                        money_text_from_str(self.money(total), size=10, color=Colors.TEXT_SECONDARY),
+                        ft.Text(self.money(total), size=10, color=Colors.TEXT_SECONDARY),
                     ]
                     if paid_amount > 1e-9:
                         secondary_parts.extend([
                             ft.Text(" • مدفوع ", size=10, color=Colors.TEXT_SECONDARY),
-                            money_text_from_str(self.money(paid_amount), size=10, color=Colors.TEXT_SECONDARY),
+                            ft.Text(self.money(paid_amount), size=10, color=Colors.TEXT_SECONDARY),
                         ])
                     secondary_control = ft.Row(secondary_parts, spacing=0, tight=True)
 
@@ -501,20 +495,7 @@ class InvoiceCenter:
                     ft.Divider(height=1, color=Colors.BACKGROUND_ALT),
                     ft.Row(
                         [
-                            ft.Column(
-                                [
-                                    ft.Text(highlight_label, size=9, color=Colors.TEXT_FAINT),
-                                    money_text_from_str(
-                                        highlight_value,
-                                        size=17,
-                                        weight=ft.FontWeight.BOLD,
-                                        color=highlight_color,
-                                    ),
-                                ],
-                                spacing=2,
-                            ),
-                            # secondary_line may embed money amounts; keep those
-                            # LTR so the currency symbol matches list/item cards.
+                            ft.Column([ft.Text(highlight_label, size=9, color=Colors.TEXT_FAINT), ft.Text(highlight_value, size=17, weight=ft.FontWeight.BOLD, color=highlight_color)], spacing=2),
                             secondary_control,
                         ],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.END,
@@ -682,10 +663,7 @@ class InvoiceCenter:
                                             f"{len(overdue_invoices)} فاتورة متأخرة السداد أكثر من 30 يومًا بقيمة ",
                                             size=11, color=Colors.DANGER_DARKER,
                                         ),
-                                        money_text_from_str(
-                                            self.money(overdue_total),
-                                            size=11, color=Colors.DANGER_DARKER,
-                                        ),
+                                        ft.Text(self.money(overdue_total), size=11, color=Colors.DANGER_DARKER),
                                     ],
                                     spacing=0,
                                     tight=True,
@@ -848,7 +826,7 @@ class InvoiceCenter:
                 ft.Row(
                     [
                         ft.Text(f"{invoice.get('party_name') or '—'} • المتبقي ", color=Colors.TEXT_SECONDARY),
-                        money_text_from_str(self.money(remaining), color=Colors.TEXT_SECONDARY),
+                        ft.Text(self.money(remaining), color=Colors.TEXT_SECONDARY),
                     ],
                     spacing=0,
                     tight=True,

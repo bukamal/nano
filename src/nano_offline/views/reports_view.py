@@ -4,7 +4,7 @@ import flet as ft
 
 from nano_offline.core.toast import toast
 
-from nano_offline.components import SmartDateField, empty_state, money_text_from_str
+from nano_offline.components import SmartDateField, empty_state
 from nano_offline.core.theme import Colors, Radius, Shadow
 from nano_offline.core import currency
 from nano_offline.core import reporting_settings

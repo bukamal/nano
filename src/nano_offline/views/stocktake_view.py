@@ -5,7 +5,7 @@ import time
 import flet as ft
 
 from nano_offline.core.toast import toast
-from nano_offline.components import SelectAllTextField, SearchSelect, SmartAmountField, empty_state, money_text_from_str
+from nano_offline.components import SelectAllTextField, SearchSelect, SmartAmountField, empty_state
 from nano_offline.components.buttons import inline_icon_button
 from nano_offline.core.theme import Colors
 from nano_offline.core import barcode_settings
