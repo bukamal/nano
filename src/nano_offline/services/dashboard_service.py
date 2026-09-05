@@ -98,12 +98,13 @@ class DashboardService:
             rows = conn.execute(
                 """
                 SELECT it.id AS item_id, it.name, it.quantity,
+                       it.purchase_price, it.average_cost,
                        COALESCE(SUM(CASE WHEN im.quantity_delta<0 THEN -im.quantity_delta ELSE 0 END),0) AS sold_qty
                 FROM items it
                 LEFT JOIN inventory_movements im
                        ON im.item_id=it.id AND im.movement_type='sale' AND im.movement_date>=?
                 WHERE it.item_type='مخزون'
-                GROUP BY it.id, it.name, it.quantity
+                GROUP BY it.id, it.name, it.quantity, it.purchase_price, it.average_cost
                 """,
                 (start,),
             ).fetchall()
@@ -116,6 +117,8 @@ class DashboardService:
             velocity = sold / window_days
             days_left = quantity / velocity
             if days_left <= horizon_days:
+                # Order enough to cover another full horizon after restock.
+                suggested = max(velocity * horizon_days - quantity, velocity * 7, 1.0)
                 predictions.append(
                     {
                         "item_id": row["item_id"],
@@ -123,7 +126,30 @@ class DashboardService:
                         "quantity": quantity,
                         "daily_velocity": velocity,
                         "days_left": days_left,
+                        "suggested_qty": round(suggested, 2),
+                        "purchase_price": float(row["purchase_price"] or 0),
+                        "average_cost": float(row["average_cost"] or 0),
                     }
                 )
         predictions.sort(key=lambda p: p["days_left"])
         return predictions[: max(1, int(limit))]
+
+    def purchase_list(
+        self, *, window_days: int = 30, horizon_days: int = 14, limit: int = 50
+    ) -> dict:
+        """Build a ready-to-order purchase list from restock predictions.
+
+        Returns ``{"lines": [...], "estimated_cost_usd": float, "count": int}``.
+        Each line includes ``suggested_qty`` and cost estimates in stored USD.
+        """
+        lines = self.restock_predictions(
+            window_days=window_days, horizon_days=horizon_days, limit=limit
+        )
+        total = 0.0
+        for line in lines:
+            unit_cost = float(line.get("average_cost") or line.get("purchase_price") or 0)
+            qty = float(line.get("suggested_qty") or 0)
+            line["line_cost_usd"] = unit_cost * qty
+            total += line["line_cost_usd"]
+        return {"lines": lines, "estimated_cost_usd": total, "count": len(lines)}
+

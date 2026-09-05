@@ -13,6 +13,7 @@ from nano_offline.components.buttons import hero_button, stepper_icon_button
 from nano_offline.services.invoice_service import InvoiceLineInput
 from nano_offline.core.theme import Colors, IconSize, LazyPalette, Radius, Shadow
 from nano_offline.core import currency
+from nano_offline.core.margin_guard import cart_margin_warnings
 from nano_offline.core import barcode_settings
 from nano_offline.core import pos_settings
 from nano_offline.core import sound as sound_engine
@@ -599,6 +600,17 @@ class POSCenter:
                 self.notify("السلة فارغة")
                 return False
             try:
+                rows_list = [self.cart[i] for i in self.cart_order]
+                margin_issues = cart_margin_warnings(rows_list, self.ctx.settings)
+                if margin_issues and not getattr(self, "_margin_override", False):
+                    names = "، ".join(str(w.get("name") or "") for w in margin_issues[:3])
+                    self.notify(
+                        f"تحذير هامش: {names} — اضغط دفع مرة أخرى للتأكيد",
+                        kind="warning",
+                    )
+                    self._margin_override = True
+                    return False
+                self._margin_override = False
                 lines = [
                     InvoiceLineInput(
                         description=str(row["item"]["name"]),
@@ -606,7 +618,7 @@ class POSCenter:
                         quantity=float(row["qty"]),
                         unit_price=float(row["item"]["selling_price"]),
                     )
-                    for row in (self.cart[i] for i in self.cart_order)
+                    for row in rows_list
                 ]
                 total = total_amount()
                 received = received_amount()

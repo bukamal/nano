@@ -378,7 +378,138 @@ class DashboardCenter:
             shadow=Shadow.SM,
         )
 
+    # -- decision of the day (smart assistant) ------------------------------
+    def _decision_of_day_card(self, decision) -> ft.Container:
+        """Hero card: the single most important next step for the owner."""
+        severity = getattr(decision, "severity", "info") or "info"
+        try:
+            color, bg, icon = SEVERITY_STYLE.get(severity, SEVERITY_STYLE.get("info"))
+        except Exception:
+            color, bg, icon = Colors.PRIMARY, Colors.PRIMARY_BG, ft.Icons.AUTO_AWESOME_ROUNDED
+        kind_icons = {
+            "restock": ft.Icons.INVENTORY_2_OUTLINED,
+            "collect": ft.Icons.PERSON_OUTLINE,
+            "stock": ft.Icons.WARNING_AMBER_ROUNDED,
+            "backup": ft.Icons.BACKUP_OUTLINED,
+            "license": ft.Icons.VERIFIED_USER_OUTLINED,
+            "cash": ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED,
+            "fx": ft.Icons.CURRENCY_EXCHANGE_ROUNDED,
+            "insight": ft.Icons.LIGHTBULB_OUTLINE,
+        }
+        icon = kind_icons.get(getattr(decision, "kind", ""), icon)
+
+        def _act(_e=None):
+            kind = getattr(decision, "kind", None)
+            target = getattr(decision, "action_target", None)
+            if kind == "restock":
+                self._open_purchase_list()
+            elif kind == "cash":
+                self._open_day_close()
+            elif target == "dashboard":
+                self._open_rate_sheet()
+            elif target and self.on_navigate:
+                self.on_navigate(target)
+            elif self.on_open_notifications:
+                self.on_open_notifications()
+
+        actions = []
+        if getattr(decision, "action_label", None):
+            actions.append(
+                ft.Container(
+                    ft.Text(decision.action_label, size=11, weight=ft.FontWeight.W_600, color=Colors.WHITE),
+                    padding=ft.padding.symmetric(horizontal=12, vertical=7),
+                    bgcolor=color,
+                    border_radius=20,
+                    on_click=_act,
+                    ink=True,
+                )
+            )
+
+        return ft.Container(
+            ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Container(
+                                ft.Icon(icon, size=22, color=color),
+                                width=44, height=44, alignment=ft.alignment.center,
+                                bgcolor=Colors.WHITE, border_radius=14,
+                            ),
+                            ft.Column(
+                                [
+                                    ft.Text("قرار اليوم", size=10, color=Colors.TEXT_SECONDARY, weight=ft.FontWeight.W_600),
+                                    ft.Text(decision.title, size=15, weight=ft.FontWeight.BOLD, color=Colors.TEXT_PRIMARY),
+                                ],
+                                spacing=2, expand=True,
+                            ),
+                        ],
+                        spacing=10,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Text(decision.body, size=12, color=Colors.TEXT_SECONDARY),
+                    ft.Row(actions, spacing=8) if actions else ft.Container(height=0),
+                ],
+                spacing=10,
+            ),
+            padding=14,
+            bgcolor=bg,
+            border=ft.border.all(1, color),
+            border_radius=18,
+            shadow=Shadow.SM,
+        )
+
+    def _decisions_list(self, decisions: list) -> list[ft.Control]:
+        """Compact follow-up decisions under the hero card."""
+        rows: list[ft.Control] = []
+        for d in decisions[1:6]:
+            sev = getattr(d, "severity", "info") or "info"
+            try:
+                color, _bg, _ic = SEVERITY_STYLE.get(sev, SEVERITY_STYLE.get("info"))
+            except Exception:
+                color = Colors.PRIMARY
+
+            def _make_click(decision):
+                def _click(_e=None):
+                    kind = getattr(decision, "kind", None)
+                    target = getattr(decision, "action_target", None)
+                    if kind == "restock":
+                        self._open_purchase_list()
+                    elif kind == "cash":
+                        self._open_day_close()
+                    elif target == "dashboard":
+                        self._open_rate_sheet()
+                    elif target and self.on_navigate:
+                        self.on_navigate(target)
+                return _click
+
+            rows.append(
+                ft.Container(
+                    ft.Row(
+                        [
+                            ft.Container(width=8, height=8, bgcolor=color, border_radius=4),
+                            ft.Column(
+                                [
+                                    ft.Text(d.title, size=12, weight=ft.FontWeight.W_600),
+                                    ft.Text(d.body, size=10, color=Colors.TEXT_FAINT, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
+                                ],
+                                spacing=1, expand=True,
+                            ),
+                            ft.Icon(ft.Icons.CHEVRON_LEFT, size=16, color=Colors.TEXT_FAINT),
+                        ],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    padding=ft.padding.symmetric(horizontal=10, vertical=8),
+                    bgcolor=Colors.BACKGROUND,
+                    border_radius=12,
+                    on_click=_make_click(d),
+                    ink=True,
+                )
+            )
+        return rows
+
     # -- smart insight banner ------------------------------------------------
+
     def _smart_insight(self, *, alerts: list, best_sellers: list, profit_change: float | None, net_profit: float) -> ft.Container:
         """One headline insight, picked by priority: an urgent smart alert,
         otherwise the current top seller, otherwise the profit trend, with a
@@ -601,6 +732,186 @@ class DashboardCenter:
             spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
+    def _open_purchase_list(self, _e=None) -> None:
+        """Suggested purchase order from restock predictions."""
+        from nano_offline.components.form_sheet import new_form_sheet, render_form_sheet
+        try:
+            data = self.ctx.dashboard.purchase_list(limit=40)
+        except Exception as exc:
+            self._notify(str(exc), kind="error")
+            return
+        lines = data.get("lines") or []
+        sheet = new_form_sheet()
+
+        def close(_=None):
+            self.page.close(sheet)
+
+        rows: list[ft.Control] = []
+        if not lines:
+            rows.append(ft.Text("لا توجد مواد تحتاج إعادة طلب حاليًا.", size=12, color=Colors.TEXT_SECONDARY))
+        else:
+            for line in lines:
+                rows.append(
+                    ft.Container(
+                        ft.Row(
+                            [
+                                ft.Column(
+                                    [
+                                        ft.Text(str(line.get("name") or "—"), size=13, weight=ft.FontWeight.W_600),
+                                        ft.Text(
+                                            f"متبقي {float(line.get('quantity') or 0):g} · يكفي ~{float(line.get('days_left') or 0):.0f} يوم",
+                                            size=10, color=Colors.TEXT_FAINT,
+                                        ),
+                                    ],
+                                    spacing=2, expand=True,
+                                ),
+                                ft.Column(
+                                    [
+                                        ft.Text(f"اطلب {float(line.get('suggested_qty') or 0):g}", size=12, weight=ft.FontWeight.BOLD, color=Colors.PRIMARY),
+                                        ft.Text(self.money(line.get("line_cost_usd")), size=10, color=Colors.TEXT_SECONDARY),
+                                    ],
+                                    spacing=2,
+                                    horizontal_alignment=ft.CrossAxisAlignment.END,
+                                ),
+                            ],
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        padding=10,
+                        bgcolor=Colors.BACKGROUND,
+                        border_radius=12,
+                    )
+                )
+            rows.append(
+                ft.Container(
+                    ft.Row(
+                        [
+                            ft.Text("تكلفة تقديرية", size=12, color=Colors.TEXT_SECONDARY, expand=True),
+                            ft.Text(self.money(data.get("estimated_cost_usd")), size=14, weight=ft.FontWeight.BOLD),
+                        ]
+                    ),
+                    padding=12,
+                    bgcolor=Colors.PRIMARY_BG,
+                    border_radius=12,
+                )
+            )
+
+        render_form_sheet(
+            self.page,
+            sheet,
+            title="قائمة شراء مقترحة",
+            fields=[
+                ft.Text("حسب سرعة البيع خلال 30 يومًا — للتحضير لطلب المورد.", size=12, color=Colors.TEXT_SECONDARY),
+                ft.Column(rows, spacing=6, scroll=ft.ScrollMode.AUTO, height=360),
+            ],
+            on_close=close,
+            on_save=lambda _: (close(), self.on_navigate("items") if self.on_navigate else None),
+            save_label="فتح المواد",
+            save_icon=ft.Icons.INVENTORY_2_OUTLINED,
+        )
+        self.page.open(sheet)
+
+    def _open_day_close(self, _e=None) -> None:
+        """End-of-day cash count vs book balance."""
+        from nano_offline.components.form_sheet import new_form_sheet, render_form_sheet
+        from nano_offline.components.text_field import SelectAllTextField
+        from nano_offline.core import currency as currency_mod
+
+        book = self.ctx.cash_day_close.book_cash()
+        movement = self.ctx.cash_day_close.today_cash_movement()
+        last = self.ctx.cash_day_close.last_close()
+        sheet = new_form_sheet()
+        counted_field = SelectAllTextField(
+            label=currency_mod.amount_field_label("المبلغ المعدود في الصندوق", self.ctx.settings),
+            value=currency_mod.to_input_text(book, self.ctx.settings),
+            keyboard_type=ft.KeyboardType.NUMBER,
+            prefix_icon=ft.Icons.PAYMENTS_OUTLINED,
+        )
+        note_field = SelectAllTextField(label="ملاحظة (اختياري)", multiline=True, min_lines=1, max_lines=3)
+        adjust_switch = ft.Switch(label="ترحيل تسوية للصندوق لتطابق العدّ", value=True)
+        preview = ft.Text("", size=12, color=Colors.TEXT_SECONDARY)
+
+        def refresh_preview(_=None):
+            try:
+                counted_disp = float((counted_field.value or "0").replace(",", "").strip() or 0)
+                counted_usd = currency_mod.parse_display_input(counted_field.value, self.ctx.settings)
+            except Exception:
+                counted_usd = 0.0
+            var = counted_usd - book
+            preview.value = (
+                f"دفتر الصندوق: {self.money(book)} · معدود: {self.money(counted_usd)} · "
+                f"الفرق: {self.money(var)}"
+            )
+            preview.color = Colors.SUCCESS if abs(var) < 1e-6 else Colors.WARNING_DARK
+            try:
+                preview.update()
+            except Exception:
+                pass
+
+        counted_field.on_change = refresh_preview
+        refresh_preview()
+
+        def close(_=None):
+            self.page.close(sheet)
+
+        def save(_=None):
+            try:
+                counted_usd = currency_mod.parse_display_input(counted_field.value, self.ctx.settings)
+            except Exception as exc:
+                self._notify(str(exc), kind="error")
+                return
+            session = None
+            try:
+                session = self.ctx.auth.current()
+            except Exception:
+                pass
+            try:
+                result = self.ctx.cash_day_close.close_day(
+                    counted_cash=counted_usd,
+                    note=note_field.value or "",
+                    post_adjustment=bool(adjust_switch.value),
+                    username=getattr(session, "username", None) if session else None,
+                    user_id=getattr(session, "id", None) if session else None,
+                )
+            except Exception as exc:
+                self._notify(str(exc), kind="error")
+                return
+            close()
+            var = float(result.get("variance") or 0)
+            msg = "تم إغلاق يوم الصندوق"
+            if abs(var) > 1e-6:
+                msg += f" — فرق {self.money(var)}"
+                if result.get("adjustment_posted"):
+                    msg += " (مع تسوية)"
+            self._notify(msg, kind="success", sound_kind="save")
+            self.show_center()
+
+        last_line = ""
+        if last:
+            last_line = f"آخر إغلاق: {last.get('date') or '—'} · معدود {self.money(last.get('counted_cash'))}"
+
+        render_form_sheet(
+            self.page,
+            sheet,
+            title="إغلاق يوم الصندوق",
+            fields=[
+                ft.Text(
+                    f"حركة اليوم — وارد: {self.money(movement['inflow'])} · صادر: {self.money(movement['outflow'])}",
+                    size=12, color=Colors.TEXT_SECONDARY,
+                ),
+                ft.Text(f"رصيد الدفتر الآن: {self.money(book)}", size=13, weight=ft.FontWeight.BOLD),
+                counted_field,
+                preview,
+                adjust_switch,
+                note_field,
+                ft.Text(last_line, size=10, color=Colors.TEXT_FAINT) if last_line else ft.Container(height=0),
+            ],
+            on_close=close,
+            on_save=save,
+            save_label="إغلاق اليوم",
+            save_icon=ft.Icons.LOCK_CLOCK_OUTLINED,
+        )
+        self.page.open(sheet)
+
     def show_center(self) -> None:
         self._set_header("لوحة التحكم", "نظرة عامة على أداء عملك")
         summary = self.ctx.dashboard.summary()
@@ -629,6 +940,12 @@ class DashboardCenter:
             smart_alerts = self.ctx.notifications.generate_alerts()
         except Exception:
             smart_alerts = []
+        try:
+            decisions = self.ctx.smart_assistant.decisions(limit=8)
+            decision_today = self.ctx.smart_assistant.decision_of_the_day()
+        except Exception:
+            decisions = []
+            decision_today = None
 
         # -- business insights: best sellers this period + items projected
         # to run out soon based on actual sale velocity ------------------
@@ -743,6 +1060,8 @@ class DashboardCenter:
 
         scrollable_body = ft.Column(
             [
+                self._decision_of_day_card(decision_today) if decision_today is not None else ft.Container(),
+                ft.Column(self._decisions_list(decisions), spacing=6) if decisions and len(decisions) > 1 else ft.Container(),
                 self._smart_insight(alerts=smart_alerts, best_sellers=best_sellers, profit_change=profit_change, net_profit=current_stmt["net_profit"]),
                 ft.ResponsiveRow(
                     [
@@ -761,6 +1080,8 @@ class DashboardCenter:
                                     self._action("بيع", ft.Icons.SHOPPING_CART_CHECKOUT, lambda _: self.on_open_sale(), primary=True),
                                     self._action("شراء", ft.Icons.ADD_SHOPPING_CART, lambda _: self.on_open_purchase()),
                                     self._action("الفواتير", ft.Icons.RECEIPT_LONG_OUTLINED, lambda _: self.on_navigate("invoices")),
+                                    self._action("قائمة شراء", ft.Icons.SHOPPING_BAG_OUTLINED, lambda _: self._open_purchase_list()),
+                                    self._action("إغلاق يوم", ft.Icons.LOCK_CLOCK_OUTLINED, lambda _: self._open_day_close()),
                                     self._action("المواد", ft.Icons.INVENTORY_2_OUTLINED, lambda _: self.on_navigate("items")),
                                 ],
                                 alignment=ft.MainAxisAlignment.SPACE_AROUND,

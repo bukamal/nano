@@ -1251,32 +1251,144 @@ class AdminCenter:
                 self._notify(str(exc), kind="error")
 
         audit_list = ft.Column(spacing=6)
+        audit_filter = {"entity": "all", "query": ""}
+        audit_search = SelectAllTextField(
+            label="بحث في السجل",
+            hint_text="إجراء، نوع، مستخدم، تفاصيل…",
+            prefix_icon=ft.Icons.SEARCH,
+        )
+        audit_entity_dd = ft.Dropdown(
+            label="النوع",
+            value="all",
+            options=[
+                ft.dropdown.Option("all", "الكل"),
+                ft.dropdown.Option("item", "مواد"),
+                ft.dropdown.Option("user", "مستخدمون"),
+                ft.dropdown.Option("customer", "عملاء"),
+                ft.dropdown.Option("supplier", "موردون"),
+                ft.dropdown.Option("invoice", "فواتير"),
+                ft.dropdown.Option("payment", "دفعات"),
+                ft.dropdown.Option("voucher", "سندات"),
+                ft.dropdown.Option("expense", "مصروفات"),
+                ft.dropdown.Option("settings", "إعدادات"),
+            ],
+            filled=True,
+            bgcolor=Colors.BACKGROUND_ALT,
+            width=160,
+        )
+        audit_count_label = ft.Text("", size=11, color=Colors.TEXT_FAINT)
+
+        _ACTION_AR = {
+            "create": "إنشاء",
+            "update": "تعديل",
+            "delete": "حذف",
+            "password_reset": "إعادة تعيين كلمة المرور",
+            "login": "تسجيل دخول",
+            "logout": "تسجيل خروج",
+            "restore": "استعادة نسخة",
+            "backup": "نسخة احتياطية",
+            "day_close": "إغلاق يوم الصندوق",
+        }
+        _ENTITY_AR = {
+            "item": "مادة",
+            "user": "مستخدم",
+            "customer": "عميل",
+            "supplier": "مورد",
+            "invoice": "فاتورة",
+            "payment": "دفعة",
+            "voucher": "سند",
+            "expense": "مصروف",
+            "settings": "إعدادات",
+            "stocktake": "جرد",
+            "cash": "صندوق",
+        }
+        _ACTION_COLOR = {
+            "create": Colors.SUCCESS,
+            "update": Colors.PRIMARY,
+            "delete": Colors.DANGER,
+            "password_reset": Colors.WARNING_DARK,
+            "login": Colors.PURPLE_LIGHT,
+            "logout": Colors.TEXT_SECONDARY,
+        }
+
+        def _audit_action_label(action: str) -> str:
+            return _ACTION_AR.get(str(action or ""), str(action or "—"))
+
+        def _audit_entity_label(entity: str) -> str:
+            return _ENTITY_AR.get(str(entity or ""), str(entity or "—"))
 
         def refresh_audit(_=None):
             audit_list.controls = []
-            for row in self.ctx.auth.audit_entries(100):
+            try:
+                rows = self.ctx.auth.audit_entries(300)
+            except Exception as exc:
+                audit_list.controls.append(ft.Text(str(exc), color=Colors.DANGER))
+                audit_count_label.value = ""
+                self.page.update()
+                return
+            q = (audit_search.value or "").strip().casefold()
+            ent = audit_entity_dd.value or "all"
+            shown = 0
+            for row in rows:
+                entity = str(row.get("entity_type") or "")
+                if ent != "all" and entity != ent:
+                    continue
+                action = str(row.get("action") or "")
                 actor = row.get("username") or "النظام"
+                details = str(row.get("details") or "")
+                hay = " ".join([action, entity, actor, details, str(row.get("entity_id") or "")]).casefold()
+                if q and q not in hay:
+                    continue
+                accent = _ACTION_COLOR.get(action, Colors.TEXT_SECONDARY)
+                title = f"{_audit_action_label(action)} • {_audit_entity_label(entity)}"
+                if row.get("entity_id") not in (None, ""):
+                    title += f" #{row.get('entity_id')}"
                 audit_list.controls.append(
                     ft.Container(
-                        ft.Column(
+                        ft.Row(
                             [
-                                ft.Row(
+                                ft.Container(width=4, height=42, bgcolor=accent, border_radius=4),
+                                ft.Column(
                                     [
-                                        ft.Text(f"{row['action']} • {row['entity_type']} #{row.get('entity_id') or '-'}", weight=ft.FontWeight.BOLD, expand=True),
-                                        ft.Text(str(row["created_at"]), size=11, color=Colors.TEXT_SECONDARY),
-                                    ]
+                                        ft.Row(
+                                            [
+                                                ft.Text(title, weight=ft.FontWeight.BOLD, size=13, expand=True),
+                                                ft.Text(str(row.get("created_at") or ""), size=10, color=Colors.TEXT_FAINT),
+                                            ],
+                                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                        ),
+                                        ft.Text(
+                                            f"{actor}" + (f" — {details}" if details else ""),
+                                            size=11,
+                                            color=Colors.TEXT_SECONDARY,
+                                        ),
+                                    ],
+                                    spacing=3,
+                                    expand=True,
                                 ),
-                                ft.Text(f"المستخدم: {actor} • {row.get('details') or ''}", size=12, color=Colors.TEXT_MUTED),
                             ],
-                            spacing=3,
+                            spacing=10,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
-                        padding=8,
-                        border=ft.border.all(1, Colors.BORDER_ALT),
-                        border_radius=8,
+                        padding=10,
+                        bgcolor=Colors.BACKGROUND,
+                        border=ft.border.all(1, Colors.BORDER),
+                        border_radius=12,
                     )
                 )
+                shown += 1
+            if shown == 0:
+                audit_list.controls.append(
+                    ft.Container(
+                        ft.Text("لا توجد أحداث مطابقة", size=12, color=Colors.TEXT_FAINT),
+                        padding=16,
+                    )
+                )
+            audit_count_label.value = f"عرض {shown} من أصل {len(rows)}"
             self.page.update()
 
+        audit_search.on_change = refresh_audit
+        audit_entity_dd.on_change = refresh_audit
         refresh_audit()
 
         # --- Modern layout: one focused section at a time behind a
@@ -1535,7 +1647,24 @@ class AdminCenter:
             ),
             "audit": self._section(
                 "سجل التدقيق",
-                [ft.OutlinedButton("تحديث السجل", icon=ft.Icons.REFRESH, on_click=refresh_audit), audit_list],
+                [
+                    ft.Text(
+                        "آخر العمليات الحساسة على البيانات والمستخدمين — مفيد لمعرفة من عدّل أو حذف وماذا.",
+                        size=12,
+                        color=Colors.TEXT_SECONDARY,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Container(audit_search, expand=True),
+                            audit_entity_dd,
+                            ft.OutlinedButton("تحديث", icon=ft.Icons.REFRESH, on_click=refresh_audit),
+                        ],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    audit_count_label,
+                    audit_list,
+                ],
             ),
             "barcode": self._section(
                 "إعدادات الباركود",

@@ -21,6 +21,8 @@ from nano_offline.services.payment_service import PaymentService
 from nano_offline.services.reporting_service import ReportingService
 from nano_offline.services.statement_service import StatementService
 from nano_offline.services.stocktake_service import StocktakeService
+from nano_offline.services.smart_assistant_service import SmartAssistantService
+from nano_offline.services.cash_day_close_service import CashDayCloseService
 
 
 @dataclass(slots=True)
@@ -42,6 +44,8 @@ class AppContext:
     backup: BackupService
     license: LicenseService
     notifications: NotificationService
+    smart_assistant: SmartAssistantService
+    cash_day_close: CashDayCloseService
     stocktake: StocktakeService
 
     @classmethod
@@ -58,6 +62,18 @@ class AppContext:
         backup = BackupService(db)
         items_repo = ItemRepository(db)
         stocktake_repo = StocktakeRepository(db)
+        settings_repo = SettingsRepository(db)
+        dashboard_svc = DashboardService(db)
+        license_svc = LicenseService(db)
+        notifications_svc = NotificationService(
+            db, settings_repo, items_repo, ReportingService(db), license_svc, dashboard_svc
+        )
+        smart_assistant_svc = SmartAssistantService(
+            db,
+            notifications=notifications_svc,
+            dashboard=dashboard_svc,
+            settings=settings_repo,
+        )
         return cls(
             db=db,
             customers=PartyRepository(db, "customers"),
@@ -69,19 +85,15 @@ class AppContext:
             expenses=expenses,
             statements=StatementService(db),
             reports=ReportingService(db),
-            dashboard=DashboardService(db),
+            dashboard=dashboard_svc,
             documents=DocumentService(db, invoices, StatementService(db)),
-            settings=SettingsRepository(db),
+            settings=settings_repo,
             auth=auth,
             backup=backup,
-            license=LicenseService(db),
-            # Stateless wrapper over `db` (same pattern as `StatementService`
-            # above, already constructed a second time for `documents`) --
-            # cheap to build again rather than re-threading the earlier
-            # locals through this call.
-            notifications=NotificationService(
-                db, SettingsRepository(db), ItemRepository(db), ReportingService(db), LicenseService(db), DashboardService(db)
-            ),
+            license=license_svc,
+            notifications=notifications_svc,
+            smart_assistant=smart_assistant_svc,
+            cash_day_close=CashDayCloseService(db),
             stocktake=StocktakeService(db, items_repo, stocktake_repo, auth),
         )
 

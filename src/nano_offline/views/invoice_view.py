@@ -26,6 +26,7 @@ from nano_offline.services.invoice_service import InvoiceLineInput
 from nano_offline.components.buttons import stepper_icon_button
 from nano_offline.core.theme import Colors, Shadow
 from nano_offline.core import currency
+from nano_offline.core.margin_guard import check_sale_margin
 from nano_offline.core.price_fingerprint import check_purchase_price
 from nano_offline.core import invoice_settings
 from nano_offline.core import barcode_settings

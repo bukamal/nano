@@ -24,7 +24,7 @@ _RULE_META = [
 # Where an alert navigates when tapped, keyed by NotificationService.Alert
 # .entity_type -- kept in sync with DashboardCenter's own copy in
 # views/dashboard_view.py (same rule engine, same two navigable entities).
-_ALERT_NAV = {"customer": "customers", "item": "items"}
+_ALERT_NAV = {"customer": "customers", "item": "items", "supplier": "suppliers", "invoice": "invoices", "voucher": "finance", "cash": "finance", "settings": "admin"}
 
 # (chip key, label) for the panel's quick filter row.
 _FILTERS: list[tuple[str, str]] = [
@@ -172,6 +172,10 @@ class NotificationCenter:
     # -- bell panel ----------------------------------------------------------
     def open_panel(self, _=None) -> None:
         all_rows = self.ctx.notifications.recent(limit=30)
+        try:
+            decisions = self.ctx.smart_assistant.decisions(limit=6)
+        except Exception:
+            decisions = []
         sheet = new_form_sheet()
         state = {"filter": "all"}
         chip_refs: dict[str, ft.Container] = {}
@@ -192,18 +196,41 @@ class NotificationCenter:
                 return [r for r in all_rows if r.get("severity") == "urgent"]
             return all_rows
 
+        def _target_for_row(row: dict) -> str | None:
+            ent = row.get("entity_type")
+            if ent in _ALERT_NAV:
+                return _ALERT_NAV[ent]
+            rule = str(row.get("rule_key") or "")
+            if "receivable" in rule or "customer" in rule:
+                return "customers"
+            if "stock" in rule or "item" in rule:
+                return "items"
+            if "backup" in rule or "license" in rule:
+                return "admin"
+            if "cash" in rule or "voucher" in rule:
+                return "finance"
+            return None
+
         def row_click(row: dict):
             def _click(_e=None):
                 if row.get("read_at") is None:
                     self.ctx.notifications.mark_read(row["id"])
                     row["read_at"] = "1"
                     self.refresh_badge()
-                target = _ALERT_NAV.get(row.get("entity_type"))
+                target = _target_for_row(row)
                 if target and self.on_navigate:
                     close()
                     self.on_navigate(target)
                 else:
                     render_list(state["filter"])
+            return _click
+
+        def decision_click(decision):
+            def _click(_e=None):
+                target = getattr(decision, "action_target", None)
+                if target and self.on_navigate:
+                    close()
+                    self.on_navigate(target)
             return _click
 
         def render_list(filter_key: str) -> None:
@@ -215,6 +242,35 @@ class NotificationCenter:
             rows = filtered_rows(filter_key)
             count_text.value = f"{len(rows)} تنبيه" if filter_key != "all" else f"{len(all_rows)} تنبيه"
             controls: list[ft.Control] = []
+            if filter_key == "all" and decisions:
+                controls.append(ft.Text("قرارات مقترحة", size=12, weight=ft.FontWeight.BOLD, color=Colors.TEXT_SECONDARY))
+                for d in decisions[:5]:
+                    controls.append(
+                        ft.Container(
+                            ft.Row(
+                                [
+                                    ft.Icon(ft.Icons.BOLT_ROUNDED, size=18, color=Colors.PRIMARY),
+                                    ft.Column(
+                                        [
+                                            ft.Text(d.title, size=12, weight=ft.FontWeight.W_600),
+                                            ft.Text(d.body, size=10, color=Colors.TEXT_FAINT, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS),
+                                        ],
+                                        spacing=1, expand=True,
+                                    ),
+                                    ft.Text(d.action_label or "فتح", size=10, color=Colors.PRIMARY),
+                                ],
+                                spacing=8,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            padding=10,
+                            bgcolor=Colors.PRIMARY_BG,
+                            border_radius=12,
+                            on_click=decision_click(d),
+                            ink=True,
+                        )
+                    )
+                controls.append(ft.Divider(height=8, color=Colors.BORDER))
+                controls.append(ft.Text("سجل التنبيهات", size=12, weight=ft.FontWeight.BOLD, color=Colors.TEXT_SECONDARY))
             if not rows:
                 controls.append(
                     ft.Container(
