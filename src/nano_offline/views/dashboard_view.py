@@ -405,6 +405,14 @@ class DashboardCenter:
                 self._open_purchase_list()
             elif kind == "cash":
                 self._open_day_close()
+            elif kind == "collect":
+                if self.on_open_receipt:
+                    self.on_open_receipt(
+                        customer_id=getattr(decision, "entity_id", None),
+                        amount=None,
+                    )
+                elif self.on_navigate:
+                    self.on_navigate("customers")
             elif target == "dashboard":
                 self._open_rate_sheet()
             elif target and self.on_navigate:
@@ -476,6 +484,14 @@ class DashboardCenter:
                         self._open_purchase_list()
                     elif kind == "cash":
                         self._open_day_close()
+                    elif kind == "collect":
+                        if self.on_open_receipt:
+                            self.on_open_receipt(
+                                customer_id=getattr(decision, "entity_id", None),
+                                amount=None,
+                            )
+                        elif self.on_navigate:
+                            self.on_navigate("customers")
                     elif target == "dashboard":
                         self._open_rate_sheet()
                     elif target and self.on_navigate:
@@ -795,18 +811,53 @@ class DashboardCenter:
                 )
             )
 
+        supplier_dd = None
+        try:
+            from nano_offline.components import SearchSelect
+            suppliers = self.ctx.suppliers.list()
+            supplier_dd = SearchSelect(
+                label="المورد (اختياري)",
+                value=None,
+                choices=[(str(s["id"]), s["name"]) for s in suppliers],
+                allow_clear=True,
+            )
+        except Exception:
+            supplier_dd = None
+
+        def _create_draft(_=None):
+            close()
+            if not lines:
+                self._notify("لا توجد بنود لإنشاء المسودة", kind="warning")
+                return
+            supplier_id = None
+            if supplier_dd is not None and supplier_dd.value:
+                try:
+                    supplier_id = int(supplier_dd.value)
+                except Exception:
+                    supplier_id = None
+            if self.on_open_purchase_draft:
+                self.on_open_purchase_draft(lines, supplier_id=supplier_id)
+            elif self.on_open_purchase:
+                self.on_open_purchase()
+            else:
+                self._notify("تعذر فتح فاتورة الشراء", kind="error")
+
+        fields_list = [
+            ft.Text("حسب سرعة البيع خلال 30 يومًا — للتحضير لطلب المورد.", size=12, color=Colors.TEXT_SECONDARY),
+        ]
+        if supplier_dd is not None:
+            fields_list.append(supplier_dd)
+        fields_list.append(ft.Column(rows, spacing=6, scroll=ft.ScrollMode.AUTO, height=320))
+
         render_form_sheet(
             self.page,
             sheet,
             title="قائمة شراء مقترحة",
-            fields=[
-                ft.Text("حسب سرعة البيع خلال 30 يومًا — للتحضير لطلب المورد.", size=12, color=Colors.TEXT_SECONDARY),
-                ft.Column(rows, spacing=6, scroll=ft.ScrollMode.AUTO, height=360),
-            ],
+            fields=fields_list,
             on_close=close,
-            on_save=lambda _: (close(), self.on_navigate("items") if self.on_navigate else None),
-            save_label="فتح المواد",
-            save_icon=ft.Icons.INVENTORY_2_OUTLINED,
+            on_save=_create_draft,
+            save_label="إنشاء مسودة شراء",
+            save_icon=ft.Icons.ADD_SHOPPING_CART,
         )
         self.page.open(sheet)
 
@@ -828,6 +879,7 @@ class DashboardCenter:
         )
         note_field = SelectAllTextField(label="ملاحظة (اختياري)", multiline=True, min_lines=1, max_lines=3)
         adjust_switch = ft.Switch(label="ترحيل تسوية للصندوق لتطابق العدّ", value=True)
+        print_after = ft.Switch(label="طباعة تقرير الإغلاق بعد الحفظ", value=True)
         preview = ft.Text("", size=12, color=Colors.TEXT_SECONDARY)
 
         def refresh_preview(_=None):
@@ -852,6 +904,22 @@ class DashboardCenter:
 
         def close(_=None):
             self.page.close(sheet)
+
+        def _print_close_report(result: dict) -> None:
+            if self.native_files is None:
+                return
+            try:
+                movement = self.ctx.cash_day_close.today_cash_movement()
+                today_sum = {}
+                try:
+                    today_sum = self.ctx.dashboard.today_summary()
+                    today_sum = {"today_sales": float(today_sum.get("total") or today_sum.get("sales") or 0)}
+                except Exception:
+                    today_sum = {}
+                html = self.ctx.documents.day_close_html(result, movement=movement, summary=today_sum)
+                self.page.run_task(self.native_files.print_html, html, name="nano-day-close")
+            except Exception as exc:
+                self._notify(f"تعذر طباعة التقرير: {exc}", kind="warning")
 
         def save(_=None):
             try:
@@ -883,6 +951,8 @@ class DashboardCenter:
                 if result.get("adjustment_posted"):
                     msg += " (مع تسوية)"
             self._notify(msg, kind="success", sound_kind="save")
+            if print_after.value:
+                _print_close_report(result)
             self.show_center()
 
         last_line = ""
@@ -903,6 +973,7 @@ class DashboardCenter:
                 preview,
                 adjust_switch,
                 note_field,
+                print_after,
                 ft.Text(last_line, size=10, color=Colors.TEXT_FAINT) if last_line else ft.Container(height=0),
             ],
             on_close=close,

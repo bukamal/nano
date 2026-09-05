@@ -447,6 +447,48 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
 """
         return self._shell(f"كشف حساب {kind}", party["name"], body)
 
+
+    def day_close_html(self, close_result: dict, *, movement: dict | None = None, summary: dict | None = None) -> str:
+        """Printable end-of-day cash close report."""
+        movement = movement or {}
+        summary = summary or {}
+        book = float(close_result.get("book_cash") or 0)
+        counted = float(close_result.get("counted_cash") or 0)
+        variance = float(close_result.get("variance") or 0)
+        inflow = float(close_result.get("inflow") or movement.get("inflow") or 0)
+        outflow = float(close_result.get("outflow") or movement.get("outflow") or 0)
+        note = self._e(close_result.get("note") or "—")
+        closed_at = self._e(close_result.get("closed_at") or close_result.get("date") or "")
+        user = self._e(close_result.get("username") or "—")
+        adj = "نعم" if close_result.get("adjustment_posted") else "لا"
+        sales = float(summary.get("sales") or 0)
+        # Prefer today's sales if provided as today_sales
+        today_sales = float(summary.get("today_sales") or summary.get("sales_today") or 0)
+        body = f"""
+  <div class="header-block">
+    <h1>تقرير إغلاق يوم الصندوق</h1>
+    <p>التاريخ: {self._e(close_result.get("date"))} · الإغلاق: {closed_at} · المستخدم: {user}</p>
+  </div>
+  <div class="metrics">
+    <div class="metric"><small>وارد الصندوق اليوم</small><strong class="money">{self._money(inflow)}</strong></div>
+    <div class="metric"><small>صادر الصندوق اليوم</small><strong class="money">{self._money(outflow)}</strong></div>
+    <div class="metric"><small>صافي الحركة</small><strong class="money">{self._money(inflow - outflow)}</strong></div>
+  </div>
+  <div class="metrics">
+    <div class="metric"><small>رصيد الدفتر قبل الإغلاق</small><strong class="money">{self._money(book)}</strong></div>
+    <div class="metric"><small>المبلغ المعدود</small><strong class="money">{self._money(counted)}</strong></div>
+    <div class="metric"><small>الفرق</small><strong class="money">{self._money(variance)}</strong></div>
+  </div>
+  <table>
+    <tr><th>البند</th><th>القيمة</th></tr>
+    <tr><td>تسوية دفترية</td><td>{adj}</td></tr>
+    <tr><td>ملاحظة</td><td>{note}</td></tr>
+    <tr><td>مبيعات اليوم (إن توفرت)</td><td class="money">{self._money(today_sales)}</td></tr>
+  </table>
+  <p class="muted">تقرير داخلي من نانو — للأرشفة والمراجعة.</p>
+"""
+        return self._shell("إغلاق يوم الصندوق", closed_at, body)
+
     def barcode_labels_html(
         self,
         labels: list[dict],

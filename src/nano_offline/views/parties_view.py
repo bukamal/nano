@@ -144,6 +144,17 @@ class PartyCenter:
                 notify(str(exc), kind="error")
                 return
             balance = float(data.get("balance") or 0)
+            party_type = "customer" if title == "العملاء" else "supplier"
+            try:
+                open_rows = [
+                    r for r in self.ctx.reports.outstanding_invoices(party_type)
+                    if int(r.get("party_id") or 0) == int(party["id"])
+                ]
+            except Exception:
+                open_rows = []
+            rel = grade_party(balance=balance, outstanding_rows=open_rows)
+            grade_color = getattr(Colors, rel["color_token"], Colors.PRIMARY)
+            grade_bg = getattr(Colors, rel["bg_token"], Colors.PRIMARY_BG)
             recent = []
             for inv in data.get("recent_invoices") or []:
                 remaining = float(inv.get("remaining_amount") or 0)
@@ -223,7 +234,18 @@ class PartyCenter:
                         ft.Row(
                             [
                                 ft.Container(ft.Icon(ft.Icons.PERSON if is_customer else ft.Icons.LOCAL_SHIPPING_OUTLINED, color=Colors.PRIMARY), width=42, height=42, alignment=ft.alignment.center, bgcolor=Colors.PRIMARY_BG, border_radius=14),
-                                ft.Column([ft.Text(data["name"], size=18, weight=ft.FontWeight.BOLD), ft.Text(data.get("phone") or "بدون هاتف", size=11, color=Colors.TEXT_SECONDARY)], spacing=1, expand=True),
+                                ft.Column([
+                                    ft.Text(data["name"], size=18, weight=ft.FontWeight.BOLD),
+                                    ft.Row([
+                                        ft.Text(data.get("phone") or "بدون هاتف", size=11, color=Colors.TEXT_SECONDARY),
+                                        ft.Container(
+                                            ft.Text(rel["label"], size=10, weight=ft.FontWeight.W_600, color=grade_color),
+                                            padding=ft.padding.symmetric(horizontal=8, vertical=2),
+                                            bgcolor=grade_bg,
+                                            border_radius=10,
+                                        ),
+                                    ], spacing=8),
+                                ], spacing=1, expand=True),
                                 ft.IconButton(ft.Icons.PRINT_OUTLINED, tooltip="طباعة بطاقة الحساب", on_click=print_party_card),
                                 ft.IconButton(ft.Icons.IOS_SHARE, tooltip="مشاركة PDF", on_click=share_party_card_pdf),
                             ]
@@ -236,7 +258,7 @@ class PartyCenter:
                                             ft.Container(small_metric("الرصيد الحالي", money(balance), ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.PRIMARY), col={"xs": 6, "md": 3}),
                                             ft.Container(small_metric("عدد الفواتير", str(int(data.get("invoice_count") or 0)), ft.Icons.RECEIPT_LONG_OUTLINED, Colors.PURPLE), col={"xs": 6, "md": 3}),
                                             ft.Container(small_metric("إجمالي الفواتير", money(data.get("invoice_total")), ft.Icons.PAID_OUTLINED, Colors.SUCCESS), col={"xs": 6, "md": 3}),
-                                            ft.Container(small_metric("المتبقي", money(data.get("outstanding_total")), ft.Icons.PENDING_ACTIONS_OUTLINED, Colors.ORANGE), col={"xs": 6, "md": 3}),
+                                            ft.Container(small_metric("انتظام السداد", rel["label"] + (f" · {rel['max_age_days']}ي" if rel["max_age_days"] else ""), ft.Icons.VERIFIED_USER_OUTLINED, grade_color), col={"xs": 6, "md": 3}),
                                         ], spacing=7, run_spacing=7,
                                     ),
                                     ft.Text(f"العنوان: {data.get('address') or '—'}", size=11, color=Colors.TEXT_MUTED),
@@ -269,9 +291,32 @@ class PartyCenter:
             )
             page.open(detail_sheet)
 
+        def _outstanding_by_party() -> dict[int, list[dict]]:
+            party_type = "customer" if "customer" in str(getattr(repo, "table", "") or getattr(repo, "party_type", "") or title).lower() or title == "العملاء" else "supplier"
+            if title == "العملاء":
+                party_type = "customer"
+            elif title == "الموردون":
+                party_type = "supplier"
+            try:
+                rows = self.ctx.reports.outstanding_invoices(party_type)
+            except Exception:
+                return {}
+            by: dict[int, list[dict]] = {}
+            for r in rows:
+                pid = r.get("party_id")
+                if pid is None:
+                    continue
+                try:
+                    pid = int(pid)
+                except Exception:
+                    continue
+                by.setdefault(pid, []).append(r)
+            return by
+
         def refresh(_=None):
             parties = repo.list(search.value or "")
             all_parties = repo.list()
+            outstanding_map = _outstanding_by_party()
             total_balance = sum(float(x.get("balance") or 0) for x in all_parties)
             positive = sum(1 for x in all_parties if abs(float(x.get("balance") or 0)) > 1e-9)
             summary_row.controls = [
@@ -296,7 +341,18 @@ class PartyCenter:
                             ft.Column(
                                 [
                                     ft.Text(money(balance), weight=ft.FontWeight.BOLD, size=13, color=Colors.TEXT_PRIMARY),
-                                    ft.Text("رصيد", size=9, color=Colors.TEXT_SECONDARY),
+                                    ft.Text(
+                                        (
+                                            lambda g: g["label"]
+                                        )(
+                                            grade_party(
+                                                balance=balance,
+                                                outstanding_rows=outstanding_map.get(int(party["id"]), []),
+                                            )
+                                        ),
+                                        size=9,
+                                        color=Colors.TEXT_SECONDARY,
+                                    ),
                                 ], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END,
                             ),
                             ft.Icon(ft.Icons.CHEVRON_LEFT, size=18, color=Colors.TEXT_FAINT),

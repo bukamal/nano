@@ -187,6 +187,13 @@ class NotificationService:
         alerts: list[Alert] = []
         if overdue:
             total = sum(float(r.get("remaining_amount") or 0) for r in overdue)
+            # Prefer the customer with the largest remaining balance for a one-tap receipt.
+            top = max(overdue, key=lambda r: float(r.get("remaining_amount") or 0))
+            top_id = top.get("party_id")
+            try:
+                top_id = int(top_id) if top_id is not None else None
+            except Exception:
+                top_id = None
             alerts.append(
                 Alert(
                     rule_key="receivables_overdue",
@@ -195,6 +202,7 @@ class NotificationService:
                     title=f"{len(overdue)} فاتورة متأخرة السداد",
                     body=f"إجمالي المتأخر {total:,.0f} — أقدمها {self._party_hint(overdue)}",
                     entity_type="customer",
+                    entity_id=top_id,
                 )
             )
         if due_soon:

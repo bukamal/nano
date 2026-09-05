@@ -286,7 +286,7 @@ class ReportingService:
         else:
             raise ValueError("نوع الحساب غير صحيح")
         with self.db.connect() as conn:
-            sql = f"""SELECT i.id,i.invoice_date,i.reference,i.total,p.name AS party_name,
+            sql = f"""SELECT i.id,i.invoice_date,i.reference,i.total,i.{column} AS party_id,p.name AS party_name,
                               COALESCE((SELECT SUM(pa.amount)
                                         FROM payment_allocations pa
                                         JOIN payments pay ON pay.id=pa.payment_id

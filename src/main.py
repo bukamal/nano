@@ -193,6 +193,36 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
     # defined further below in this same function. The lambdas below only
     # resolve those names at click-time, once the whole shell is built — the
     # same late-binding the previous inline closures relied on.
+    def open_purchase_draft(lines=None, supplier_id=None):
+        # Navigate to invoices shell then open purchase editor with suggested lines.
+        navigate("invoices")
+        prefill = []
+        for line in lines or []:
+            prefill.append(
+                {
+                    "item_id": line.get("item_id"),
+                    "quantity": line.get("suggested_qty") or 1,
+                    "unit_price": line.get("purchase_price") or line.get("average_cost") or 0,
+                    "description": line.get("name") or "",
+                }
+            )
+        invoice_center.show_editor(
+            None, "purchase", prefill_lines=prefill, party_id=supplier_id
+        )
+
+    def open_receipt(customer_id=None, amount=None):
+        navigate("finance")
+        seed = {"voucher_type": "receipt"}
+        if customer_id is not None:
+            try:
+                seed["customer_id"] = int(customer_id)
+            except Exception:
+                pass
+        if amount is not None:
+            seed["amount"] = amount
+        finance_center.show_vouchers()
+        finance_center.show_voucher_dialog(voucher_type="receipt", initial_data=seed)
+
     dashboard_center = DashboardCenter(
         page, ctx, content,
         on_title_change=set_header,
@@ -200,6 +230,9 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         on_open_sale=lambda: open_sale(),
         on_open_purchase=lambda: open_purchase(),
         on_open_notifications=notification_center.open_panel,
+        on_open_purchase_draft=lambda lines, supplier_id=None: open_purchase_draft(lines, supplier_id),
+        on_open_receipt=lambda customer_id=None, amount=None: open_receipt(customer_id, amount),
+        native_files=native_files,
     )
     session = ctx.auth.current()
     if session is None:

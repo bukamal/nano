@@ -872,7 +872,14 @@ class InvoiceCenter:
         ]
         self.page.open(dialog)
 
-    def show_editor(self, invoice_id: int | None = None, invoice_type: str | None = None) -> None:
+    def show_editor(
+        self,
+        invoice_id: int | None = None,
+        invoice_type: str | None = None,
+        *,
+        prefill_lines: list[dict] | None = None,
+        party_id: int | None = None,
+    ) -> None:
         existing = self.ctx.invoices.get_invoice(invoice_id) if invoice_id else None
         if invoice_id and not existing:
             self.notify("الفاتورة غير موجودة")
@@ -1397,8 +1404,20 @@ class InvoiceCenter:
         if existing:
             for line in existing["lines"]:
                 add_line(line)
+        elif prefill_lines:
+            for line in prefill_lines:
+                add_line(line)
+            if not prefill_lines:
+                add_line()
         else:
             add_line()
+        # Optional party preselect (customer for sale / supplier for purchase)
+        if party_id and not existing:
+            try:
+                party_dd.value = str(int(party_id))
+                party_dd.update()
+            except Exception:
+                pass
 
         def type_changed(_):
             self.invoice_type = type_dd.value or "sale"
@@ -1444,6 +1463,29 @@ class InvoiceCenter:
                             unit_price=parse_money(state["price"], f"سعر البند {idx}"),
                         )
                     )
+                # Margin guard for sale invoices (stored USD vs average cost)
+                if (type_dd.value or "sale") == "sale" and not getattr(self, "_margin_override", False):
+                    warnings = []
+                    for line in inputs:
+                        if not line.item_id:
+                            continue
+                        item = item_map.get(int(line.item_id))
+                        # unit_price is in display units; convert to base USD per unit already stored
+                        result = check_sale_margin(
+                            unit_price_usd=float(line.unit_price) / max(float(line.conversion_factor or 1), 1e-9),
+                            item=item,
+                            settings=self.ctx.settings,
+                        )
+                        if result.get("flag"):
+                            warnings.append(result.get("message") or "بيع تحت التكلفة")
+                    if warnings:
+                        self._margin_override = True
+                        self.notify(
+                            warnings[0] + " — احفظ مرة أخرى للتأكيد",
+                            kind="warning",
+                        )
+                        return
+                self._margin_override = False
                 paid_value = parse_money(paid, "المبلغ المدفوع")
                 common = dict(
                     invoice_type=type_dd.value or "sale",
