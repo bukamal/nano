@@ -6,7 +6,7 @@ import flet as ft
 
 from nano_offline.core.toast import toast
 
-from nano_offline.components import SearchSelect, SegmentedToggle, SelectAllTextField, SmartAmountField, empty_state
+from nano_offline.components import SearchSelect, SegmentedToggle, SelectAllTextField, SmartAmountField, empty_state, kpi_card, status_pill
 from nano_offline.components.buttons import header_close_button, inline_icon_button
 from nano_offline.core.theme import Colors, IconSize, LazyPalette, Radius, Shadow
 from nano_offline.core import currency
@@ -228,15 +228,6 @@ class ItemsCenter:
         filter_boxes: dict[str, ft.Container] = {}
         sort_state = {"key": "name"}
         LOW_STOCK = 5.0
-
-        def stat_card(label: str, value: str, icon, accent: str):
-            return ft.Container(
-                ft.Row([
-                    ft.Container(ft.Icon(icon, color=accent, size=20), width=40, height=40, alignment=ft.alignment.center, bgcolor=Colors.BACKGROUND, border_radius=13),
-                    ft.Column([ft.Text(label, size=10, color=Colors.TEXT_SECONDARY), ft.Text(value, size=17, weight=ft.FontWeight.BOLD)], spacing=1, expand=True),
-                ]),
-                padding=11, bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=16, shadow=Shadow.SM,
-            )
 
         def filter_box(key: str, label: str, icon):
             box = ft.Container(
@@ -1771,16 +1762,16 @@ class ItemsCenter:
                         ft.Container(
                             ft.Column([
                                 ft.ResponsiveRow([
-                                    ft.Container(stat_card("المخزون", qty_fmt(stats.get("quantity")), ft.Icons.INVENTORY, Colors.PRIMARY), col={"xs": 6, "md": 3}),
-                                    ft.Container(stat_card("متوسط التكلفة", money(stats.get("average_cost")), ft.Icons.PRICE_CHECK_OUTLINED, Colors.PURPLE), col={"xs": 6, "md": 3}),
-                                    ft.Container(stat_card("قيمة المخزون", money(stats.get("inventory_cost_value")), ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.SUCCESS), col={"xs": 6, "md": 3}),
-                                    ft.Container(stat_card("بسعر البيع", money(stats.get("inventory_sale_value")), ft.Icons.SELL_OUTLINED, Colors.WARNING), col={"xs": 6, "md": 3}),
+                                    ft.Container(kpi_card("المخزون", qty_fmt(stats.get("quantity")), ft.Icons.INVENTORY, Colors.PRIMARY), col={"xs": 6, "md": 3}),
+                                    ft.Container(kpi_card("متوسط التكلفة", money(stats.get("average_cost")), ft.Icons.PRICE_CHECK_OUTLINED, Colors.PURPLE), col={"xs": 6, "md": 3}),
+                                    ft.Container(kpi_card("قيمة المخزون", money(stats.get("inventory_cost_value")), ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.SUCCESS), col={"xs": 6, "md": 3}),
+                                    ft.Container(kpi_card("بسعر البيع", money(stats.get("inventory_sale_value")), ft.Icons.SELL_OUTLINED, Colors.WARNING), col={"xs": 6, "md": 3}),
                                 ], spacing=7, run_spacing=7),
                                 ft.ResponsiveRow([
-                                    ft.Container(stat_card("كمية مباعة", qty_fmt(stats.get("sold_qty")), ft.Icons.TRENDING_UP, Colors.DANGER), col={"xs": 6, "md": 3}),
-                                    ft.Container(stat_card("كمية مشتراة", qty_fmt(stats.get("purchased_qty")), ft.Icons.TRENDING_DOWN, Colors.SUCCESS), col={"xs": 6, "md": 3}),
-                                    ft.Container(stat_card("فواتير بيع", str(int(stats.get("sale_count") or 0)), ft.Icons.RECEIPT_LONG, Colors.PRIMARY), col={"xs": 6, "md": 3}),
-                                    ft.Container(stat_card("فواتير شراء", str(int(stats.get("purchase_count") or 0)), ft.Icons.SHOPPING_BAG_OUTLINED, Colors.PURPLE), col={"xs": 6, "md": 3}),
+                                    ft.Container(kpi_card("كمية مباعة", qty_fmt(stats.get("sold_qty")), ft.Icons.TRENDING_UP, Colors.DANGER), col={"xs": 6, "md": 3}),
+                                    ft.Container(kpi_card("كمية مشتراة", qty_fmt(stats.get("purchased_qty")), ft.Icons.TRENDING_DOWN, Colors.SUCCESS), col={"xs": 6, "md": 3}),
+                                    ft.Container(kpi_card("فواتير بيع", str(int(stats.get("sale_count") or 0)), ft.Icons.RECEIPT_LONG, Colors.PRIMARY), col={"xs": 6, "md": 3}),
+                                    ft.Container(kpi_card("فواتير شراء", str(int(stats.get("purchase_count") or 0)), ft.Icons.SHOPPING_BAG_OUTLINED, Colors.PURPLE), col={"xs": 6, "md": 3}),
                                 ], spacing=7, run_spacing=7),
                                 ft.Text(f"الوحدات: {units_text}", size=10, color=Colors.TEXT_MUTED),
                                 ft.Text(f"آخر بيع: {stats.get('last_sale_date') or '—'}   •   آخر شراء: {stats.get('last_purchase_date') or '—'}", size=10, color=Colors.TEXT_SECONDARY),
@@ -1877,10 +1868,10 @@ class ItemsCenter:
             low_count = sum(1 for i in all_items if i.get("item_type") == "مخزون" and float(i.get("quantity") or 0) < LOW_STOCK)
             service_count = sum(1 for i in all_items if i.get("item_type") == "خدمة")
             summary_row.controls = [
-                ft.Container(stat_card("عدد المواد", str(len(all_items)), ft.Icons.INVENTORY_2_OUTLINED, Colors.PRIMARY), col={"xs": 6, "md": 3}),
-                ft.Container(stat_card("قيمة المخزون", money(inventory_value), ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.SUCCESS), col={"xs": 6, "md": 3}),
-                ft.Container(stat_card("مخزون منخفض", str(low_count), ft.Icons.WARNING_AMBER_ROUNDED, Colors.DANGER), col={"xs": 6, "md": 3}),
-                ft.Container(stat_card("الخدمات", str(service_count), ft.Icons.HANDYMAN_OUTLINED, Colors.PURPLE), col={"xs": 6, "md": 3}),
+                ft.Container(kpi_card("عدد المواد", str(len(all_items)), ft.Icons.INVENTORY_2_OUTLINED, Colors.PRIMARY), col={"xs": 6, "md": 3}),
+                ft.Container(kpi_card("قيمة المخزون", money(inventory_value), ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.SUCCESS), col={"xs": 6, "md": 3}),
+                ft.Container(kpi_card("مخزون منخفض", str(low_count), ft.Icons.WARNING_AMBER_ROUNDED, Colors.DANGER, on_tap=lambda _: set_filter("low")), col={"xs": 6, "md": 3}),
+                ft.Container(kpi_card("الخدمات", str(service_count), ft.Icons.HANDYMAN_OUTLINED, Colors.PURPLE, on_tap=lambda _: set_filter("service")), col={"xs": 6, "md": 3}),
             ]
             rows.controls = []
             if low_count and mode != "low":
@@ -1889,14 +1880,15 @@ class ItemsCenter:
                 qty = float(item.get("quantity") or 0)
                 stock = item.get("item_type") == "مخزون"
                 status = "خدمة" if not stock else "نفد" if qty <= 0 else "منخفض" if qty < LOW_STOCK else "متوفر"
-                status_color = Colors.PURPLE if not stock else Colors.DANGER_DARK if qty <= 0 else Colors.WARNING_DARK if qty < LOW_STOCK else Colors.SUCCESS
+                status_fg = Colors.PURPLE if not stock else Colors.DANGER_DARK if qty <= 0 else Colors.WARNING_DARK if qty < LOW_STOCK else Colors.SUCCESS
+                status_bg = Colors.PURPLE_BG if not stock else Colors.DANGER_BG if qty <= 0 else Colors.WARNING_BG_ALT if qty < LOW_STOCK else Colors.SUCCESS_BG
                 cat_idx = int(item["category_id"]) if item.get("category_id") else 0
                 accent = CATEGORY_PALETTE[cat_idx % len(CATEGORY_PALETTE)]
                 row_card = ft.Container(
                     ft.Row([
                         ft.Container(ft.Icon(ft.Icons.HANDYMAN_OUTLINED if not stock else ft.Icons.INVENTORY_2_OUTLINED, color=accent, size=20), width=44, height=44, alignment=ft.alignment.center, bgcolor=Colors.BACKGROUND_ALT, border_radius=14),
                         ft.Column([ft.Text(item["name"], weight=ft.FontWeight.BOLD, size=13), ft.Text(f"{item.get('category_name') or 'بلا تصنيف'} • {item.get('unit_name') or 'بلا وحدة'}", size=9, color=Colors.TEXT_SECONDARY)], expand=True, spacing=2),
-                        ft.Column([ft.Text("—" if not stock else f"{qty:,.2f}", size=13, weight=ft.FontWeight.BOLD), ft.Text(status, size=9, color=status_color, weight=ft.FontWeight.W_600)], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                        ft.Column([ft.Text("—" if not stock else f"{qty:,.2f}", size=13, weight=ft.FontWeight.BOLD), status_pill(status, status_fg, status_bg)], spacing=3, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
                         ft.Column([ft.Text(money(item.get("selling_price")), size=12, weight=ft.FontWeight.BOLD), ft.Text("سعر البيع", size=8, color=Colors.TEXT_SECONDARY)], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END),
                         ft.Icon(ft.Icons.CHEVRON_LEFT, color=Colors.TEXT_FAINT, size=18),
                     ], vertical_alignment=ft.CrossAxisAlignment.CENTER),

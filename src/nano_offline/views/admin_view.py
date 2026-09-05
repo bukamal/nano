@@ -26,7 +26,6 @@ from nano_offline.core import sound_settings
 from nano_offline.core import sound as sound_engine
 from nano_offline.core import barcode_quality
 from nano_offline.core.barcode128 import code128b_bars
-from nano_offline.core.home_widget import home_widget_snapshot
 
 
 class AdminCenter:
@@ -518,22 +517,63 @@ class AdminCenter:
 
         refresh_backups()
 
+        # License tab: server URL, device ID and status are treated as
+        # private data and masked by default, the same way the activation
+        # screen (ActivationGate) never shows a full device ID and always
+        # keeps the license key itself behind a password field. An explicit
+        # reveal toggle is the only way to see the real values here.
         license_key = SelectAllTextField(label="مفتاح الترخيص", password=True, can_reveal_password=True)
         license_state = ft.Text("", size=12)
-        license_server = ft.Text(self.ctx.license.activation_url(), size=10, color=Colors.TEXT_SECONDARY, selectable=True)
-        license_device = ft.Text("", size=11, color=Colors.TEXT_SECONDARY, selectable=True)
+        license_server = ft.Text("", size=10, color=Colors.TEXT_SECONDARY, selectable=False)
+        license_device = ft.Text("", size=11, color=Colors.TEXT_SECONDARY, selectable=False)
         activation_progress = ft.ProgressBar(visible=False)
         activation_button = ft.FilledButton("إعادة التفعيل", icon=ft.Icons.VERIFIED_USER)
 
+        _license_raw = {"server": self.ctx.license.activation_url(), "device": "", "status": ""}
+        _license_reveal = {"on": False}
+
+        def _mask_secret(value: str) -> str:
+            if not value:
+                return ""
+            if len(value) <= 10:
+                return "•" * len(value)
+            return f"{value[:4]}••••••••{value[-4:]}"
+
+        def _apply_license_visibility():
+            revealed = _license_reveal["on"]
+            license_server.value = _license_raw["server"] if revealed else _mask_secret(_license_raw["server"])
+            device = _license_raw["device"]
+            license_device.value = "معرّف الجهاز: " + (device if revealed else _mask_secret(device))
+            license_server.selectable = revealed
+            license_device.selectable = revealed
+            license_reveal_button.icon = ft.Icons.VISIBILITY_OFF_OUTLINED if revealed else ft.Icons.VISIBILITY_OUTLINED
+            license_reveal_button.tooltip = "إخفاء بيانات الترخيص" if revealed else "إظهار بيانات الترخيص (خاصة)"
+
+        def toggle_license_reveal(_):
+            _license_reveal["on"] = not _license_reveal["on"]
+            _apply_license_visibility()
+            self.page.update()
+
+        license_reveal_button = ft.IconButton(
+            icon=ft.Icons.VISIBILITY_OUTLINED,
+            icon_size=16,
+            icon_color=Colors.TEXT_FAINT,
+            tooltip="إظهار بيانات الترخيص (خاصة)",
+            on_click=toggle_license_reveal,
+            width=28,
+            height=28,
+        )
+
         def refresh_license():
             status = self.ctx.license.status()
-            license_device.value = f"معرّف الجهاز: {status.device_id}"
+            _license_raw["device"] = status.device_id or ""
             if status.valid:
                 license_state.value = f"مفعل • {status.edition or 'standard'} • الانتهاء {status.expires_at or 'دائم/غير محدد'} • {status.protocol or 'hawaa-v1'}"
                 license_state.color = Colors.SUCCESS_DARK
             else:
                 license_state.value = f"غير صالح/غير مفعل • {status.reason or ''}"
                 license_state.color = Colors.DANGER_DARKER
+            _apply_license_visibility()
 
         async def activate(_):
             activation_button.disabled = True
@@ -1118,127 +1158,6 @@ class AdminCenter:
             self.page.open(diag_dialog)
             await refresh_diagnosis(body, False)
 
-        # --- Home screen widget diagnostics -------------------------------
-        # Walks the same failure points documented in PHASE10_HOME_WIDGET_GLANCE_AR.md
-        # and the FIX_0.8.2/0.8.3 notes: manifest/receiver issues can't be
-        # inspected from inside a running APK, but everything the *running*
-        # widget code can see -- whether it's currently placed at all, the
-        # last snapshot it read, and the exact exception (if any) from the
-        # DataStore read or from Compose/Glance rendering -- is captured by
-        # NanoWidgetDiagnostics on the native side and surfaced here, so an
-        # admin stuck on "الودجت تعرض يتعذر عرض المحتوى" gets a concrete
-        # reason instead of guessing.
-        def _fmt_widget_ts(ms) -> str:
-            try:
-                ms_int = int(ms)
-            except (TypeError, ValueError):
-                return "لم يحدث بعد"
-            if ms_int <= 0:
-                return "لم يحدث بعد"
-            return datetime.fromtimestamp(ms_int / 1000).strftime("%Y-%m-%d %H:%M:%S")
-
-        async def build_widget_diagnosis() -> list[ft.Control]:
-            rows: list[ft.Control] = []
-            if self.native_files is None:
-                rows.append(_diag_row(False, "جسر التشغيل الأصلي (native bridge) غير متاح في هذا البناء — لا يمكن فحص الودجت من هنا (بناء سطح مكتب/ويب، أو APK أقدم من PHASE10)."))
-                return rows
-
-            diag = await self.native_files.diagnose_home_widget()
-            if not diag or diag.get("bridge_error") is not None:
-                rows.append(_diag_row(False, "تعذّر الوصول لجسر الودجت: " + str((diag or {}).get("bridge_error") or "لا استجابة — قد تكون تُجرّب نسخة APK أقدم من PHASE10 لا تحتوي هذه الميزة بعد.")))
-                return rows
-            if diag.get("unsupported_platform") is not None:
-                rows.append(_diag_row(None, f"الودجت ميزة أندرويد فقط، والمنصة الحالية: {diag.get('unsupported_platform')}."))
-                return rows
-
-            widget_count = diag.get("widget_count", -1)
-            if widget_count == -1:
-                rows.append(_diag_row(False, "تعذّر معرفة عدد الودجت المضافة فعليًا للشاشة الرئيسية."))
-            elif widget_count == 0:
-                rows.append(_diag_row(None, "لا توجد ودجت \"Nano | نانو\" مضافة للشاشة الرئيسية حاليًا — أضفها أولًا من قائمة ودجت أندرويد قبل تفسير أي نتيجة أخرى هنا."))
-            else:
-                rows.append(_diag_row(True, f"عدد نسخ الودجت المضافة للشاشة الرئيسية: {widget_count}."))
-
-            last_at = diag.get("last_provide_glance_at")
-            ever_rendered = bool(last_at)
-
-            state_err = diag.get("last_state_read_error")
-            if state_err:
-                rows.append(_diag_row(False, f"فشل قراءة بيانات الودجت المخزَّنة (DataStore) — {state_err} — هذا يُسقط الودجت بالكامل قبل أي محاولة رسم، وهو أكثر سبب متوقَّع لظهور \"يتعذّر عرض المحتوى\" رغم تطبيق إصلاحات 0.8.3."))
-            elif ever_rendered:
-                rows.append(_diag_row(True, "آخر قراءة لبيانات الودجت المخزَّنة نجحت بلا استثناء."))
-            else:
-                rows.append(_diag_row(None, "لم تُنفَّذ قراءة بيانات الودجت بعد — لا يوجد حكم بنجاح أو فشل، فقط لم يحدث."))
-
-            render_err = diag.get("last_render_error")
-            if render_err:
-                rows.append(_diag_row(False, f"فشل رسم محتوى الودجت رغم نجاح قراءة البيانات — {render_err} — الودجت تعرض حاليًا نص \"تعذّر تحميل الأرقام\" بدل الأرقام الفعلية."))
-            elif ever_rendered:
-                rows.append(_diag_row(True, "آخر محاولة رسم لمحتوى الودجت نجحت بلا استثناء."))
-            else:
-                rows.append(_diag_row(None, "لم تُنفَّذ محاولة رسم بعد — لا يوجد حكم بنجاح أو فشل، فقط لم يحدث."))
-
-            rows.append(_diag_row(None, f"آخر مرة أُعيد فيها بناء محتوى الودجت (provideGlance): {_fmt_widget_ts(last_at)}."))
-
-            push_ok = diag.get("last_push_ok")
-            push_err = diag.get("last_push_error")
-            push_at = diag.get("last_push_at")
-            if push_ok is None:
-                rows.append(_diag_row(None, "لم يصل أي تحديث فوري (بعد بيع أو سند) للودجت بعد في هذه الجلسة."))
-            elif push_ok:
-                rows.append(_diag_row(True, f"آخر تحديث فوري نجح في {_fmt_widget_ts(push_at)}."))
-            else:
-                rows.append(_diag_row(False, f"فشل آخر تحديث فوري في {_fmt_widget_ts(push_at)} — {push_err}."))
-
-            # The critical combination: data was pushed successfully and the
-            # widget IS present on the home screen, yet provideGlance itself
-            # never ran even once. Every try/catch added in 0.8.3/0.8.4 lives
-            # *inside* provideGlance -- none of it runs if the failure is a
-            # level above, inside Glance's own session/receiver dispatch
-            # (GlanceAppWidgetReceiver -> AppWidgetSession -> provideGlance)
-            # before our code is ever reached. This is not something a
-            # try/catch inside NanoGlanceWidget can catch or explain further
-            # from here; adb logcat at the moment of failure is required.
-            if not ever_rendered and widget_count and widget_count > 0 and push_ok:
-                rows.append(_diag_row(False, "الودجت مضافة والبيانات وصلتها بنجاح، لكن Android لم يستدعِ provideGlance ولو مرة واحدة — أي أن العطل يقع في طبقة أعلى من الكود الذي عولج في 0.8.3/0.8.4 (داخل آلية جلسة Glance نفسها قبل الوصول لهذا الملف). لا يمكن تشخيصه أكثر من هنا؛ الخطوة التالية الوحيدة المفيدة هي adb logcat وقت ظهور \"يتعذّر عرض المحتوى\" فعليًا على الشاشة."))
-
-            snapshot = diag.get("last_snapshot_json")
-            if snapshot:
-                rows.append(_diag_row(None, f"آخر بيانات مخزَّنة للودجت: {snapshot}"))
-            return rows
-
-        async def refresh_widget_diagnosis(body: ft.Column):
-            body.controls = [ft.Row([ft.ProgressRing(width=16, height=16), ft.Text("يفحص الآن...", size=12)])]
-            self.page.update()
-            try:
-                rows = await build_widget_diagnosis()
-            except Exception as exc:
-                rows = [_diag_row(False, f"تعذّر إتمام الفحص: {exc!r}")]
-            body.controls = rows
-            self.page.update()
-
-        async def test_widget_now(body: ft.Column):
-            if self.native_files is not None:
-                try:
-                    await self.native_files.push_home_widget(home_widget_snapshot(self.ctx.dashboard))
-                except Exception:
-                    pass
-            await refresh_widget_diagnosis(body)
-
-        async def open_widget_diagnosis(_):
-            body = ft.Column(spacing=10, tight=True, scroll=ft.ScrollMode.AUTO)
-            diag_dialog = ft.AlertDialog(
-                title=ft.Text("تشخيص ودجت الشاشة الرئيسية"),
-                content=ft.Container(body, width=380, height=360),
-                actions=[
-                    ft.TextButton("اختبار الآن (دفع بيانات حديثة)", on_click=lambda e: self.page.run_task(test_widget_now, body)),
-                    ft.TextButton("إعادة الفحص", on_click=lambda e: self.page.run_task(refresh_widget_diagnosis, body)),
-                    ft.FilledButton("حسنًا", on_click=lambda e: self.page.close(diag_dialog)),
-                ],
-            )
-            self.page.open(diag_dialog)
-            await refresh_widget_diagnosis(body)
-
         # --- Backups: automatic creation on login when overdue, and local
         # retention pruning -- admin-tunable and read via core.backup_settings
         # (auto-check happens once per login in main.py; retention pruning
@@ -1521,7 +1440,14 @@ class AdminCenter:
                 "التفعيل — نفس سيرفر هوى الشام",
                 [
                     ft.Text("تطبيق Nano يرسل مفتاح الترخيص ومعرّف الجهاز فقط إلى سيرفر تفعيل هوى الشام. لا تُرسل الفواتير أو العملاء أو الموردون أو المخزون. بعد نجاح التفعيل يعمل التطبيق أوفلاين.", size=12, color=Colors.TEXT_MUTED),
-                    ft.Text("سيرفر التفعيل", size=11, color=Colors.TEXT_SECONDARY),
+                    ft.Row(
+                        [
+                            ft.Text("سيرفر التفعيل ومعرّف الجهاز (بيانات خاصة)", size=11, color=Colors.TEXT_SECONDARY),
+                            license_reveal_button,
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
                     license_server,
                     license_device,
                     ft.ResponsiveRow(
@@ -1701,18 +1627,6 @@ class AdminCenter:
                     ),
                 ],
             ),
-            "widget": self._section(
-                "ودجت الشاشة الرئيسية",
-                [
-                    ft.Text(
-                        "ودجت \"Nano | نانو\" تعرض مبيعات اليوم ورصيد الصندوق على الشاشة الرئيسية لأندرويد، "
-                        "وتتحدّث فورًا بعد كل بيع أو سند، وكل 30 دقيقة عند إغلاق التطبيق. "
-                        "استخدم الفحص أدناه إذا ظهرت رسالة \"يتعذّر عرض المحتوى\" بدل الأرقام.",
-                        size=12, color=Colors.TEXT_SECONDARY,
-                    ),
-                    ft.OutlinedButton("تشخيص الودجت", icon=ft.Icons.HEALTH_AND_SAFETY_OUTLINED, on_click=open_widget_diagnosis),
-                ],
-            ),
             "reports": self._section(
                 "إعدادات التقارير",
                 [
@@ -1737,7 +1651,6 @@ class AdminCenter:
             ("pos", "نقطة البيع", ft.Icons.POINT_OF_SALE_OUTLINED),
             ("stocktake", "الجرد", ft.Icons.FACT_CHECK_OUTLINED),
             ("sound", "الصوت", ft.Icons.VOLUME_UP_OUTLINED),
-            ("widget", "ودجت الشاشة الرئيسية", ft.Icons.WIDGETS_OUTLINED),
             ("reports", "التقارير", ft.Icons.BAR_CHART_OUTLINED),
             ("audit", "سجل التدقيق", ft.Icons.HISTORY),
         ]

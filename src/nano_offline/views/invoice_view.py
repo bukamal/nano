@@ -16,8 +16,10 @@ from nano_offline.components import (
     SmartAmountField,
     SmartDateField,
     empty_state,
+    kpi_card,
     new_form_sheet,
     render_form_sheet,
+    status_pill,
 )
 
 from nano_offline.services.invoice_service import InvoiceLineInput
@@ -229,6 +231,129 @@ class InvoiceCenter:
             body=body,
         )
 
+    def show_invoice_detail(self, invoice_id: int) -> None:
+        """Tap-to-open quick view for an invoice card -- same role as
+        items_view.show_item_detail: a read-mostly bottom sheet (totals +
+        line items) with print/PDF/edit reachable from a footer, so opening
+        an invoice from the list no longer requires jumping straight into
+        the full editor just to look at it.
+        """
+        invoice = self.ctx.invoices.get_invoice(invoice_id)
+        if not invoice:
+            self.notify("الفاتورة غير موجودة")
+            return
+
+        sale = invoice.get("type") == "sale"
+        kind = "بيع" if sale else "شراء"
+        party = invoice.get("party_name") or "نقدي"
+        total = float(invoice.get("total") or 0)
+        paid_amount = float(invoice.get("paid_amount") or 0)
+        remaining = max(0.0, float(invoice.get("remaining_amount") or 0))
+        status_key = invoice.get("payment_status") or ""
+        status = STATUS_AR.get(status_key, status_key)
+        status_bg = Colors.SUCCESS_BG if status_key == "paid" else Colors.WARNING_BG_ALT if status_key == "partial" else Colors.DANGER_BG
+        status_fg = Colors.SUCCESS_DARKER if status_key == "paid" else Colors.ORANGE_DARK if status_key == "partial" else Colors.DANGER_DARKER
+        accent = Colors.SUCCESS if sale else Colors.PURPLE
+        accent_bg = Colors.SUCCESS_BG if sale else Colors.PURPLE_BG
+
+        line_rows: list[ft.Control] = []
+        for line in invoice.get("lines") or []:
+            qty = float(line.get("quantity") or 0)
+            unit_price = float(line.get("unit_price") or 0)
+            line_total = float(line.get("total") or 0)
+            unit = line.get("unit_abbreviation") or line.get("unit_name") or ""
+            name = line.get("item_name") or line.get("description") or "—"
+            line_rows.append(
+                ft.Container(
+                    ft.Row(
+                        [
+                            ft.Column(
+                                [
+                                    ft.Text(name, size=12, weight=ft.FontWeight.W_600),
+                                    ft.Text(f"{self._qty(qty)} {unit} × {self.money(unit_price)}", size=10, color=Colors.TEXT_SECONDARY),
+                                ],
+                                spacing=1, expand=True,
+                            ),
+                            ft.Text(self.money(line_total), size=12, weight=ft.FontWeight.BOLD),
+                        ],
+                    ),
+                    padding=8, bgcolor=Colors.BACKGROUND, border_radius=11,
+                )
+            )
+        if not line_rows:
+            line_rows = [ft.Text("لا توجد أسطر", size=11, color=Colors.TEXT_SECONDARY)]
+
+        def close(_=None):
+            self.page.close(sheet)
+
+        async def edit(_=None):
+            # Same close-then-yield-then-open fix used everywhere else in
+            # this file/items_view -- closing this sheet and opening the
+            # editor's sheet in the same tick can race Flutter's dismiss
+            # animation and leave the editor invisible.
+            close()
+            await asyncio.sleep(0.1)
+            self.show_editor(invoice_id)
+
+        async def do_print(_):
+            close()
+            await asyncio.sleep(0.1)
+            await self._print_handler(invoice_id)(None)
+
+        async def do_pdf(_):
+            close()
+            await asyncio.sleep(0.1)
+            await self._pdf_handler(invoice_id)(None)
+
+        export_row = []
+        if self.native_files is not None:
+            export_row = [
+                ft.OutlinedButton("طباعة", icon=ft.Icons.PRINT_OUTLINED, on_click=do_print, expand=True),
+                ft.OutlinedButton("PDF", icon=ft.Icons.DESCRIPTION_OUTLINED, on_click=do_pdf, expand=True),
+            ]
+
+        body = ft.Column(
+            [
+                ft.Row([status_pill(status, status_fg, status_bg)], alignment=ft.MainAxisAlignment.START),
+                ft.ResponsiveRow(
+                    [
+                        ft.Container(kpi_card("الإجمالي", self.money(total), ft.Icons.RECEIPT_LONG_OUTLINED, Colors.PRIMARY), col={"xs": 4}),
+                        ft.Container(kpi_card("المدفوع", self.money(paid_amount), ft.Icons.CHECK_CIRCLE_OUTLINE, Colors.SUCCESS), col={"xs": 4}),
+                        ft.Container(kpi_card("المتبقي", self.money(remaining), ft.Icons.SCHEDULE, Colors.ORANGE if remaining > 1e-9 else Colors.SUCCESS), col={"xs": 4}),
+                    ],
+                    spacing=7, run_spacing=7,
+                ),
+                ft.Divider(height=1, color=Colors.BACKGROUND_ALT),
+                ft.Text("الأصناف", size=13, weight=ft.FontWeight.BOLD, color=Colors.TEXT_SECONDARY),
+                ft.Column(line_rows, spacing=6),
+                ft.Divider(height=1, color=Colors.BACKGROUND_ALT),
+                ft.Column(
+                    (
+                        [ft.Row(export_row, spacing=10)] if export_row else []
+                    ) + [
+                        ft.Row(
+                            [
+                                ft.OutlinedButton("تعديل", icon=ft.Icons.EDIT_OUTLINED, on_click=edit, expand=True),
+                                ft.FilledButton("إغلاق", on_click=close, expand=True),
+                            ],
+                            spacing=10,
+                        ),
+                    ],
+                    spacing=8,
+                ),
+            ],
+            spacing=12,
+        )
+
+        sheet = self._bottom_sheet(
+            icon=ft.Icons.TRENDING_UP if sale else ft.Icons.TRENDING_DOWN,
+            icon_color=accent,
+            icon_bg=accent_bg,
+            title=f"فاتورة {kind} #{invoice_id}",
+            subtitle=f"{party} • {invoice.get('invoice_date') or '—'}",
+            body=body,
+        )
+
     def show_center(self) -> None:
         """Reference-style invoice browser with mobile-safe cards and chip filters."""
         if self.on_title_change:
@@ -269,23 +394,6 @@ class InvoiceCenter:
             ]
             overdue_total = sum(max(0.0, float(i.get("remaining_amount") or 0)) for i in overdue_invoices)
 
-            def summary_card(title: str, value: str, icon, color: str, on_tap=None):
-                # Tappable when on_tap is given -- turns the KPI card into a
-                # filter shortcut (e.g. tap "المستحق" to jump straight to
-                # outstanding invoices) instead of being display-only.
-                return ft.Container(
-                    ft.Row(
-                        [
-                            ft.Container(ft.Icon(icon, color=color, size=20), width=38, height=38, alignment=ft.alignment.center, bgcolor=Colors.BACKGROUND, border_radius=12),
-                            ft.Column([ft.Text(title, size=10, color=Colors.TEXT_SECONDARY), ft.Text(value, size=16, weight=ft.FontWeight.BOLD)], spacing=2, expand=True),
-                            *([ft.Icon(ft.Icons.CHEVRON_LEFT_ROUNDED, size=16, color=Colors.TEXT_FAINT)] if on_tap else []),
-                        ],
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    padding=11, border=ft.border.all(1, Colors.BORDER), border_radius=16, bgcolor=Colors.WHITE, shadow=Shadow.SM,
-                    ink=bool(on_tap), on_click=on_tap,
-                )
-
             def matches(inv: dict) -> bool:
                 query = (search.value or "").strip().lower()
                 if filters["type"] != "all" and inv.get("type") != filters["type"]:
@@ -320,66 +428,109 @@ class InvoiceCenter:
                 status_bg = Colors.SUCCESS_BG if status_key == "paid" else Colors.WARNING_BG_ALT if status_key == "partial" else Colors.DANGER_BG
                 status_fg = Colors.SUCCESS_DARKER if status_key == "paid" else Colors.ORANGE_DARK if status_key == "partial" else Colors.DANGER_DARKER
                 has_party = bool(inv.get("customer_id") if sale else inv.get("supplier_id"))
+                # Same icon-badge-carries-the-accent language as the items
+                # list card (accent lives in the round icon badge, not in a
+                # separate border stripe) -- one card language app-wide.
                 accent = Colors.SUCCESS if sale else Colors.PURPLE
                 accent_bg = Colors.SUCCESS_BG if sale else Colors.PURPLE_BG
                 overdue_days = days_since(inv.get("invoice_date")) if remaining > 1e-9 and status_key != "paid" else None
                 is_overdue = bool(overdue_days and overdue_days > overdue_threshold)
+                can_pay = remaining > 1e-9 and has_party
 
-                actions = [
-                    ft.FilledButton("فتح", icon=ft.Icons.VISIBILITY_OUTLINED, on_click=lambda _, iid=invoice_id: self.show_editor(iid)),
-                ]
-                if remaining > 1e-9 and has_party:
-                    actions.append(ft.OutlinedButton("تسجيل دفعة", icon=ft.Icons.PAYMENTS_OUTLINED, on_click=lambda _, iid=invoice_id: self.show_payment_dialog(iid)))
+                # One prominent number instead of always showing three --
+                # a fully-paid invoice showing "المدفوع/المتبقي" columns that
+                # just restate the total/zero is pure visual noise. Mirrors
+                # the items card's single "price + status" pairing.
+                if status_key == "paid":
+                    highlight_label, highlight_value, highlight_color = "الإجمالي", self.money(total), Colors.SUCCESS
+                    secondary_line = "مسددة بالكامل"
+                else:
+                    highlight_label, highlight_value, highlight_color = "المتبقي", self.money(remaining), (Colors.ORANGE if remaining > 1e-9 else Colors.SUCCESS)
+                    secondary_line = f"من إجمالي {self.money(total)}"
+                    if paid_amount > 1e-9:
+                        secondary_line += f" • مدفوع {self.money(paid_amount)}"
 
-                status_badges = [ft.Container(ft.Text(status, size=9, color=status_fg, weight=ft.FontWeight.BOLD), padding=ft.padding.symmetric(horizontal=8, vertical=4), bgcolor=status_bg, border_radius=12)]
+                status_badges = [status_pill(status, status_fg, status_bg)]
                 if is_overdue:
-                    status_badges.append(
-                        ft.Container(
-                            ft.Text(f"متأخرة {overdue_days} يوم", size=9, color=Colors.DANGER_DARKER, weight=ft.FontWeight.BOLD),
-                            padding=ft.padding.symmetric(horizontal=8, vertical=4), bgcolor=Colors.DANGER_BG, border_radius=12,
+                    status_badges.append(status_pill(f"متأخرة {overdue_days} يوم", Colors.DANGER_DARKER, Colors.DANGER_BG))
+
+                actions = []
+                if can_pay:
+                    actions.append(
+                        ft.OutlinedButton(
+                            "تسجيل دفعة", icon=ft.Icons.PAYMENTS_OUTLINED, expand=True,
+                            on_click=lambda _, iid=invoice_id: self.show_payment_dialog(iid),
                         )
                     )
 
-                return ft.Container(
-                    ft.Column(
+                body: list[ft.Control] = [
+                    ft.Row(
                         [
-                            ft.Row(
+                            ft.Container(ft.Icon(ft.Icons.TRENDING_UP if sale else ft.Icons.TRENDING_DOWN, color=accent, size=21), width=44, height=44, alignment=ft.alignment.center, bgcolor=accent_bg, border_radius=14),
+                            ft.Column(
                                 [
-                                    ft.Container(ft.Icon(ft.Icons.TRENDING_UP if sale else ft.Icons.TRENDING_DOWN, color=accent, size=21), width=44, height=44, alignment=ft.alignment.center, bgcolor=accent_bg, border_radius=14),
-                                    ft.Column(
-                                        [
-                                            ft.Row([ft.Text(f"فاتورة {kind} #{invoice_id}", weight=ft.FontWeight.BOLD, size=14, expand=True), *status_badges]),
-                                            ft.Text(f"{party} • {inv.get('invoice_date') or '—'}", size=10, color=Colors.TEXT_SECONDARY),
-                                        ],
-                                        spacing=3, expand=True,
-                                    ),
-                                    ft.IconButton(icon=ft.Icons.MORE_VERT, tooltip="المزيد", icon_color=Colors.TEXT_SECONDARY, on_click=lambda _, row=inv: self._invoice_more_dialog(row)),
+                                    ft.Row([ft.Text(f"فاتورة {kind} #{invoice_id}", weight=ft.FontWeight.BOLD, size=14, expand=True), *status_badges]),
+                                    ft.Text(f"{party} • {inv.get('invoice_date') or '—'}", size=10, color=Colors.TEXT_SECONDARY),
                                 ],
-                                vertical_alignment=ft.CrossAxisAlignment.START,
+                                spacing=3, expand=True,
                             ),
-                            ft.Divider(height=1, color=Colors.BACKGROUND_ALT),
-                            ft.Row(
-                                [
-                                    ft.Column([ft.Text("الإجمالي", size=9, color=Colors.TEXT_FAINT), ft.Text(self.money(total), size=16, weight=ft.FontWeight.BOLD)], spacing=2, expand=True),
-                                    ft.Column([ft.Text("المدفوع", size=9, color=Colors.TEXT_FAINT), ft.Text(self.money(paid_amount), size=12, color=Colors.TEXT_MUTED)], spacing=2, expand=True),
-                                    ft.Column([ft.Text("المتبقي", size=9, color=Colors.TEXT_FAINT), ft.Text(self.money(remaining), size=12, color=Colors.ORANGE if remaining else Colors.SUCCESS)], spacing=2, expand=True),
-                                ]
-                            ),
-                            ft.Row(actions, spacing=8, wrap=True),
+                            ft.IconButton(icon=ft.Icons.MORE_VERT, tooltip="المزيد", icon_color=Colors.TEXT_SECONDARY, on_click=lambda _, row=inv: self._invoice_more_dialog(row)),
                         ],
-                        spacing=9,
+                        vertical_alignment=ft.CrossAxisAlignment.START,
                     ),
-                    padding=13,
-                    # Thin colored stripe on the leading edge (green=sale,
-                    # purple=purchase) so a long list scans at a glance,
-                    # in addition to the existing trend icon.
-                    border=ft.border.only(
-                        top=ft.BorderSide(1, Colors.BORDER),
-                        right=ft.BorderSide(1, Colors.BORDER),
-                        bottom=ft.BorderSide(1, Colors.BORDER),
-                        left=ft.BorderSide(3, accent),
+                    ft.Divider(height=1, color=Colors.BACKGROUND_ALT),
+                    ft.Row(
+                        [
+                            ft.Column([ft.Text(highlight_label, size=9, color=Colors.TEXT_FAINT), ft.Text(highlight_value, size=17, weight=ft.FontWeight.BOLD, color=highlight_color)], spacing=2),
+                            ft.Text(secondary_line, size=10, color=Colors.TEXT_SECONDARY),
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.END,
                     ),
-                    border_radius=20, bgcolor=Colors.WHITE, shadow=Shadow.SM,
+                ]
+                if actions:
+                    body.append(ft.Row(actions, spacing=8))
+
+                # Whole card is tappable now (like the items row) -- opens a
+                # quick detail sheet instead of requiring a permanent "فتح"
+                # button just to view the invoice. Buttons/kebab inside sit
+                # on top and absorb their own tap, so they don't also
+                # trigger this.
+                card = ft.Container(
+                    ft.Column(body, spacing=9),
+                    padding=13, border=ft.border.all(1, Colors.BORDER), border_radius=16,
+                    bgcolor=Colors.WHITE, shadow=Shadow.SM, ink=True,
+                    on_click=lambda _, iid=invoice_id: self.show_invoice_detail(iid),
+                )
+
+                if not can_pay:
+                    return card
+
+                # Swipe = quick, non-destructive "تسجيل دفعة" shortcut on
+                # outstanding invoices with a known party -- unlike the
+                # items list, invoices never get a swipe-to-delete gesture
+                # (too easy to trigger by accident on a financial record);
+                # the only destructive action stays behind "المزيد" + a
+                # confirm dialog. Refreshing right after re-renders this
+                # same card in place (the payment doesn't remove it).
+                def swipe_to_payment(_, iid=invoice_id):
+                    self.show_payment_dialog(iid)
+                    refresh_cards()
+
+                payment_background = ft.Container(
+                    content=ft.Row([ft.Icon(ft.Icons.PAYMENTS_OUTLINED, color=Colors.WHITE, size=22), ft.Text("تسجيل دفعة", color=Colors.WHITE, size=12, weight=ft.FontWeight.W_600)], spacing=6),
+                    bgcolor=Colors.SUCCESS_DARK, border_radius=16, padding=ft.padding.symmetric(horizontal=20), alignment=ft.alignment.center_left,
+                )
+                payment_background_end = ft.Container(
+                    content=ft.Row([ft.Text("تسجيل دفعة", color=Colors.WHITE, size=12, weight=ft.FontWeight.W_600), ft.Icon(ft.Icons.PAYMENTS_OUTLINED, color=Colors.WHITE, size=22)], spacing=6, alignment=ft.MainAxisAlignment.END),
+                    bgcolor=Colors.SUCCESS_DARK, border_radius=16, padding=ft.padding.symmetric(horizontal=20), alignment=ft.alignment.center_right,
+                )
+                return ft.Dismissible(
+                    key=f"invoice-{invoice_id}",
+                    content=card,
+                    dismiss_direction=ft.DismissDirection.HORIZONTAL,
+                    background=payment_background,
+                    secondary_background=payment_background_end,
+                    on_dismiss=swipe_to_payment,
                 )
 
             def refresh_cards(_=None):
@@ -475,15 +626,15 @@ class InvoiceCenter:
                     ft.ResponsiveRow(
                         [
                             ft.Container(
-                                summary_card("إجمالي المبيعات", self.money(sales_total), ft.Icons.TRENDING_UP, Colors.SUCCESS, on_tap=lambda _: set_filter("type", "sale")),
+                                kpi_card("إجمالي المبيعات", self.money(sales_total), ft.Icons.TRENDING_UP, Colors.SUCCESS, on_tap=lambda _: set_filter("type", "sale")),
                                 col={"xs": 6, "md": 4},
                             ),
                             ft.Container(
-                                summary_card("المستحق", self.money(outstanding), ft.Icons.SCHEDULE, Colors.ORANGE, on_tap=lambda _: set_filter("status", "outstanding")),
+                                kpi_card("المستحق", self.money(outstanding), ft.Icons.SCHEDULE, Colors.ORANGE, on_tap=lambda _: set_filter("status", "outstanding")),
                                 col={"xs": 6, "md": 4},
                             ),
                             ft.Container(
-                                summary_card("فواتير مفتوحة", str(open_count), ft.Icons.RECEIPT_LONG_OUTLINED, Colors.PRIMARY, on_tap=lambda _: set_filter("status", "outstanding")),
+                                kpi_card("فواتير مفتوحة", str(open_count), ft.Icons.RECEIPT_LONG_OUTLINED, Colors.PRIMARY, on_tap=lambda _: set_filter("status", "outstanding")),
                                 col={"xs": 12, "md": 4},
                             ),
                         ], spacing=8, run_spacing=8,
