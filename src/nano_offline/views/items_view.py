@@ -6,7 +6,7 @@ import flet as ft
 
 from nano_offline.core.toast import toast
 
-from nano_offline.components import SearchSelect, SegmentedToggle, SelectAllTextField, SmartAmountField, empty_state, kpi_card, status_pill
+from nano_offline.components import SearchSelect, SegmentedToggle, SegmentOption, SelectAllTextField, SmartAmountField, empty_state, kpi_card, status_pill
 from nano_offline.components.buttons import header_close_button, inline_icon_button
 from nano_offline.core.theme import Colors, IconSize, LazyPalette, Radius, Shadow
 from nano_offline.core import currency
@@ -386,10 +386,10 @@ class ItemsCenter:
                 definitions_tab["value"] = key
                 render_definitions_sheet()
 
-            def tab_chip(label: str, key: str):
+            def tab_chip(label: str, key: str, count: int):
                 active = definitions_tab["value"] == key
                 return ft.Container(
-                    ft.Text(label, size=12, color=Colors.WHITE if active else Colors.TEXT_MUTED, weight=ft.FontWeight.BOLD if active else ft.FontWeight.W_500, text_align=ft.TextAlign.CENTER),
+                    ft.Text(f"{label} ({count})", size=12, color=Colors.WHITE if active else Colors.TEXT_MUTED, weight=ft.FontWeight.BOLD if active else ft.FontWeight.W_500, text_align=ft.TextAlign.CENTER),
                     padding=ft.padding.symmetric(horizontal=14, vertical=9),
                     bgcolor=Colors.PRIMARY if active else Colors.WHITE,
                     border=ft.border.all(1, Colors.PRIMARY if active else Colors.BORDER),
@@ -468,6 +468,19 @@ class ItemsCenter:
             add_row_controls: list[ft.Control] = [new_name] + ([new_abbr] if new_abbr else []) + [
                 ft.IconButton(ft.Icons.ADD_CIRCLE, icon_size=IconSize.HERO, icon_color=Colors.PRIMARY, tooltip="إضافة", on_click=add_new),
             ]
+            add_card = ft.Container(
+                ft.Column(
+                    [
+                        ft.Row(
+                            [ft.Icon(ft.Icons.ADD_CIRCLE_OUTLINE, size=15, color=Colors.PRIMARY), ft.Text("إضافة تصنيف جديد" if is_categories else "إضافة وحدة جديدة", size=12, weight=ft.FontWeight.W_600, color=Colors.TEXT_MUTED_DARK)],
+                            spacing=6,
+                        ),
+                        ft.Row(add_row_controls, spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    ],
+                    spacing=8,
+                ),
+                padding=12, bgcolor=Colors.BACKGROUND_ALT, border_radius=Radius.MD,
+            )
 
             definitions_sheet.content = ft.Container(
                 ft.Column(
@@ -475,14 +488,21 @@ class ItemsCenter:
                         ft.Container(width=44, height=5, bgcolor=Colors.BORDER_STRONG, border_radius=10, alignment=ft.alignment.center),
                         ft.Row(
                             [
-                                ft.Text("التصنيفات والوحدات", size=18, weight=ft.FontWeight.BOLD, expand=True),
+                                _icon_bubble(ft.Icons.SELL_OUTLINED if is_categories else ft.Icons.STRAIGHTEN, color=Colors.PRIMARY, bgcolor=Colors.PRIMARY_BG),
+                                ft.Column(
+                                    [
+                                        ft.Text("التصنيفات والوحدات", size=17, weight=ft.FontWeight.BOLD),
+                                        ft.Text(f"{len(categories)} تصنيف، {len(units)} وحدة قياس", size=11, color=Colors.TEXT_SECONDARY),
+                                    ],
+                                    spacing=1, expand=True,
+                                ),
                                 header_close_button(lambda _: page.close(definitions_sheet)),
                             ],
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=12,
                         ),
-                        ft.Row([tab_chip("التصنيفات", "categories"), tab_chip("الوحدات", "units")], spacing=8),
+                        ft.Row([tab_chip("التصنيفات", "categories", len(categories)), tab_chip("الوحدات", "units", len(units))], spacing=8),
                         ft.Container(ft.Column(row_controls, spacing=8, scroll=ft.ScrollMode.AUTO), height=280),
-                        ft.Row(add_row_controls, spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                        add_card,
                     ],
                     # tight + scroll (rather than a fixed pixel height on
                     # the outer Container, as this used to have): combined
@@ -972,13 +992,27 @@ class ItemsCenter:
                 page_count=_STEP_COUNT, render_page=render_page,
             )
 
-        def open_barcode_print_dialog(entries: list[tuple[dict, int]]) -> None:
-            """entries: [(item_dict, copies), ...] for items that already have a barcode."""
+        def open_barcode_print_dialog(
+            entries: list[tuple[dict, int]],
+            *,
+            layout: str = "sheet",
+            roll_width_mm: int | None = None,
+        ) -> None:
+            """entries: [(item_dict, copies), ...] for items that already have a barcode.
+
+            ``layout``/``roll_width_mm`` come from the printer-type chip in
+            open_bulk_barcode_sheet() above (falling back to the admin's saved
+            default from core.barcode_settings when called directly, e.g. from
+            a single-item action elsewhere) -- see barcode_labels_html()'s
+            docstring for what each layout actually renders.
+            """
             usable = [(it, max(1, int(n or 1))) for it, n in entries if str(it.get("barcode") or "").strip()]
             if not usable:
                 notify("لا توجد مواد لها باركود ضمن التحديد")
                 return
             total = sum(n for _, n in usable)
+            is_roll = layout == "roll"
+            roll_width_mm = roll_width_mm or barcode_settings.label_roll_width_mm(ctx.settings)
             dialog = ft.AlertDialog(modal=True)
             price_qr_toggle = ft.Checkbox(
                 label="إضافة رمز QR للسعر (يمسحه الزبون بكاميرا هاتفه)",
@@ -989,6 +1023,20 @@ class ItemsCenter:
                 choices=[("2", "٢ أعمدة"), ("3", "٣ أعمدة"), ("4", "٤ أعمدة")],
                 value=str(barcode_settings.label_columns(ctx.settings)),
                 allow_clear=False,
+            )
+            printer_note = ft.Container(
+                ft.Row(
+                    [
+                        ft.Icon(ft.Icons.RECEIPT_LONG_OUTLINED if is_roll else ft.Icons.APPS_ROUNDED, size=16, color=Colors.PURPLE),
+                        ft.Text(
+                            f"طابعة حرارية — لفة {roll_width_mm} مم، ملصق واحد لكل صفحة" if is_roll else "ورق A4 — عدة ملصقات في كل صفحة",
+                            size=11, color=Colors.TEXT_MUTED_DARK,
+                        ),
+                    ],
+                    spacing=6,
+                ),
+                padding=ft.padding.symmetric(horizontal=10, vertical=8),
+                bgcolor=Colors.PURPLE_BG, border_radius=Radius.SM,
             )
 
             def close(_=None):
@@ -1009,6 +1057,8 @@ class ItemsCenter:
                     include_price_qr=price_qr_toggle.value,
                     label_size=barcode_settings.label_dimensions(ctx.settings),
                     show_text=barcode_settings.label_show_text(ctx.settings),
+                    layout=layout,
+                    roll_width_mm=roll_width_mm,
                 )
 
             async def do_print(_):
@@ -1031,11 +1081,13 @@ class ItemsCenter:
                 except Exception as exc:
                     notify(str(exc), kind="error")
 
+            surface_label = f"لفة حرارية {roll_width_mm} مم" if is_roll else "ورق A4"
             dialog.title = ft.Text("طباعة ملصقات الباركود")
             dialog.content = ft.Column(
                 [
-                    ft.Text(f"سيتم إنشاء {total} ملصق باركود لِـ {len(usable)} مادة على ورق A4."),
-                    columns_field,
+                    ft.Text(f"سيتم إنشاء {total} ملصق باركود لِـ {len(usable)} مادة على {surface_label}."),
+                    printer_note,
+                    *([columns_field] if not is_roll else []),
                     price_qr_toggle,
                 ],
                 spacing=8, tight=True,
@@ -1349,15 +1401,39 @@ class ItemsCenter:
             selected: dict[int, bool] = {int(i["id"]): False for i in with_barcode}
             sheet = ft.BottomSheet(content=ft.Container(), is_scroll_controlled=True, enable_drag=True, maintain_bottom_view_insets_padding=True)
 
+            # Printer profile chosen here travels with the selection into
+            # open_barcode_print_dialog() below -- the admin's saved default
+            # (core.barcode_settings) just seeds the initial chip state, it
+            # doesn't lock the choice for this one print run.
+            printer_layout = SegmentedToggle(
+                options=[SegmentOption(k, v) for k, v in barcode_settings.LABEL_LAYOUT_LABELS.items()],
+                value=barcode_settings.label_layout(ctx.settings),
+            )
+            roll_width_toggle = SegmentedToggle(
+                options=[SegmentOption(k, v) for k, v in barcode_settings.LABEL_ROLL_WIDTH_LABELS.items()],
+                value=barcode_settings.label_roll_width(ctx.settings),
+            )
+            roll_width_row = ft.Row([ft.Text("عرض اللفة:", size=11, color=Colors.TEXT_SECONDARY), roll_width_toggle], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER, visible=printer_layout.value == "roll")
+
+            def on_layout_change(_=None) -> None:
+                roll_width_row.visible = printer_layout.value == "roll"
+                roll_width_row.update()
+
+            printer_layout.on_change = on_layout_change
+
             def close(_=None):
                 page.close(sheet)
 
             def update_summary():
                 n = sum(1 for v in selected.values() if v)
-                counter_text.value = f"{n} من {len(with_barcode)} محدّدة" if n else "لم يتم تحديد أي مادة"
+                counter_text.value = f"{n} من {len(with_barcode)} محدّدة للطباعة" if n else "لم يتم تحديد أي مادة بعد"
+                counter_badge.bgcolor = Colors.PRIMARY_BG if n else Colors.BACKGROUND_ALT
+                counter_badge.border = ft.border.all(1, Colors.PRIMARY_BORDER if n else Colors.BORDER)
                 confirm_button.disabled = n == 0
+                confirm_button.text = f"متابعة ({n})" if n else "متابعة"
                 select_all_box.value = n == len(with_barcode)
                 counter_text.update()
+                counter_badge.update()
                 confirm_button.update()
                 select_all_box.update()
 
@@ -1390,8 +1466,10 @@ class ItemsCenter:
                 if not entries:
                     notify("اختر مادة واحدة على الأقل للطباعة")
                     return
+                layout = printer_layout.value or barcode_settings.DEFAULT_LABEL_LAYOUT
+                roll_width_mm = barcode_settings.LABEL_ROLL_WIDTH_MM.get(roll_width_toggle.value or "", barcode_settings.label_roll_width_mm(ctx.settings))
                 close()
-                open_barcode_print_dialog(entries)
+                open_barcode_print_dialog(entries, layout=layout, roll_width_mm=roll_width_mm)
 
             def apply_search(e=None):
                 term = (search_field.value or "").strip().lower()
@@ -1404,7 +1482,7 @@ class ItemsCenter:
             rows_ctrl = []
             for it in with_barcode:
                 item_id = int(it["id"])
-                copies_field = SelectAllTextField(value="1", width=60, text_align=ft.TextAlign.CENTER, keyboard_type=ft.KeyboardType.NUMBER, dense=True)
+                copies_field = SelectAllTextField(value="1", width=56, text_align=ft.TextAlign.CENTER, keyboard_type=ft.KeyboardType.NUMBER, dense=True)
                 copies_fields[item_id] = copies_field
                 cb = ft.Checkbox(value=False, on_change=lambda e, i=item_id: toggle(i, bool(e.control.value)))
                 checkboxes[item_id] = cb
@@ -1412,11 +1490,13 @@ class ItemsCenter:
                     ft.Row(
                         [
                             cb,
-                            ft.Column([ft.Text(it["name"], size=12, weight=ft.FontWeight.W_600), ft.Text(str(it.get("barcode")), size=9, color=Colors.TEXT_SECONDARY)], expand=True, spacing=1),
-                            copies_field,
+                            ft.Column([ft.Text(it["name"], size=12, weight=ft.FontWeight.W_600), ft.Text(str(it.get("barcode")), size=9, color=Colors.TEXT_SECONDARY, font_family="monospace")], expand=True, spacing=1),
+                            ft.Column([ft.Text("نسخ", size=9, color=Colors.TEXT_FAINT), copies_field], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
                         ],
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=8,
                     ),
+                    padding=ft.padding.symmetric(horizontal=10, vertical=8),
+                    bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=14, shadow=Shadow.SM,
                     visible=True,
                 )
                 row_wrappers[item_id] = row
@@ -1428,18 +1508,47 @@ class ItemsCenter:
                 border_color=Colors.BORDER, on_change=apply_search,
             )
             select_all_box = ft.Checkbox(value=False, label="تحديد الكل", on_change=toggle_all)
-            counter_text = ft.Text("لم يتم تحديد أي مادة", size=11, color=Colors.TEXT_SECONDARY)
+            counter_text = ft.Text("لم يتم تحديد أي مادة بعد", size=11, color=Colors.TEXT_SECONDARY)
+            counter_badge = ft.Container(
+                counter_text, padding=ft.padding.symmetric(horizontal=10, vertical=6),
+                bgcolor=Colors.BACKGROUND_ALT, border=ft.border.all(1, Colors.BORDER), border_radius=20,
+            )
             confirm_button = ft.FilledButton("متابعة", icon=ft.Icons.QR_CODE_2, on_click=confirm, expand=True, disabled=True)
-            list_column = ft.Column(rows_ctrl, spacing=10, scroll=ft.ScrollMode.AUTO)
+            list_column = ft.Column(rows_ctrl, spacing=8, scroll=ft.ScrollMode.AUTO)
+
+            printer_section = ft.Container(
+                ft.Column(
+                    [
+                        ft.Row([ft.Icon(ft.Icons.PRINT_OUTLINED, size=15, color=Colors.TEXT_SECONDARY), ft.Text("نوع الطابعة", size=12, weight=ft.FontWeight.W_600, color=Colors.TEXT_MUTED_DARK)], spacing=6),
+                        printer_layout,
+                        roll_width_row,
+                    ],
+                    spacing=8,
+                ),
+                padding=12, bgcolor=Colors.BACKGROUND_ALT, border_radius=Radius.MD,
+            )
 
             sheet.content = ft.Container(
                 ft.Column(
                     [
                         ft.Container(width=44, height=5, bgcolor=Colors.BORDER_STRONG, border_radius=10, alignment=ft.alignment.center),
-                        ft.Text("طباعة ملصقات الباركود", size=17, weight=ft.FontWeight.BOLD),
-                        ft.Text("اختر المواد وعدد النسخ لكل ملصق", size=11, color=Colors.TEXT_SECONDARY),
+                        ft.Row(
+                            [
+                                _icon_bubble(ft.Icons.QR_CODE_2_ROUNDED, color=Colors.PURPLE, bgcolor=Colors.PURPLE_BG),
+                                ft.Column(
+                                    [
+                                        ft.Text("طباعة ملصقات الباركود", size=17, weight=ft.FontWeight.BOLD),
+                                        ft.Text("اختر المواد وعدد النسخ لكل ملصق ثم نوع الطابعة", size=11, color=Colors.TEXT_SECONDARY),
+                                    ],
+                                    spacing=1, expand=True,
+                                ),
+                                header_close_button(close),
+                            ],
+                            spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        printer_section,
                         search_field,
-                        ft.Row([select_all_box, ft.Container(counter_text, expand=True, alignment=ft.alignment.center_left)], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                        ft.Row([select_all_box, ft.Container(expand=True), counter_badge], vertical_alignment=ft.CrossAxisAlignment.CENTER),
                         # This inner list keeps its own bounded height and
                         # scroll (same as the categories/units list in
                         # definitions_sheet) since it's a genuinely long
@@ -1447,7 +1556,7 @@ class ItemsCenter:
                         # about letting the whole SHEET rise above the
                         # keyboard, not about how tall this particular list
                         # is.
-                        ft.Container(list_column, height=320),
+                        ft.Container(list_column, height=300),
                         ft.Row(
                             [
                                 ft.OutlinedButton("إلغاء", on_click=close, expand=True),
@@ -1467,7 +1576,7 @@ class ItemsCenter:
                     # "نسخ" field the user taps into view -- no manual
                     # height math to keep in sync as this sheet's content
                     # changes.
-                    spacing=10, tight=True, scroll=ft.ScrollMode.AUTO,
+                    spacing=12, tight=True, scroll=ft.ScrollMode.AUTO,
                     horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 ),
                 padding=ft.padding.only(left=18, right=18, top=12, bottom=20),
@@ -1525,10 +1634,12 @@ class ItemsCenter:
             def update_summary():
                 n = sum(1 for v in selected.values() if v)
                 counter_text.value = f"{n} من {len(all_items)} محدّدة" if n else "لم يتم تحديد أي مادة"
+                counter_badge.bgcolor = Colors.PRIMARY_BG if n else Colors.BACKGROUND_ALT
+                counter_badge.border = ft.border.all(1, Colors.PRIMARY_BORDER if n else Colors.BORDER)
                 move_button.disabled = n == 0 or not move_category.value
                 price_button.disabled = n == 0
                 select_all_box.value = n == len(all_items)
-                counter_text.update(); move_button.update(); price_button.update(); select_all_box.update()
+                counter_text.update(); counter_badge.update(); move_button.update(); price_button.update(); select_all_box.update()
 
             def toggle(item_id: int, value: bool):
                 selected[item_id] = value
@@ -1610,8 +1721,10 @@ class ItemsCenter:
                             ft.Column([ft.Text(it["name"], size=12, weight=ft.FontWeight.W_600), ft.Text(it.get("category_name") or "بلا تصنيف", size=9, color=Colors.TEXT_SECONDARY)], expand=True, spacing=1),
                             ft.Text(money(it.get("selling_price")), size=12, weight=ft.FontWeight.BOLD, color=Colors.PRIMARY_DARK),
                         ],
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=8,
                     ),
+                    padding=ft.padding.symmetric(horizontal=10, vertical=8),
+                    bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=14, shadow=Shadow.SM,
                     visible=True,
                 )
                 row_wrappers[item_id] = row
@@ -1624,11 +1737,29 @@ class ItemsCenter:
             )
             select_all_box = ft.Checkbox(value=False, label="تحديد الكل", on_change=toggle_all)
             counter_text = ft.Text("لم يتم تحديد أي مادة", size=11, color=Colors.TEXT_SECONDARY)
+            counter_badge = ft.Container(
+                counter_text, padding=ft.padding.symmetric(horizontal=10, vertical=6),
+                bgcolor=Colors.BACKGROUND_ALT, border=ft.border.all(1, Colors.BORDER), border_radius=20,
+            )
             list_column = ft.Column(rows_ctrl, spacing=8, scroll=ft.ScrollMode.AUTO)
 
-            move_category = SearchSelect(label="نقل التصنيف إلى", choices=[(str(c["id"]), c["name"]) for c in categories])
+            # Real dropdown instead of the search-style field: it showed no
+            # options until the user typed something and its expanding
+            # results box left a large empty gap in the sheet once focused.
+            # A native ft.Dropdown lists every category immediately on tap,
+            # matching "ترتيب حسب" on this same screen and "نوع السند" on
+            # the finance screen.
+            move_category = ft.Dropdown(
+                label="نقل التصنيف إلى",
+                options=[ft.dropdown.Option(key=str(c["id"]), text=c["name"]) for c in categories],
+                filled=True,
+                bgcolor=Colors.BACKGROUND_ALT,
+                border_radius=Radius.MD,
+                border_color=Colors.BORDER,
+                expand=2,
+            )
             move_category.on_change = lambda _=None: update_summary()
-            move_button = ft.FilledButton("نقل المحدد", icon=ft.Icons.DRIVE_FILE_MOVE_OUTLINED, on_click=apply_category_move, disabled=True, expand=True)
+            move_button = ft.FilledButton("نقل المحدد", icon=ft.Icons.DRIVE_FILE_MOVE_OUTLINED, on_click=apply_category_move, disabled=True, expand=1)
 
             # Percentage only (not a fixed amount): a flat +500 makes sense
             # for one price scale and is meaningless for another, while a
@@ -1667,21 +1798,53 @@ class ItemsCenter:
             style_price_mode(do_update=False)
             price_button = ft.FilledButton("تطبيق على سعر البيع", icon=ft.Icons.PERCENT, on_click=apply_price_change, disabled=True, expand=True)
 
+            def _action_card(icon: str, title: str, controls: list[ft.Control]) -> ft.Container:
+                return ft.Container(
+                    ft.Column(
+                        [
+                            ft.Row([ft.Icon(icon, size=15, color=Colors.PRIMARY), ft.Text(title, size=12, weight=ft.FontWeight.W_600, color=Colors.TEXT_MUTED_DARK)], spacing=6),
+                            *controls,
+                        ],
+                        spacing=10,
+                    ),
+                    padding=12, bgcolor=Colors.BACKGROUND_ALT, border_radius=Radius.MD,
+                )
+
+            move_card = _action_card(
+                ft.Icons.DRIVE_FILE_MOVE_OUTLINED, "نقل إلى تصنيف",
+                [ft.Row([move_category, move_button], spacing=8, vertical_alignment=ft.CrossAxisAlignment.END)],
+            )
+            price_card = _action_card(
+                ft.Icons.PERCENT, "تعديل نسبة سعر البيع",
+                [ft.Row([up_chip, down_chip, price_pct, price_button], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER)],
+            )
+
             sheet.content = ft.Container(
                 ft.Column(
                     [
                         ft.Container(width=44, height=5, bgcolor=Colors.BORDER_STRONG, border_radius=10, alignment=ft.alignment.center),
-                        ft.Text("تعديل جماعي", size=17, weight=ft.FontWeight.BOLD),
-                        ft.Text("اختر مواد ثم طبّق نقل تصنيف أو تعديل سعر بيع على المحدد دفعة واحدة", size=11, color=Colors.TEXT_SECONDARY),
+                        ft.Row(
+                            [
+                                _icon_bubble(ft.Icons.EDIT_NOTE_OUTLINED, color=Colors.PRIMARY, bgcolor=Colors.PRIMARY_BG),
+                                ft.Column(
+                                    [
+                                        ft.Text("تعديل جماعي", size=17, weight=ft.FontWeight.BOLD),
+                                        ft.Text("اختر مواد ثم طبّق نقل تصنيف أو تعديل سعر بيع على المحدد دفعة واحدة", size=11, color=Colors.TEXT_SECONDARY),
+                                    ],
+                                    spacing=1, expand=True,
+                                ),
+                                header_close_button(close),
+                            ],
+                            spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
                         bulk_search,
-                        ft.Row([select_all_box, ft.Container(counter_text, expand=True, alignment=ft.alignment.center_left)], vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                        ft.Container(list_column, height=260),
+                        ft.Row([select_all_box, ft.Container(expand=True), counter_badge], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                        ft.Container(list_column, height=240),
                         ft.Divider(height=1, color=Colors.BORDER),
-                        ft.Row([move_category, move_button], spacing=8, vertical_alignment=ft.CrossAxisAlignment.END),
-                        ft.Row([up_chip, down_chip, price_pct, price_button], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                        ft.OutlinedButton("إغلاق", on_click=close),
+                        move_card,
+                        price_card,
                     ],
-                    spacing=10, tight=True, scroll=ft.ScrollMode.AUTO,
+                    spacing=12, tight=True, scroll=ft.ScrollMode.AUTO,
                     horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 ),
                 padding=ft.padding.only(left=18, right=18, top=12, bottom=20),
@@ -1784,7 +1947,7 @@ class ItemsCenter:
                                 [
                                     ft.Row(
                                         (
-                                            [ft.OutlinedButton("طباعة الباركود", icon=ft.Icons.QR_CODE_2, on_click=lambda _, i=data: (close(), open_barcode_print_dialog([(i, 1)])), expand=True)]
+                                            [ft.OutlinedButton("طباعة الباركود", icon=ft.Icons.QR_CODE_2, on_click=lambda _, i=data: (close(), open_barcode_print_dialog([(i, 1)], layout=barcode_settings.label_layout(ctx.settings), roll_width_mm=barcode_settings.label_roll_width_mm(ctx.settings))), expand=True)]
                                             if str(data.get("barcode") or "").strip() else []
                                         ) + [ft.OutlinedButton("بطاقة QR", icon=ft.Icons.SHARE_ROUNDED, on_click=lambda _, i=data: (close(), open_item_card_sheet(i)), expand=True)],
                                         spacing=10,

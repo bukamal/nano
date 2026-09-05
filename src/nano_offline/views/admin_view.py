@@ -763,6 +763,14 @@ class AdminCenter:
             label="تنبيه عند خطأ رقم التحقق (checksum) لأكواد EAN/UPC",
             value=barcode_settings.checksum_warning_enabled(bset),
         )
+        barcode_layout_field = SegmentedToggle(
+            options=[SegmentOption(k, v) for k, v in barcode_settings.LABEL_LAYOUT_LABELS.items()],
+            value=barcode_settings.label_layout(bset),
+        )
+        barcode_roll_width_field = SegmentedToggle(
+            options=[SegmentOption(k, v) for k, v in barcode_settings.LABEL_ROLL_WIDTH_LABELS.items()],
+            value=barcode_settings.label_roll_width(bset),
+        )
         barcode_columns_field = SegmentedToggle(
             options=[SegmentOption(str(n), f"{n} أعمدة") for n in barcode_settings.VALID_LABEL_COLUMNS],
             value=str(barcode_settings.label_columns(bset)),
@@ -771,6 +779,33 @@ class AdminCenter:
             options=[SegmentOption(k, v) for k, v in barcode_settings.LABEL_SIZE_LABELS.items()],
             value=barcode_settings.label_size(bset),
         )
+        # Sheet-only controls (columns/size) hide when the roll profile is
+        # selected -- a thermal roll is always one continuous strip, so
+        # "columns" and a fixed sticker size don't apply to it.
+        barcode_sheet_only_box = ft.Column(
+            [
+                ft.Text("عدد الأعمدة", size=11, color=Colors.TEXT_SECONDARY),
+                barcode_columns_field,
+                ft.Text("حجم الملصق", size=11, color=Colors.TEXT_SECONDARY),
+                barcode_size_field,
+            ],
+            spacing=8, visible=barcode_layout_field.value == "sheet",
+        )
+        barcode_roll_only_box = ft.Column(
+            [
+                ft.Text("عرض اللفة", size=11, color=Colors.TEXT_SECONDARY),
+                barcode_roll_width_field,
+            ],
+            spacing=8, visible=barcode_layout_field.value == "roll",
+        )
+
+        def on_barcode_layout_change(_=None) -> None:
+            barcode_sheet_only_box.visible = barcode_layout_field.value == "sheet"
+            barcode_roll_only_box.visible = barcode_layout_field.value == "roll"
+            barcode_sheet_only_box.update()
+            barcode_roll_only_box.update()
+
+        barcode_layout_field.on_change = on_barcode_layout_change
         barcode_show_text_switch = ft.Switch(
             label="إظهار الرقم أسفل شريط الباركود",
             value=barcode_settings.label_show_text(bset),
@@ -848,6 +883,8 @@ class AdminCenter:
                     barcode_settings.AUTO_GENERATE_KEY: "1" if barcode_auto_generate_switch.value else "0",
                     barcode_settings.SIMILAR_WARNING_KEY: "1" if barcode_similar_switch.value else "0",
                     barcode_settings.CHECKSUM_WARNING_KEY: "1" if barcode_checksum_switch.value else "0",
+                    barcode_settings.LABEL_LAYOUT_KEY: barcode_layout_field.value or barcode_settings.DEFAULT_LABEL_LAYOUT,
+                    barcode_settings.LABEL_ROLL_WIDTH_KEY: barcode_roll_width_field.value or barcode_settings.DEFAULT_LABEL_ROLL_WIDTH,
                     barcode_settings.LABEL_COLUMNS_KEY: barcode_columns_field.value or str(barcode_settings.DEFAULT_LABEL_COLUMNS),
                     barcode_settings.LABEL_SIZE_KEY: barcode_size_field.value or barcode_settings.DEFAULT_LABEL_SIZE,
                     barcode_settings.LABEL_SHOW_TEXT_KEY: "1" if barcode_show_text_switch.value else "0",
@@ -1515,10 +1552,10 @@ class AdminCenter:
                     barcode_checksum_switch,
                     ft.Divider(height=1, color=Colors.BACKGROUND_ALT),
                     ft.Text("ملصقات الطباعة", size=12, weight=ft.FontWeight.W_600),
-                    ft.Text("عدد الأعمدة", size=11, color=Colors.TEXT_SECONDARY),
-                    barcode_columns_field,
-                    ft.Text("حجم الملصق", size=11, color=Colors.TEXT_SECONDARY),
-                    barcode_size_field,
+                    ft.Text("نوع الطابعة", size=11, color=Colors.TEXT_SECONDARY),
+                    barcode_layout_field,
+                    barcode_sheet_only_box,
+                    barcode_roll_only_box,
                     barcode_show_text_switch,
                     barcode_price_qr_switch,
                     ft.Divider(height=1, color=Colors.BACKGROUND_ALT),

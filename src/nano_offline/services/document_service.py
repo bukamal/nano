@@ -449,8 +449,10 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
         include_price_qr: bool = False,
         label_size: tuple[int, int] = (210, 54),
         show_text: bool = True,
+        layout: str = "sheet",
+        roll_width_mm: int = 58,
     ) -> str:
-        """A4 sheet of barcode labels for printing/PDF via the native print path.
+        """Barcode labels for printing/PDF via the native print path.
 
         ``labels`` is a flat list of ``{"name": str, "barcode": str, "price":
         float|None}`` -- one entry per physical sticker (the caller repeats an
@@ -469,13 +471,24 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
 
         ``label_size``/``show_text``: admin-configurable sticker size
         (core.barcode_settings.label_dimensions) and whether the human-
-        readable code is printed under the bars -- both apply to the whole
-        sheet, matching how a physical roll of labels is one fixed size.
+        readable code is printed under the bars.
+
+        ``layout``: ``"sheet"`` (default, unchanged from before) lays labels
+        out on an A4 grid of ``columns`` columns via the shared invoice shell
+        -- meant for sticker sheets on a regular printer. ``"roll"`` instead
+        renders one label per printed "page" stacked full-width down a
+        continuous strip sized to ``roll_width_mm`` (58/80mm are the two
+        near-universal thermal roll widths) -- no grid, no invoice-style
+        logo header (that would waste paper on every single label), just the
+        essentials. Both go through the exact same native print/PDF pipeline
+        the caller already has (services.document_service only changes the
+        HTML/CSS shape of the page), so a thermal printer that's already set
+        up as the OS's active/default printer works with zero extra plumbing.
         """
         settings = self._settings()
         accent = settings.get("invoice_color") or _DEFAULT_ACCENT
-        tint = self._accent_tint(accent, amount=0.94)
         lbl_width, lbl_height = label_size
+        is_roll = layout == "roll"
         cells = []
         for label in labels:
             code = str(label.get("barcode") or "").strip()
@@ -492,7 +505,13 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
                     price_qr_html = f'<div class="lbl-price-row">{price_html}<div class="lbl-price-qr">{price_qr}</div></div>'
                 else:
                     price_qr_html = price_html
-            svg = code128b_svg(code, width=lbl_width, height=lbl_height, show_text=show_text, bar_color="#0F172A")
+            # On a roll label the barcode is the whole point of the strip, so
+            # it's rendered wide relative to the sticker-sheet case and then
+            # scaled to fill the roll's printable width via CSS (the SVG's
+            # own viewBox keeps bar proportions correct at any final size).
+            svg_width = 380 if is_roll else lbl_width
+            svg_height = int(lbl_height * (380 / lbl_width)) if is_roll else lbl_height
+            svg = code128b_svg(code, width=svg_width, height=svg_height, show_text=show_text, bar_color="#0F172A")
             cells.append(
                 f'<div class="lbl">'
                 f'<div class="lbl-name">{name}</div>'
@@ -502,6 +521,11 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
             )
         if not cells:
             raise ValueError("لا توجد مواد لها باركود لطباعتها")
+
+        if is_roll:
+            return self._barcode_labels_roll_html(cells, accent=accent, roll_width_mm=roll_width_mm)
+
+        tint = self._accent_tint(accent, amount=0.94)
         body = f'<div class="lbl-grid">{"".join(cells)}</div>'
         style_extra = f"""
 <style>
@@ -523,6 +547,55 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
 """
         html = self._shell(f"{len(cells)} ملصق", "ملصقات باركود", body)
         return html.replace("</head>", f"{style_extra}</head>")
+
+    def _barcode_labels_roll_html(self, cells: list[str], *, accent: str, roll_width_mm: int) -> str:
+        """Lean, header-free document for a continuous thermal roll -- see
+        ``barcode_labels_html``'s ``layout="roll"`` docstring for why this
+        deliberately bypasses ``_shell`` (no logo/company banner per label).
+        Each label is its own CSS page sized to the roll's fixed width with
+        an automatic height, so the printer driver cuts/feeds between labels
+        the same way it already does between receipts.
+        """
+        # ``cells`` are already ``<div class="lbl">...</div>`` blocks built
+        # by the caller above with the same class names this stylesheet
+        # targets (.lbl/.lbl-name/.lbl-barcode/.lbl-price...) -- joined
+        # as-is, no reformatting needed.
+        body = "".join(cells)
+        return f"""<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>ملصقات باركود (لفة حرارية)</title>
+<style>
+@page {{ size: {int(roll_width_mm)}mm auto; margin: 2mm; }}
+* {{ box-sizing: border-box; }}
+html, body {{ margin:0; padding:0; width:{int(roll_width_mm)}mm; }}
+body {{
+  direction: rtl;
+  font-family: 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif;
+  color:#0F172A;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}}
+.lbl {{
+  width:100%; padding:2mm 1mm; text-align:center;
+  page-break-after:always; break-after:page;
+}}
+.lbl:last-child {{ page-break-after:auto; break-after:auto; }}
+.lbl-name {{
+  font-size:12px; font-weight:700; margin-bottom:2mm; color:#0F172A;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}}
+.lbl-barcode svg {{ width:100%; height:auto; display:block; }}
+.lbl-price {{ font-size:14px; font-weight:800; direction:ltr; color:{accent}; margin-top:2mm; }}
+.lbl-price-row {{ display:flex; align-items:center; justify-content:center; gap:6px; margin-top:2mm; }}
+.lbl-price-qr {{ line-height:0; }}
+</style>
+</head>
+<body>
+{body}
+</body>
+</html>"""
 
     def item_card_html(
         self,
