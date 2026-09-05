@@ -129,22 +129,23 @@ def to_stored(amount_displayed: float | int | None, rate: float) -> float:
     return float(amount_displayed or 0) / rate
 
 
-# U+2066 LEFT-TO-RIGHT ISOLATE / U+2069 POP DIRECTIONAL ISOLATE. Every
-# "amount symbol" string this module builds gets wrapped in these, which
-# pins the run to a fixed left-to-right internal layout (amount, then
-# symbol) no matter what surrounds it -- a right-aligned Row, a table cell,
-# a print engine's own bidi pass, this app's page-wide RTL setting, etc.
-# Without the isolate, the exact same "1,000 ل.س" text can render with the
-# symbol swapped to the *other* side of the amount depending on that
-# context, which is the "symbol flips sides" bug this fixes; it does not
-# change how the Arabic symbol's own letters connect/shape, only which
-# side of the amount the whole symbol lands on.
-_LRI = "\u2066"
-_PDI = "\u2069"
+# NOTE: this used to wrap every "amount symbol" string in U+2066/U+2069
+# (LEFT-TO-RIGHT ISOLATE / POP DIRECTIONAL ISOLATE) to pin the amount before
+# the symbol regardless of surrounding context. In practice that isolate is
+# exactly what causes the symbol to flip sides once the amount is embedded
+# inside a longer Arabic sentence (e.g. "دفعة جزئية — سيُسجَّل 1,000 ل.س على
+# حساب العميل") -- the Bidi algorithm treats the isolated run as a single
+# strongly-LTR unit and reorders it against the Arabic text around it.
+# Plain, unwrapped text -- exactly like the dashboard's exchange-rate box
+# ("13,500 ل.س"), which never used this wrapping -- renders in the correct
+# amount-then-symbol order in every context, so the isolate is dropped
+# entirely rather than reworked.
+_LRI = ""
+_PDI = ""
 
 
 def _amount_with_symbol(text: str, symbol: str) -> str:
-    return f"{_LRI}{text} {symbol}{_PDI}"
+    return f"{text} {symbol}"
 
 
 def format_amount(

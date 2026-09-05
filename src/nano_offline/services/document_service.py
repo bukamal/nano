@@ -84,14 +84,9 @@ class DocumentService:
         symbol always lands after the amount as intended.
         """
         amount_text, symbol = self._money_parts(value, inv)
-        # Belt-and-suspenders alongside the .money-wrap CSS above: some
-        # print/PDF engines (older Android WebView builds in particular)
-        # don't fully honor `unicode-bidi:isolate`, so the same LRI/PDI
-        # isolate used everywhere else (see currency._amount_with_symbol)
-        # goes around the whole span too.
         return (
-            f'{currency._LRI}<span class="money-wrap"><span class="amt">'
-            f'{amount_text}</span><span class="sym">{self._e(symbol)}</span></span>{currency._PDI}'
+            f'<span class="money-wrap"><span class="amt">'
+            f'{amount_text}</span><span class="sym">{self._e(symbol)}</span></span>'
         )
 
     @staticmethod
