@@ -7,7 +7,7 @@ import flet as ft
 from nano_offline.core.toast import toast
 
 from nano_offline.components import SearchSelect, SelectAllTextField, SmartAmountField, SmartDateField, empty_state, kpi_card, new_form_sheet, render_form_sheet, status_pill
-from nano_offline.core.theme import Colors, Shadow
+from nano_offline.core.theme import Colors, Radius, Shadow
 from nano_offline.core import currency
 from nano_offline.core.home_widget import refresh_home_widget
 
@@ -80,14 +80,21 @@ class FinanceCenter:
         rows = ft.Column(spacing=9)
         summary = ft.ResponsiveRow(spacing=8, run_spacing=8)
         filter_state = {"type": "all"}
-        # Dropdown selector instead of filter chips -- same searchable-select
-        # control used for "نوع السند" in the new/edit voucher form, so the
-        # type filter reads as a proper field rather than a row of buttons.
-        type_filter = SearchSelect(
+        # Real dropdown (ft.Dropdown) instead of a search-style field or a
+        # row of chips -- same control used for "ترتيب حسب" on the items
+        # screen: tap once, pick from the list, no typing involved.
+        type_filter = ft.Dropdown(
             label="نوع السند",
             value="all",
-            choices=[("all", "الكل"), ("receipt", "قبض"), ("payment", "دفع")],
-            allow_clear=False,
+            options=[
+                ft.dropdown.Option(key="all", text="الكل"),
+                ft.dropdown.Option(key="receipt", text="قبض"),
+                ft.dropdown.Option(key="payment", text="دفع"),
+            ],
+            filled=True,
+            bgcolor=Colors.BACKGROUND_ALT,
+            border_radius=Radius.MD,
+            border_color=Colors.BORDER,
         )
 
         def set_filter(key: str):
