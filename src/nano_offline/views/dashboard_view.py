@@ -413,6 +413,11 @@ class DashboardCenter:
                     )
                 elif self.on_navigate:
                     self.on_navigate("customers")
+            elif kind in ("backup", "license"):
+                if self.on_open_admin_section:
+                    self.on_open_admin_section("backup" if kind == "backup" else "license")
+                elif self.on_navigate:
+                    self.on_navigate("admin")
             elif target == "dashboard":
                 self._open_rate_sheet()
             elif target and self.on_navigate:
@@ -492,6 +497,11 @@ class DashboardCenter:
                             )
                         elif self.on_navigate:
                             self.on_navigate("customers")
+                    elif kind in ("backup", "license"):
+                        if self.on_open_admin_section:
+                            self.on_open_admin_section("backup" if kind == "backup" else "license")
+                        elif self.on_navigate:
+                            self.on_navigate("admin")
                     elif target == "dashboard":
                         self._open_rate_sheet()
                     elif target and self.on_navigate:
@@ -983,6 +993,71 @@ class DashboardCenter:
         )
         self.page.open(sheet)
 
+    def _weekly_owner_card(self, data: dict) -> ft.Container:
+        change = data.get("sales_change_pct")
+        if change is None:
+            change_text = "—"
+            change_color = Colors.TEXT_FAINT
+        else:
+            arrow = "▲" if change >= 0 else "▼"
+            change_text = f"{arrow} {abs(change):.0f}% vs الأسبوع السابق"
+            change_color = Colors.SUCCESS if change >= 0 else Colors.DANGER
+        return ft.Container(
+            ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.CALENDAR_VIEW_WEEK_ROUNDED, color=Colors.PRIMARY, size=22),
+                            ft.Text("ملخص الأسبوع", size=16, weight=ft.FontWeight.BOLD, expand=True),
+                            ft.Text(f"{data.get('from')} → {data.get('to')}", size=10, color=Colors.TEXT_FAINT),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.ResponsiveRow(
+                        [
+                            ft.Container(
+                                ft.Column([
+                                    ft.Text("المبيعات", size=10, color=Colors.TEXT_SECONDARY),
+                                    ft.Text(self.money(data.get("sales")), size=14, weight=ft.FontWeight.BOLD),
+                                    ft.Text(change_text, size=10, color=change_color),
+                                ], spacing=2),
+                                col={"xs": 6, "md": 3},
+                            ),
+                            ft.Container(
+                                ft.Column([
+                                    ft.Text("ربح تقريبي", size=10, color=Colors.TEXT_SECONDARY),
+                                    ft.Text(self.money(data.get("approx_profit")), size=14, weight=ft.FontWeight.BOLD),
+                                ], spacing=2),
+                                col={"xs": 6, "md": 3},
+                            ),
+                            ft.Container(
+                                ft.Column([
+                                    ft.Text("ذمم العملاء", size=10, color=Colors.TEXT_SECONDARY),
+                                    ft.Text(self.money(data.get("receivables")), size=14, weight=ft.FontWeight.BOLD),
+                                ], spacing=2),
+                                col={"xs": 6, "md": 3},
+                            ),
+                            ft.Container(
+                                ft.Column([
+                                    ft.Text("مخزون منخفض", size=10, color=Colors.TEXT_SECONDARY),
+                                    ft.Text(str(int(data.get("low_stock_count") or 0)), size=14, weight=ft.FontWeight.BOLD),
+                                ], spacing=2),
+                                col={"xs": 6, "md": 3},
+                            ),
+                        ],
+                        spacing=8,
+                        run_spacing=8,
+                    ),
+                ],
+                spacing=10,
+            ),
+            padding=14,
+            bgcolor=Colors.WHITE,
+            border=ft.border.all(1, Colors.BORDER),
+            border_radius=18,
+            shadow=Shadow.SM,
+        )
+
     def show_center(self) -> None:
         self._set_header("لوحة التحكم", "نظرة عامة على أداء عملك")
         summary = self.ctx.dashboard.summary()
@@ -1017,6 +1092,10 @@ class DashboardCenter:
         except Exception:
             decisions = []
             decision_today = None
+        try:
+            weekly = self.ctx.dashboard.weekly_owner_summary()
+        except Exception:
+            weekly = None
 
         # -- business insights: best sellers this period + items projected
         # to run out soon based on actual sale velocity ------------------
@@ -1133,6 +1212,7 @@ class DashboardCenter:
             [
                 self._decision_of_day_card(decision_today) if decision_today is not None else ft.Container(),
                 ft.Column(self._decisions_list(decisions), spacing=6) if decisions and len(decisions) > 1 else ft.Container(),
+                self._weekly_owner_card(weekly) if weekly else ft.Container(),
                 self._smart_insight(alerts=smart_alerts, best_sellers=best_sellers, profit_change=profit_change, net_profit=current_stmt["net_profit"]),
                 ft.ResponsiveRow(
                     [

@@ -2042,6 +2042,27 @@ class ItemsCenter:
             confirm.actions = [ft.TextButton("إلغاء", on_click=close), ft.FilledButton("حذف", icon=ft.Icons.DELETE_FOREVER, on_click=remove)]
             page.open(confirm)
 
+        def _quiet_item_ids() -> set[int]:
+            """Stock item ids with no sale movements in the last 30 days."""
+            try:
+                with ctx.db.connect() as conn:
+                    rows = conn.execute(
+                        """
+                        SELECT it.id
+                        FROM items it
+                        WHERE it.item_type='مخزون'
+                          AND NOT EXISTS (
+                            SELECT 1 FROM inventory_movements im
+                            WHERE im.item_id=it.id
+                              AND im.movement_type='sale'
+                              AND im.movement_date >= date('now', '-30 day')
+                          )
+                        """
+                    ).fetchall()
+                return {int(r[0] if not hasattr(r, 'keys') else r['id']) for r in rows}
+            except Exception:
+                return set()
+
         def refresh(_=None):
             all_items = ctx.items.list()
             query = (search.value or "").strip().casefold()
@@ -2052,9 +2073,35 @@ class ItemsCenter:
                 or query in str(i.get("barcode") or "").casefold()
             ]
             mode = filter_state["mode"]
-            if mode == "stock": filtered = [i for i in filtered if i.get("item_type") == "مخزون"]
-            elif mode == "service": filtered = [i for i in filtered if i.get("item_type") == "خدمة"]
-            elif mode == "low": filtered = [i for i in filtered if i.get("item_type") == "مخزون" and float(i.get("quantity") or 0) < LOW_STOCK]
+            if mode == "stock":
+                filtered = [i for i in filtered if i.get("item_type") == "مخزون"]
+            elif mode == "service":
+                filtered = [i for i in filtered if i.get("item_type") == "خدمة"]
+            elif mode == "low":
+                filtered = [i for i in filtered if i.get("item_type") == "مخزون" and float(i.get("quantity") or 0) < LOW_STOCK]
+            elif mode == "no_barcode":
+                filtered = [i for i in filtered if not str(i.get("barcode") or "").strip()]
+            elif mode == "no_price":
+                filtered = [
+                    i for i in filtered
+                    if i.get("item_type") == "مخزون" and float(i.get("selling_price") or 0) <= 0
+                ]
+            elif mode == "no_movement":
+                # Items with stock but no sales movement in last 30 days
+                quiet_ids = _quiet_item_ids()
+                filtered = [
+                    i for i in filtered
+                    if i.get("item_type") == "مخزون"
+                    and float(i.get("quantity") or 0) > 0
+                    and int(i.get("id") or 0) in quiet_ids
+                ]
+            elif mode == "restock":
+                try:
+                    preds = self.ctx.dashboard.restock_predictions(limit=200)
+                    pred_ids = {int(p["item_id"]) for p in preds}
+                except Exception:
+                    pred_ids = set()
+                filtered = [i for i in filtered if int(i.get("id") or 0) in pred_ids]
             sort_key = sort_state["key"]
             if sort_key == "price_desc":
                 filtered.sort(key=lambda i: float(i.get("selling_price") or 0), reverse=True)
@@ -2165,8 +2212,14 @@ class ItemsCenter:
         # A single scrolling row keeps chips at their natural compact width
         # and puts sort_dd beside them instead of stacking everything.
         filters = ft.Row([
-            filter_box("all", "الكل", ft.Icons.APPS_ROUNDED), filter_box("stock", "مخزون", ft.Icons.INVENTORY_2_OUTLINED),
-            filter_box("service", "خدمات", ft.Icons.HANDYMAN_OUTLINED), filter_box("low", "منخفض", ft.Icons.WARNING_AMBER_ROUNDED),
+            filter_box("all", "الكل", ft.Icons.APPS_ROUNDED),
+            filter_box("stock", "مخزون", ft.Icons.INVENTORY_2_OUTLINED),
+            filter_box("service", "خدمات", ft.Icons.HANDYMAN_OUTLINED),
+            filter_box("low", "منخفض", ft.Icons.WARNING_AMBER_ROUNDED),
+            filter_box("restock", "سينفد", ft.Icons.SCHEDULE_ROUNDED),
+            filter_box("no_barcode", "بلا باركود", ft.Icons.QR_CODE_2_OUTLINED),
+            filter_box("no_price", "بلا سعر", ft.Icons.MONEY_OFF_OUTLINED),
+            filter_box("no_movement", "بلا حركة", ft.Icons.HOURGLASS_EMPTY_ROUNDED),
         ], spacing=6, scroll=ft.ScrollMode.AUTO)
         sort_dd.width = 130
         filters_row = ft.Row(

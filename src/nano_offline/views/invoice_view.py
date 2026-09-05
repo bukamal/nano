@@ -71,6 +71,30 @@ class InvoiceCenter:
         toast(self.page, text, kind=kind, sound_kind=sound_kind)
 
 
+    def _log_invoice_print(self, invoice_id: int, *, channel: str = "print") -> None:
+        """Record reprint activity in audit_log for management transparency."""
+        try:
+            session = self.ctx.auth.current()
+            username = getattr(session, "username", None) if session else None
+            user_id = getattr(session, "id", None) if session else None
+        except Exception:
+            username, user_id = None, None
+        try:
+            with self.ctx.db.transaction() as conn:
+                conn.execute(
+                    """INSERT INTO audit_log(action,entity_type,entity_id,details,user_id,username)
+                       VALUES('print','invoice',?,?,?,?)""",
+                    (int(invoice_id), channel, user_id, username),
+                )
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM audit_log WHERE action='print' AND entity_type='invoice' AND entity_id=?",
+                    (int(invoice_id),),
+                ).fetchone()
+                count = int(row[0] if row is not None else 0)
+            return count
+        except Exception:
+            return 0
+
     def _print_handler(self, invoice_id: int):
         async def handler(_):
             if self.native_files is None:
@@ -80,6 +104,9 @@ class InvoiceCenter:
             try:
                 html = self.ctx.documents.invoice_html(invoice_id)
                 await self.native_files.print_html(html, name=f"nano-invoice-{invoice_id}")
+                count = self._log_invoice_print(invoice_id, channel="print")
+                if count and count > 1:
+                    self.notify(f"طُبعت الفاتورة (مرة رقم {count})")
             except Exception as exc:
                 self.notify(str(exc), kind="error")
         return handler
@@ -93,6 +120,8 @@ class InvoiceCenter:
             try:
                 html = self.ctx.documents.invoice_html(invoice_id)
                 shared = await self.native_files.share_pdf(html, filename=f"nano_invoice_{invoice_id}.pdf")
+                if shared:
+                    self._log_invoice_print(invoice_id, channel="pdf")
                 # share_pdf() returns False when the user simply dismissed the
                 # native share sheet without picking an app -- without this,
                 # that looked identical to "nothing happened" / "broken",

@@ -74,8 +74,9 @@ class AdminCenter:
             shadow=Shadow.SM,
         )
 
-    def show_center(self):
+    def show_center(self, section: str | None = None):
         self.ctx.auth.require("admin")
+        self._pending_section = section
         session = self.ctx.auth.current()
         backups_dir = self.ctx.db.path.parent / "backups"
         backups_dir.mkdir(parents=True, exist_ok=True)
@@ -1288,6 +1289,7 @@ class AdminCenter:
             "restore": "استعادة نسخة",
             "backup": "نسخة احتياطية",
             "day_close": "إغلاق يوم الصندوق",
+            "print": "طباعة",
         }
         _ENTITY_AR = {
             "item": "مادة",
@@ -1820,7 +1822,9 @@ class AdminCenter:
             ("reports", "التقارير", ft.Icons.BAR_CHART_OUTLINED),
             ("audit", "سجل التدقيق", ft.Icons.HISTORY),
         ]
-        tab_state = {"active": "users"}
+        initial = getattr(self, "_pending_section", None) or "users"
+        self._pending_section = None
+        tab_state = {"active": initial or "users"}
         tab_chips: dict[str, ft.Container] = {}
 
         for key, panel in section_panels.items():

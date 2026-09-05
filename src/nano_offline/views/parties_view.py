@@ -17,12 +17,14 @@ class PartyCenter:
     Extracted from ``main.py`` (previously the inline ``party_view`` closure).
     """
 
-    def __init__(self, page: ft.Page, ctx, content: ft.Container, *, native_files=None, on_title_change=None):
+    def __init__(self, page: ft.Page, ctx, content: ft.Container, *, native_files=None, on_title_change=None, on_open_receipt=None, on_open_payment=None):
         self.page = page
         self.ctx = ctx
         self.content = content
         self.native_files = native_files
         self.on_title_change = on_title_change
+        self.on_open_receipt = on_open_receipt
+        self.on_open_payment = on_open_payment
 
     def _set_header(self, title: str, subtitle: str = "") -> None:
         if self.on_title_change:
@@ -271,11 +273,7 @@ class PartyCenter:
                         ),
                         ft.Container(
                             ft.Row(
-                                [
-                                    ft.TextButton("حذف", icon=ft.Icons.DELETE_OUTLINE, on_click=lambda _: confirm_delete(data, detail_sheet), expand=True),
-                                    ft.OutlinedButton("تعديل", icon=ft.Icons.EDIT_OUTLINED, on_click=edit, expand=True),
-                                    ft.FilledButton("إغلاق", on_click=close, expand=True),
-                                ],
+                                _detail_actions(),
                                 spacing=10,
                             ),
                             padding=ft.padding.only(top=4),
@@ -289,6 +287,36 @@ class PartyCenter:
                 border_radius=ft.border_radius.only(top_left=28, top_right=28),
                 shadow=Shadow.LG,
             )
+
+            def _detail_actions():
+                actions = [
+                    ft.TextButton("حذف", icon=ft.Icons.DELETE_OUTLINE, on_click=lambda _: confirm_delete(data, detail_sheet), expand=True),
+                    ft.OutlinedButton("تعديل", icon=ft.Icons.EDIT_OUTLINED, on_click=edit, expand=True),
+                ]
+                bal = abs(float(data.get("balance") or 0))
+                if title == "العملاء" and self.on_open_receipt and bal > 1e-9:
+                    def _receipt(_=None):
+                        close()
+                        self.on_open_receipt(
+                            customer_id=int(data["id"]),
+                            amount=max(0.0, float(data.get("balance") or 0)),
+                        )
+                    actions.append(
+                        ft.FilledButton("سند قبض", icon=ft.Icons.PAYMENTS_OUTLINED, on_click=_receipt, expand=True)
+                    )
+                elif title == "الموردون" and self.on_open_payment and bal > 1e-9:
+                    def _pay(_=None):
+                        close()
+                        self.on_open_payment(
+                            supplier_id=int(data["id"]),
+                            amount=max(0.0, float(data.get("balance") or 0)),
+                        )
+                    actions.append(
+                        ft.FilledButton("سند صرف", icon=ft.Icons.PAYMENTS_OUTLINED, on_click=_pay, expand=True)
+                    )
+                actions.append(ft.FilledButton("إغلاق", on_click=close, expand=True))
+                return actions
+
             page.open(detail_sheet)
 
         def _outstanding_by_party() -> dict[int, list[dict]]:

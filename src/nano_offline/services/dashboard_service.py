@@ -153,3 +153,65 @@ class DashboardService:
             total += line["line_cost_usd"]
         return {"lines": lines, "estimated_cost_usd": total, "count": len(lines)}
 
+    def weekly_owner_summary(self) -> dict:
+        """Owner-facing snapshot for the last 7 days vs the prior 7 days."""
+        from datetime import date, timedelta
+        today = date.today()
+        cur_from = (today - timedelta(days=6)).isoformat()
+        cur_to = today.isoformat()
+        prev_from = (today - timedelta(days=13)).isoformat()
+        prev_to = (today - timedelta(days=7)).isoformat()
+        with self.db.connect() as conn:
+            def _sales(d0, d1):
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(total),0) FROM invoices WHERE type='sale' AND invoice_date>=? AND invoice_date<=?",
+                    (d0, d1),
+                ).fetchone()
+                return float(row[0] or 0)
+
+            def _cogs(d0, d1):
+                row = conn.execute(
+                    """SELECT COALESCE(SUM(il.cost_amount),0)
+                       FROM invoice_lines il
+                       JOIN invoices i ON i.id=il.invoice_id
+                       WHERE i.type='sale' AND i.invoice_date>=? AND i.invoice_date<=?""",
+                    (d0, d1),
+                ).fetchone()
+                return float(row[0] or 0)
+
+            def _expenses(d0, d1):
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE expense_date>=? AND expense_date<=?",
+                    (d0, d1),
+                ).fetchone()
+                return float(row[0] or 0)
+
+            sales = _sales(cur_from, cur_to)
+            prev_sales = _sales(prev_from, prev_to)
+            cogs = _cogs(cur_from, cur_to)
+            expenses = _expenses(cur_from, cur_to)
+            receivables = float(conn.execute(
+                "SELECT COALESCE(SUM(CASE WHEN balance>0 THEN balance ELSE 0 END),0) FROM customers"
+            ).fetchone()[0] or 0)
+            low_stock = int(conn.execute(
+                "SELECT COUNT(*) FROM items WHERE item_type='مخزون' AND quantity < 5"
+            ).fetchone()[0] or 0)
+        profit = sales - cogs - expenses
+        change = None
+        if prev_sales > 1e-9:
+            change = ((sales - prev_sales) / prev_sales) * 100.0
+        elif sales > 1e-9:
+            change = 100.0
+        return {
+            "from": cur_from,
+            "to": cur_to,
+            "sales": sales,
+            "prev_sales": prev_sales,
+            "sales_change_pct": change,
+            "cogs": cogs,
+            "expenses": expenses,
+            "approx_profit": profit,
+            "receivables": receivables,
+            "low_stock_count": low_stock,
+        }
+

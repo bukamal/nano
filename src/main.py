@@ -179,7 +179,13 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
     finance_center = FinanceCenter(page, ctx, content, native_files=native_files, on_title_change=set_header)
     reports_center = ReportsCenter(page, ctx, content, native_files=native_files, on_title_change=set_header)
     admin_center = AdminCenter(page, ctx, content, on_logout=on_logout, native_files=native_files, on_theme_changed=on_theme_changed)
-    party_center = PartyCenter(page, ctx, content, native_files=native_files, on_title_change=set_header)
+    party_center = PartyCenter(
+        page, ctx, content,
+        native_files=native_files,
+        on_title_change=set_header,
+        on_open_receipt=lambda customer_id=None, amount=None: open_receipt(customer_id, amount),
+        on_open_payment=lambda supplier_id=None, amount=None: open_supplier_payment(supplier_id, amount),
+    )
     items_center = ItemsCenter(
         page, ctx, content, native_files=native_files, on_title_change=set_header,
         on_open_stocktake=lambda: stocktake_center.show_center(),
@@ -223,6 +229,23 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         finance_center.show_vouchers()
         finance_center.show_voucher_dialog(voucher_type="receipt", initial_data=seed)
 
+    def open_supplier_payment(supplier_id=None, amount=None):
+        navigate("finance")
+        seed = {"voucher_type": "payment"}
+        if supplier_id is not None:
+            try:
+                seed["supplier_id"] = int(supplier_id)
+            except Exception:
+                pass
+        if amount is not None:
+            seed["amount"] = amount
+        finance_center.show_vouchers()
+        finance_center.show_voucher_dialog(voucher_type="payment", initial_data=seed)
+
+    def open_admin_section(section: str = "backup"):
+        navigate("admin")
+        admin_center.show_center(section=section)
+
     dashboard_center = DashboardCenter(
         page, ctx, content,
         on_title_change=set_header,
@@ -232,6 +255,7 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         on_open_notifications=notification_center.open_panel,
         on_open_purchase_draft=lambda lines, supplier_id=None: open_purchase_draft(lines, supplier_id),
         on_open_receipt=lambda customer_id=None, amount=None: open_receipt(customer_id, amount),
+        on_open_admin_section=lambda section="backup": open_admin_section(section),
         native_files=native_files,
     )
     session = ctx.auth.current()

@@ -4,6 +4,7 @@ import asyncio
 import math
 import time
 
+import copy
 import flet as ft
 
 from nano_offline.core.toast import toast
@@ -575,23 +576,50 @@ class POSCenter:
             if not self.cart_order:
                 self.notify("السلة فارغة")
                 return
-            label = f"تعليق #{len(self.held) + 1} · {time.strftime('%H:%M')}"
-            self.held.append({"label": label, "cart": self.cart, "order": self.cart_order, "customer_id": self.customer_id})
+            if len(self.held) >= 5:
+                self.notify("الحد الأقصى 5 فواتير معلّقة — استرجع واحدة أولًا", kind="warning")
+                return
+            n_items = len(self.cart_order)
+            total = total_amount()
+            first_name = ""
+            try:
+                first_name = str(self.cart[self.cart_order[0]]["item"].get("name") or "")[:18]
+            except Exception:
+                pass
+            label = f"{first_name or 'سلة'} · {n_items} بند · {self.money(total)} · {time.strftime('%H:%M')}"
+            self.held.append(
+                {
+                    "label": label,
+                    "cart": copy.deepcopy(self.cart),
+                    "order": list(self.cart_order),
+                    "customer_id": self.customer_id,
+                }
+            )
             clear_cart()
             refresh_cart()
-            self.notify("تم تعليق الفاتورة — يمكنك بدء بيع جديد")
+            self.notify(f"تم التعليق ({len(self.held)} معلّقة) — ابدأ بيعًا جديدًا أو استرجع من الشريط")
             self.page.update()
 
         def resume_held(idx: int):
-            if self.cart_order:
-                self.notify("أنهِ أو علّق السلة الحالية أولًا")
+            if idx < 0 or idx >= len(self.held):
                 return
+            if self.cart_order:
+                # Auto-hold current cart so resume never loses work
+                hold_cart()
+                if self.cart_order:
+                    self.notify("تعذّر تعليق السلة الحالية", kind="error")
+                    return
             held_ticket = self.held.pop(idx)
-            self.cart = held_ticket["cart"]
-            self.cart_order = held_ticket["order"]
+            self.cart = copy.deepcopy(held_ticket["cart"])
+            self.cart_order = list(held_ticket["order"])
             self.customer_id = held_ticket["customer_id"]
             customer_dd.value = str(self.customer_id) if self.customer_id else None
+            try:
+                customer_dd.update()
+            except Exception:
+                pass
             refresh_cart()
+            self.notify("تم استرجاع السلة المعلّقة")
             self.page.update()
 
         # ---- checkout -----------------------------------------------------
@@ -1100,6 +1128,21 @@ class POSCenter:
         try:
             html = self.ctx.documents.invoice_html(invoice_id)
             await self.native_files.print_html(html, name=f"nano-invoice-{invoice_id}")
+            try:
+                session = self.ctx.auth.current()
+                username = getattr(session, "username", None) if session else None
+                user_id = getattr(session, "id", None) if session else None
+            except Exception:
+                username, user_id = None, None
+            try:
+                with self.ctx.db.transaction() as conn:
+                    conn.execute(
+                        """INSERT INTO audit_log(action,entity_type,entity_id,details,user_id,username)
+                           VALUES('print','invoice',?,?,?,?)""",
+                        (int(invoice_id), "pos", user_id, username),
+                    )
+            except Exception:
+                pass
         except Exception as exc:
             self.notify(str(exc), kind="error")
 
