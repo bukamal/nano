@@ -948,8 +948,8 @@ class InvoiceCenter:
             keyboard_type=ft.KeyboardType.NUMBER,
         )
         lines_column = ft.Column(spacing=8)
-        total_text = ft.Text("0.00", size=20, weight=ft.FontWeight.BOLD, text_direction=ft.TextDirection.LTR)
-        remaining_text = ft.Text("0.00", size=18, weight=ft.FontWeight.BOLD, text_direction=ft.TextDirection.LTR)
+        total_text = ft.Text("0.00", size=20, weight=ft.FontWeight.BOLD)
+        remaining_text = ft.Text("0.00", size=18, weight=ft.FontWeight.BOLD)
         paid_progress = ft.ProgressBar(value=0, color=Colors.SUCCESS, bgcolor=Colors.BACKGROUND_ALT, height=6, border_radius=6)
 
         def party_options() -> None:

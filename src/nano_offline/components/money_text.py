@@ -1,29 +1,10 @@
 """Unified currency amount display for the UI.
 
-Every money figure shown on screen should go through this helper so the
-currency symbol always appears in the same order as on the material/invoice
-list cards (amount then symbol), regardless of surrounding RTL Arabic text.
-
-Why LTR on the Text itself?
-  ``currency.format_amount`` returns a plain string like ``"1,000 ل.س"``.
-  When that string is embedded inside a longer Arabic sentence the Unicode
-  bidirectional algorithm can reorder the symbol relative to the digits.
-  Putting the formatted amount in its own ``ft.Text`` with
-  ``text_direction=LTR`` pins the visual order to match standalone cards.
-
-Usage
------
-Standalone (same as a list-card price column)::
-
-    money_text(amount_usd, settings, size=12, weight=ft.FontWeight.BOLD)
-
-After an Arabic label (detail sheets, summaries)::
-
-    labeled_money("سعر البيع:", amount_usd, settings, size=11)
-
-When you only have the already-formatted string (e.g. view.money())::
-
-    money_text_from_str(formatted, size=12, weight=ft.FontWeight.BOLD)
+Formats amounts via ``currency.format_amount`` and returns plain ``ft.Text``
+controls. Prefer separating the Arabic label from the amount in a ``Row``
+when embedding money inside RTL sentences (see ``labeled_money_from_str``),
+so the symbol order matches standalone list cards without relying on
+``text_direction`` (which some Flet/Flutter builds reject at render time).
 """
 
 from __future__ import annotations
@@ -46,7 +27,6 @@ def money_text(
     decimals: int | None = None,
     **kwargs: Any,
 ) -> ft.Text:
-    """Format a stored USD amount and return an LTR ``ft.Text`` for the UI."""
     text = currency.format_amount(
         amount_usd,
         settings,
@@ -64,15 +44,9 @@ def money_text_from_str(
     color: str | None = None,
     **kwargs: Any,
 ) -> ft.Text:
-    """Wrap an already-formatted amount string in an LTR ``ft.Text``.
-
-    Prefer :func:`money_text` when you still have the numeric value; use
-    this when a view helper (``self.money``) has already produced the string.
-    """
-    opts: dict[str, Any] = {
-        "value": formatted,
-        "text_direction": ft.TextDirection.LTR,
-    }
+    # Drop any text_direction kwarg callers may still pass — plain Text only.
+    kwargs.pop("text_direction", None)
+    opts: dict[str, Any] = {"value": str(formatted if formatted is not None else "")}
     if size is not None:
         opts["size"] = size
     if weight is not None:
@@ -95,7 +69,6 @@ def labeled_money(
     decimals: int | None = None,
     spacing: float = 6,
 ) -> ft.Row:
-    """Arabic label + LTR amount in one tight row (detail sheets / summaries)."""
     from nano_offline.core.theme import Colors
 
     fg = color if color is not None else Colors.TEXT_SECONDARY
@@ -126,7 +99,6 @@ def labeled_money_from_str(
     amount_weight: ft.FontWeight | None = ft.FontWeight.BOLD,
     spacing: float = 6,
 ) -> ft.Row:
-    """Like :func:`labeled_money` but the amount is already a formatted string."""
     from nano_offline.core.theme import Colors
 
     fg = color if color is not None else Colors.TEXT_SECONDARY
