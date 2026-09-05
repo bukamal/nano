@@ -4,7 +4,7 @@ import flet as ft
 
 from nano_offline.core.toast import toast
 
-from nano_offline.components import SelectAllTextField, empty_state, new_form_sheet, render_form_sheet
+from nano_offline.components import SelectAllTextField, empty_state, new_form_sheet, render_form_sheet, money_text_from_str
 from nano_offline.core.theme import Colors, Shadow
 from nano_offline.core import currency
 
@@ -159,8 +159,19 @@ class PartyCenter:
                                 ),
                                 ft.Column(
                                     [
-                                        ft.Text(money(inv.get("total")), size=12, weight=ft.FontWeight.BOLD),
-                                        ft.Text("مسددة" if remaining <= 1e-9 else f"متبقي {money(remaining)}", size=9, color=Colors.SUCCESS if remaining <= 1e-9 else Colors.ORANGE),
+                                        money_text_from_str(money(inv.get("total")), size=12, weight=ft.FontWeight.BOLD),
+                                        (
+                                            ft.Text("مسددة", size=9, color=Colors.SUCCESS)
+                                            if remaining <= 1e-9
+                                            else ft.Row(
+                                                [
+                                                    ft.Text("متبقي ", size=9, color=Colors.ORANGE),
+                                                    money_text_from_str(money(remaining), size=9, color=Colors.ORANGE),
+                                                ],
+                                                spacing=0,
+                                                tight=True,
+                                            )
+                                        ),
                                     ], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END,
                                 ),
                             ]
@@ -295,7 +306,7 @@ class PartyCenter:
                             ),
                             ft.Column(
                                 [
-                                    ft.Text(money(balance), weight=ft.FontWeight.BOLD, size=13, color=Colors.TEXT_PRIMARY),
+                                    money_text_from_str(money(balance), weight=ft.FontWeight.BOLD, size=13, color=Colors.TEXT_PRIMARY),
                                     ft.Text("رصيد", size=9, color=Colors.TEXT_SECONDARY),
                                 ], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END,
                             ),

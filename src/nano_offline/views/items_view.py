@@ -6,7 +6,7 @@ import flet as ft
 
 from nano_offline.core.toast import toast
 
-from nano_offline.components import SearchSelect, SegmentedToggle, SegmentOption, SelectAllTextField, SmartAmountField, empty_state, kpi_card, status_pill
+from nano_offline.components import SearchSelect, SegmentedToggle, SegmentOption, SelectAllTextField, SmartAmountField, empty_state, kpi_card, status_pill, money_text_from_str, labeled_money_from_str
 from nano_offline.components.buttons import header_close_button, inline_icon_button
 from nano_offline.core.theme import Colors, IconSize, LazyPalette, Radius, Shadow
 from nano_offline.core import currency
@@ -1192,41 +1192,12 @@ class ItemsCenter:
                 if item.get("barcode"):
                     summary_rows.append(ft.Text(f"الباركود: {item.get('barcode')}", size=11, color=Colors.TEXT_SECONDARY))
                 if include_selling.value:
-                    # Keep amount+symbol in its own Text (same as list item cards)
-                    # so RTL/bidi does not reorder the currency symbol when the
-                    # figure is embedded after Arabic label text.
                     summary_rows.append(
-                        ft.Row(
-                            [
-                                ft.Text("سعر البيع:", size=11, color=Colors.TEXT_SECONDARY),
-                                ft.Text(
-                                    self.money(item.get("selling_price")),
-                                    size=11,
-                                    weight=ft.FontWeight.BOLD,
-                                    color=Colors.TEXT_SECONDARY,
-                                    text_direction=ft.TextDirection.LTR,
-                                ),
-                            ],
-                            spacing=6,
-                            tight=True,
-                        )
+                        labeled_money_from_str("سعر البيع:", self.money(item.get("selling_price")), size=11)
                     )
                 if include_purchase.value:
                     summary_rows.append(
-                        ft.Row(
-                            [
-                                ft.Text("سعر الشراء:", size=11, color=Colors.TEXT_SECONDARY),
-                                ft.Text(
-                                    self.money(item.get("purchase_price")),
-                                    size=11,
-                                    weight=ft.FontWeight.BOLD,
-                                    color=Colors.TEXT_SECONDARY,
-                                    text_direction=ft.TextDirection.LTR,
-                                ),
-                            ],
-                            spacing=6,
-                            tight=True,
-                        )
+                        labeled_money_from_str("سعر الشراء:", self.money(item.get("purchase_price")), size=11)
                     )
                 if include_category.value and item.get("category_name"):
                     summary_rows.append(ft.Text(f"التصنيف: {item.get('category_name')}", size=11, color=Colors.TEXT_SECONDARY))
@@ -1370,37 +1341,11 @@ class ItemsCenter:
                     rows.append(ft.Text(f"الباركود: {parsed['barcode']}", size=11, color=Colors.TEXT_SECONDARY))
                 if parsed.get("selling_price") is not None:
                     rows.append(
-                        ft.Row(
-                            [
-                                ft.Text("سعر البيع:", size=11, color=Colors.TEXT_SECONDARY),
-                                ft.Text(
-                                    self.money(parsed["selling_price"]),
-                                    size=11,
-                                    weight=ft.FontWeight.BOLD,
-                                    color=Colors.TEXT_SECONDARY,
-                                    text_direction=ft.TextDirection.LTR,
-                                ),
-                            ],
-                            spacing=6,
-                            tight=True,
-                        )
+                        labeled_money_from_str("سعر البيع:", self.money(parsed["selling_price"]), size=11)
                     )
                 if parsed.get("purchase_price") is not None:
                     rows.append(
-                        ft.Row(
-                            [
-                                ft.Text("سعر الشراء:", size=11, color=Colors.TEXT_SECONDARY),
-                                ft.Text(
-                                    self.money(parsed["purchase_price"]),
-                                    size=11,
-                                    weight=ft.FontWeight.BOLD,
-                                    color=Colors.TEXT_SECONDARY,
-                                    text_direction=ft.TextDirection.LTR,
-                                ),
-                            ],
-                            spacing=6,
-                            tight=True,
-                        )
+                        labeled_money_from_str("سعر الشراء:", self.money(parsed["purchase_price"]), size=11)
                     )
                 if parsed.get("category"):
                     rows.append(ft.Text(f"التصنيف: {parsed['category']}", size=11, color=Colors.TEXT_SECONDARY))
@@ -1782,7 +1727,7 @@ class ItemsCenter:
                         [
                             cb,
                             ft.Column([ft.Text(it["name"], size=12, weight=ft.FontWeight.W_600), ft.Text(it.get("category_name") or "بلا تصنيف", size=9, color=Colors.TEXT_SECONDARY)], expand=True, spacing=1),
-                            ft.Text(money(it.get("selling_price")), size=12, weight=ft.FontWeight.BOLD, color=Colors.PRIMARY_DARK),
+                            money_text_from_str(money(it.get("selling_price")), size=12, weight=ft.FontWeight.BOLD, color=Colors.PRIMARY_DARK),
                         ],
                         vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=8,
                     ),
@@ -1988,12 +1933,7 @@ class ItemsCenter:
                             # (standalone LTR Text) so the currency symbol order matches.
                             ft.Column(
                                 [
-                                    ft.Text(
-                                        money(data.get("selling_price")),
-                                        size=14,
-                                        weight=ft.FontWeight.BOLD,
-                                        text_direction=ft.TextDirection.LTR,
-                                    ),
+                                    money_text_from_str(money(data.get("selling_price")), size=14, weight=ft.FontWeight.BOLD),
                                     ft.Text("سعر البيع", size=9, color=Colors.TEXT_SECONDARY),
                                 ],
                                 spacing=1,
@@ -2130,7 +2070,7 @@ class ItemsCenter:
                         ft.Container(ft.Icon(ft.Icons.HANDYMAN_OUTLINED if not stock else ft.Icons.INVENTORY_2_OUTLINED, color=accent, size=20), width=44, height=44, alignment=ft.alignment.center, bgcolor=Colors.BACKGROUND_ALT, border_radius=14),
                         ft.Column([ft.Text(item["name"], weight=ft.FontWeight.BOLD, size=13), ft.Text(f"{item.get('category_name') or 'بلا تصنيف'} • {item.get('unit_name') or 'بلا وحدة'}", size=9, color=Colors.TEXT_SECONDARY)], expand=True, spacing=2),
                         ft.Column([ft.Text("—" if not stock else f"{qty:,.2f}", size=13, weight=ft.FontWeight.BOLD), status_pill(status, status_fg, status_bg)], spacing=3, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                        ft.Column([ft.Text(money(item.get("selling_price")), size=12, weight=ft.FontWeight.BOLD, text_direction=ft.TextDirection.LTR), ft.Text("سعر البيع", size=8, color=Colors.TEXT_SECONDARY)], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END),
+                        ft.Column([money_text_from_str(money(item.get("selling_price")), size=12, weight=ft.FontWeight.BOLD), ft.Text("سعر البيع", size=8, color=Colors.TEXT_SECONDARY)], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END),
                         ft.Icon(ft.Icons.CHEVRON_LEFT, color=Colors.TEXT_FAINT, size=18),
                     ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
                     padding=11, bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=16, shadow=Shadow.SM, on_click=lambda _, i=dict(item): show_item_detail(i), ink=True,

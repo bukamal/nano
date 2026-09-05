@@ -412,6 +412,12 @@ class Database:
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key,value) VALUES('display_currency_symbol','ل.س')"
             )
+            conn.execute(
+                "INSERT OR IGNORE INTO settings(key,value) VALUES('display_currency_symbol_usd','$')"
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO settings(key,value) VALUES('display_currency_code','SYP')"
+            )
             conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('company_name','نانو')")
             conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('payment_allocation_mode','oldest')")
             conn.commit()

@@ -48,7 +48,7 @@ def kpi_card(
                 ft.Column(
                     [
                         ft.Text(label, size=10, color=Colors.TEXT_SECONDARY),
-                        ft.Text(value, size=16, weight=ft.FontWeight.BOLD),
+                        ft.Text(value, size=16, weight=ft.FontWeight.BOLD, text_direction=ft.TextDirection.LTR),
                     ],
                     spacing=2, expand=True,
                 ),

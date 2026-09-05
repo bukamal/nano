@@ -6,7 +6,7 @@ import flet as ft
 
 from nano_offline.core.toast import toast
 
-from nano_offline.components import SearchSelect, SelectAllTextField, SmartAmountField, SmartDateField, empty_state, kpi_card, new_form_sheet, render_form_sheet, status_pill
+from nano_offline.components import SearchSelect, SelectAllTextField, SmartAmountField, SmartDateField, empty_state, kpi_card, new_form_sheet, render_form_sheet, status_pill, money_text_from_str
 from nano_offline.core.theme import Colors, Radius, Shadow
 from nano_offline.core import currency
 from nano_offline.core.home_widget import refresh_home_widget
@@ -146,10 +146,25 @@ class FinanceCenter:
                             ft.Column([
                                 ft.Row([ft.Text(f"{title} #{voucher['id']}", size=13, weight=ft.FontWeight.BOLD, expand=True), *badges]),
                                 ft.Text(f"{voucher.get('party_name') or '—'} • {voucher.get('voucher_date') or '—'}", size=10, color=Colors.TEXT_SECONDARY),
-                                ft.Text(f"موزع {self.money(allocated)}" + (f" • على الحساب {self.money(unallocated)}" if unallocated else ""), size=9, color=Colors.TEXT_SECONDARY),
+                                ft.Row(
+                                    [
+                                        ft.Text("موزع ", size=9, color=Colors.TEXT_SECONDARY),
+                                        money_text_from_str(self.money(allocated), size=9, color=Colors.TEXT_SECONDARY),
+                                        *(
+                                            [
+                                                ft.Text(" • على الحساب ", size=9, color=Colors.TEXT_SECONDARY),
+                                                money_text_from_str(self.money(unallocated), size=9, color=Colors.TEXT_SECONDARY),
+                                            ]
+                                            if unallocated
+                                            else []
+                                        ),
+                                    ],
+                                    spacing=0,
+                                    tight=True,
+                                ),
                             ], spacing=2, expand=True),
                             ft.Column([
-                                ft.Text(self.money(voucher.get("amount")), size=15, weight=ft.FontWeight.BOLD, color=accent),
+                                money_text_from_str(self.money(voucher.get("amount")), size=15, weight=ft.FontWeight.BOLD, color=accent),
                                 ft.Text(voucher.get("reference") or "بدون مرجع", size=9, color=Colors.TEXT_FAINT, max_lines=1),
                             ], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END),
                             ft.Icon(ft.Icons.CHEVRON_LEFT, size=18, color=Colors.TEXT_FAINT),
@@ -331,7 +346,7 @@ class FinanceCenter:
         allocations = voucher.get("allocations") or []
         alloc_controls = []
         for a in allocations:
-            alloc_controls.append(ft.Container(ft.Row([ft.Text(f"فاتورة #{a['invoice_id']}", size=11, expand=True), ft.Text(self.money(a.get("amount")), size=11, weight=ft.FontWeight.BOLD)]), padding=7, bgcolor=Colors.BACKGROUND, border_radius=10))
+            alloc_controls.append(ft.Container(ft.Row([ft.Text(f"فاتورة #{a['invoice_id']}", size=11, expand=True), money_text_from_str(self.money(a.get("amount")), size=11, weight=ft.FontWeight.BOLD)]), padding=7, bgcolor=Colors.BACKGROUND, border_radius=10))
         if not alloc_controls:
             alloc_controls.append(ft.Text("لا توجد توزيعات على فواتير", size=10, color=Colors.TEXT_SECONDARY))
         # Bottom sheet instead of a centered AlertDialog -- same read-mostly
@@ -368,12 +383,22 @@ class FinanceCenter:
                     ft.Text(f"{title} #{voucher_id}", size=18, weight=ft.FontWeight.BOLD),
                     ft.Container(
                         ft.Column([
-                            ft.Container(ft.Column([ft.Text(self.money(voucher.get("amount")), size=28, weight=ft.FontWeight.BOLD, color=accent), ft.Text(title, size=11, color=Colors.TEXT_SECONDARY)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2), padding=14, bgcolor=Colors.BACKGROUND, border_radius=16),
+                            ft.Container(ft.Column([money_text_from_str(self.money(voucher.get("amount")), size=28, weight=ft.FontWeight.BOLD, color=accent), ft.Text(title, size=11, color=Colors.TEXT_SECONDARY)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2), padding=14, bgcolor=Colors.BACKGROUND, border_radius=16),
                             ft.ResponsiveRow([
                                 ft.Container(ft.Text(f"التاريخ: {voucher.get('voucher_date') or '—'}", size=11), col={"xs": 6}),
                                 ft.Container(ft.Text(f"الحساب: {voucher.get('party_name') or '—'}", size=11), col={"xs": 6}),
                                 ft.Container(ft.Text(f"المرجع: {voucher.get('reference') or '—'}", size=11), col={"xs": 6}),
-                                ft.Container(ft.Text(f"على الحساب: {self.money(voucher.get('unallocated_amount'))}", size=11), col={"xs": 6}),
+                                ft.Container(
+                                    ft.Row(
+                                        [
+                                            ft.Text("على الحساب: ", size=11),
+                                            money_text_from_str(self.money(voucher.get("unallocated_amount")), size=11),
+                                        ],
+                                        spacing=0,
+                                        tight=True,
+                                    ),
+                                    col={"xs": 6},
+                                ),
                             ]),
                             ft.Text(voucher.get("notes") or "بدون ملاحظات", size=10, color=Colors.TEXT_SECONDARY),
                             ft.Divider(height=8), ft.Text("التوزيعات", size=13, weight=ft.FontWeight.BOLD), ft.Column(alloc_controls, spacing=5),
@@ -485,7 +510,14 @@ class FinanceCenter:
                                 ft.Column(
                                     [
                                         ft.Text(f"فاتورة #{iid}", weight=ft.FontWeight.BOLD),
-                                        ft.Text(f"{inv['invoice_date']} • المتاح للتوزيع {self.money(inv['allocatable_amount'])}", size=11, color=Colors.TEXT_SECONDARY),
+                                        ft.Row(
+                                            [
+                                                ft.Text(f"{inv['invoice_date']} • المتاح للتوزيع ", size=11, color=Colors.TEXT_SECONDARY),
+                                                money_text_from_str(self.money(inv["allocatable_amount"]), size=11, color=Colors.TEXT_SECONDARY),
+                                            ],
+                                            spacing=0,
+                                            tight=True,
+                                        ),
                                     ],
                                     expand=True,
                                     spacing=2,
@@ -633,7 +665,7 @@ class FinanceCenter:
                             ]),
                             ft.Text(exp.get("expense_date") or "—", size=10, color=Colors.TEXT_SECONDARY),
                         ], spacing=2, expand=True),
-                        ft.Column([ft.Text(self.money(exp.get("amount")), size=15, weight=ft.FontWeight.BOLD, color=Colors.DANGER_DARK), ft.Text(exp.get("reference") or "بدون مرجع", size=9, color=Colors.TEXT_FAINT)], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END),
+                        ft.Column([money_text_from_str(self.money(exp.get("amount")), size=15, weight=ft.FontWeight.BOLD, color=Colors.DANGER_DARK), ft.Text(exp.get("reference") or "بدون مرجع", size=9, color=Colors.TEXT_FAINT)], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END),
                         ft.PopupMenuButton(items=[
                             ft.PopupMenuItem(text="تعديل", icon=ft.Icons.EDIT_OUTLINED, on_click=lambda _, eid=int(exp["id"]): self.show_expense_dialog(eid)),
                             ft.PopupMenuItem(text="حذف", icon=ft.Icons.DELETE_OUTLINE, on_click=lambda _, eid=int(exp["id"]): self.confirm_delete_expense(eid)),
@@ -870,7 +902,14 @@ class FinanceCenter:
                                     ft.Column(
                                         [
                                             ft.Text(movement_text, size=15, weight=ft.FontWeight.BOLD, color=accent),
-                                            ft.Text(f"الرصيد {self.money(row['balance'])}", size=9, color=Colors.TEXT_FAINT),
+                                            ft.Row(
+                                                [
+                                                    ft.Text("الرصيد ", size=9, color=Colors.TEXT_FAINT),
+                                                    money_text_from_str(self.money(row["balance"]), size=9, color=Colors.TEXT_FAINT),
+                                                ],
+                                                spacing=0,
+                                                tight=True,
+                                            ),
                                         ],
                                         spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END,
                                     ),

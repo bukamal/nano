@@ -8,7 +8,7 @@ import flet as ft
 from nano_offline.core.theme import Colors, Radius, SEVERITY_STYLE, Shadow
 from nano_offline.core import currency
 from nano_offline.core.toast import toast
-from nano_offline.components import SelectAllTextField, new_form_sheet, render_form_sheet
+from nano_offline.components import SelectAllTextField, SegmentedToggle, SegmentOption, new_form_sheet, render_form_sheet, money_text_from_str
 
 # Arabic weekday/month names for the header's live date line -- kept local
 # (rather than relying on locale-dependent strftime) so it renders correctly
@@ -163,12 +163,47 @@ class DashboardCenter:
             )
         return ft.Row(pills, spacing=6)
 
-    # -- currency rate quick-edit (also available in لوحة الإدارة → العملة) --
+    # -- display currency + exchange rate (also in لوحة الإدارة → العملة) --
+    def _set_display_currency(self, code: str) -> None:
+        """Persist display currency and rebuild the dashboard so every KPI
+        re-formats under the newly chosen unit without a full app restart."""
+        code = (code or "").strip().upper()
+        if code not in currency.SUPPORTED_DISPLAY_CURRENCIES:
+            return
+        if currency.get_display_currency(self.ctx.settings) == code:
+            return
+        self.ctx.settings.set_many({currency.DISPLAY_CURRENCY_KEY: code})
+        symbol = currency.get_display_symbol(self.ctx.settings)
+        label = "الليرة السورية" if code == currency.DISPLAY_CURRENCY_SYP else "الدولار الأمريكي"
+        self._notify(
+            f"عملة العرض: {label} ({symbol}) — كل المبالغ في الشاشات والمستندات",
+            kind="success",
+            sound_kind="save",
+        )
+        self.show_center()
+
     def _open_rate_sheet(self, _e=None) -> None:
+        """Modern currency sheet: two large selectable cards for SYP/USD, and
+        when SYP is active an inline rate editor with nudge chips. Instant
+        visual feedback; Save commits currency + rate together.
+        """
         current_rate = currency.get_exchange_rate(self.ctx.settings)
-        rate_display = f"{current_rate:.0f}" if abs(current_rate - round(current_rate)) < 0.005 else f"{current_rate:.2f}"
+        rate_display = (
+            f"{current_rate:.0f}"
+            if abs(current_rate - round(current_rate)) < 0.005
+            else f"{current_rate:.2f}"
+        )
+        current_code = currency.get_display_currency(self.ctx.settings)
+        selected = {"code": current_code}
 
         preview = ft.Text("", size=12, color=Colors.TEXT_MUTED)
+        rate_field = SelectAllTextField(
+            label="سعر صرف الدولار (ل.س لكل 1$)",
+            value=rate_display,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            hint_text="مثال: 13500",
+            prefix_icon=ft.Icons.CURRENCY_EXCHANGE_ROUNDED,
+        )
 
         def _refresh_preview() -> None:
             try:
@@ -176,30 +211,12 @@ class DashboardCenter:
             except ValueError:
                 r = 0
             if r > 0:
-                preview.value = f"١ $ = {r:,.0f} ل.س      •      ١٠٠ $ = {r * 100:,.0f} ل.س"
+                preview.value = f"١ $ = {r:,.0f} ل.س   •   ١٠٠ $ = {r * 100:,.0f} ل.س"
                 preview.color = Colors.TEXT_MUTED
             else:
                 preview.value = "أدخل رقمًا أكبر من صفر"
                 preview.color = Colors.DANGER
 
-        rate_field = SelectAllTextField(
-            label="سعر صرف الدولار (ل.س لكل 1$)",
-            value=rate_display,
-            keyboard_type=ft.KeyboardType.NUMBER,
-            hint_text="مثال: 13500",
-            autofocus=True,
-            prefix_icon=ft.Icons.CURRENCY_EXCHANGE_ROUNDED,
-        )
-
-        def field_changed(_ev=None):
-            _refresh_preview()
-            self.page.update()
-
-        rate_field.on_change = field_changed
-
-        # Quick-nudge chips: bump the current rate by a common step in
-        # either direction without retyping the whole number -- handy when
-        # the parallel-market rate only moved a little since it was last set.
         def _nudge(step: float):
             def handler(_e):
                 try:
@@ -207,7 +224,11 @@ class DashboardCenter:
                 except ValueError:
                     r = 0
                 new_value = max(0.0, r + step)
-                rate_field.value = f"{new_value:.0f}" if abs(new_value - round(new_value)) < 0.5 else f"{new_value:.2f}"
+                rate_field.value = (
+                    f"{new_value:.0f}"
+                    if abs(new_value - round(new_value)) < 0.5
+                    else f"{new_value:.2f}"
+                )
                 _refresh_preview()
                 self.page.update()
             return handler
@@ -216,9 +237,131 @@ class DashboardCenter:
             return ft.Container(
                 ft.Text(label, size=12, weight=ft.FontWeight.W_600, color=Colors.PRIMARY),
                 padding=ft.padding.symmetric(horizontal=12, vertical=7),
-                bgcolor=Colors.PRIMARY_BG, border_radius=Radius.MD,
-                on_click=_nudge(step), ink=True,
+                bgcolor=Colors.PRIMARY_BG,
+                border_radius=Radius.MD,
+                on_click=_nudge(step),
+                ink=True,
             )
+
+        # Mutable holders so card rebuild can refresh styles without recreating the sheet.
+        syp_card_ref: dict = {}
+        usd_card_ref: dict = {}
+
+        def _style_card(card: ft.Container, active: bool, accent: str) -> None:
+            card.bgcolor = accent if active else Colors.WHITE
+            card.border = ft.border.all(2, accent if active else Colors.BORDER)
+            card.shadow = Shadow.SM if active else None
+            # children: icon badge, column(title, subtitle), check icon
+            row = card.content
+            badge = row.controls[0]
+            title = row.controls[1].controls[0]
+            subtitle = row.controls[1].controls[1]
+            check = row.controls[2]
+            badge.bgcolor = Colors.WHITE if active else Colors.BACKGROUND_ALT
+            title.color = Colors.WHITE if active else Colors.TEXT_PRIMARY
+            subtitle.color = Colors.WHITE if active else Colors.TEXT_SECONDARY
+            check.visible = active
+            check.color = Colors.WHITE
+
+        def _select_currency(code: str):
+            selected["code"] = code
+            is_syp = code == currency.DISPLAY_CURRENCY_SYP
+            _style_card(syp_card_ref["c"], is_syp, Colors.PRIMARY)
+            _style_card(usd_card_ref["c"], not is_syp, Colors.SUCCESS)
+            rate_block.visible = is_syp
+            hint.value = (
+                "المبالغ تُحوَّل من الدولار المخزَّن بسعر الصرف أدناه"
+                if is_syp
+                else "المبالغ تُعرض بالدولار مباشرة كما هي مخزَّنة — دون تحويل"
+            )
+            self.page.update()
+
+        def _make_card(code: str, symbol: str, title: str, subtitle: str, accent: str) -> ft.Container:
+            active = selected["code"] == code
+            card = ft.Container(
+                ft.Row(
+                    [
+                        ft.Container(
+                            ft.Text(symbol, size=18, weight=ft.FontWeight.BOLD, color=accent),
+                            width=44, height=44, alignment=ft.alignment.center,
+                            bgcolor=Colors.WHITE if active else Colors.BACKGROUND_ALT,
+                            border_radius=14,
+                        ),
+                        ft.Column(
+                            [
+                                ft.Text(title, size=14, weight=ft.FontWeight.BOLD,
+                                        color=Colors.WHITE if active else Colors.TEXT_PRIMARY),
+                                ft.Text(subtitle, size=10,
+                                        color=Colors.WHITE if active else Colors.TEXT_SECONDARY),
+                            ],
+                            spacing=2, expand=True,
+                        ),
+                        ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, size=22,
+                                color=Colors.WHITE, visible=active),
+                    ],
+                    spacing=10,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                padding=14,
+                bgcolor=accent if active else Colors.WHITE,
+                border=ft.border.all(2, accent if active else Colors.BORDER),
+                border_radius=16,
+                shadow=Shadow.SM if active else None,
+                on_click=lambda _e, c=code: _select_currency(c),
+                ink=True,
+                animate=ft.Animation(180, ft.AnimationCurve.EASE_OUT),
+                expand=True,
+            )
+            return card
+
+        syp_card = _make_card(
+            currency.DISPLAY_CURRENCY_SYP,
+            currency.DEFAULT_DISPLAY_SYMBOL,
+            "الليرة السورية",
+            "العرض المحلي مع التحويل",
+            Colors.PRIMARY,
+        )
+        usd_card = _make_card(
+            currency.DISPLAY_CURRENCY_USD,
+            currency.DEFAULT_USD_DISPLAY_SYMBOL,
+            "الدولار الأمريكي",
+            "نفس عملة التخزين",
+            Colors.SUCCESS,
+        )
+        syp_card_ref["c"] = syp_card
+        usd_card_ref["c"] = usd_card
+
+        hint = ft.Text(
+            "المبالغ تُحوَّل من الدولار المخزَّن بسعر الصرف أدناه"
+            if current_code == currency.DISPLAY_CURRENCY_SYP
+            else "المبالغ تُعرض بالدولار مباشرة كما هي مخزَّنة — دون تحويل",
+            size=11,
+            color=Colors.TEXT_FAINT,
+        )
+
+        rate_block = ft.Column(
+            [
+                ft.Divider(height=12, color=Colors.BORDER),
+                ft.Text("سعر الصرف الموازي", size=12, weight=ft.FontWeight.W_600, color=Colors.TEXT_SECONDARY),
+                rate_field,
+                preview,
+                ft.Row(
+                    [
+                        nudge_chip("−1000", -1000),
+                        nudge_chip("−500", -500),
+                        nudge_chip("+500", 500),
+                        nudge_chip("+1000", 1000),
+                    ],
+                    spacing=6,
+                    wrap=True,
+                ),
+            ],
+            spacing=8,
+            tight=True,
+            visible=current_code == currency.DISPLAY_CURRENCY_SYP,
+        )
+
+        rate_field.on_change = lambda _e: (_refresh_preview(), self.page.update())
 
         sheet = new_form_sheet()
 
@@ -226,100 +369,165 @@ class DashboardCenter:
             self.page.close(sheet)
 
         def save(_ev=None) -> None:
-            rate_text = (rate_field.value or "").replace(",", "").strip()
-            try:
-                rate_value = float(rate_text)
-            except ValueError:
-                rate_value = 0
-            if rate_value <= 0:
-                self._notify("سعر الصرف يجب أن يكون رقمًا أكبر من صفر", kind="error")
-                return
-            self.ctx.settings.set_many({currency.EXCHANGE_RATE_KEY: str(rate_value)})
+            code = selected["code"] or currency.DEFAULT_DISPLAY_CURRENCY
+            if code not in currency.SUPPORTED_DISPLAY_CURRENCIES:
+                code = currency.DEFAULT_DISPLAY_CURRENCY
+            payload = {currency.DISPLAY_CURRENCY_KEY: code}
+            if code == currency.DISPLAY_CURRENCY_SYP:
+                rate_text = (rate_field.value or "").replace(",", "").strip()
+                try:
+                    rate_value = float(rate_text)
+                except ValueError:
+                    rate_value = 0
+                if rate_value <= 0:
+                    self._notify("سعر الصرف يجب أن يكون رقمًا أكبر من صفر", kind="error")
+                    return
+                payload[currency.EXCHANGE_RATE_KEY] = str(rate_value)
+            self.ctx.settings.set_many(payload)
             close()
-            self._notify("تم تحديث سعر الصرف — سيظهر في كل الشاشات والمستندات فورًا", kind="success", sound_kind="save")
+            symbol = currency.get_display_symbol(self.ctx.settings)
+            label = "الليرة السورية" if code == currency.DISPLAY_CURRENCY_SYP else "الدولار الأمريكي"
+            self._notify(
+                f"تم الحفظ — العرض بـ {label} ({symbol})",
+                kind="success",
+                sound_kind="save",
+            )
             self.show_center()
 
         _refresh_preview()
         render_form_sheet(
-            self.page, sheet,
-            title="تحديث سعر الصرف",
+            self.page,
+            sheet,
+            title="عملة العرض",
             fields=[
-                rate_field,
-                preview,
-                ft.Row(
-                    [
-                        ft.Text("تعديل سريع:", size=11, color=Colors.TEXT_FAINT),
-                        nudge_chip("-100", -100),
-                        nudge_chip("+100", 100),
-                        nudge_chip("+500", 500),
-                        nudge_chip("+1000", 1000),
-                    ],
-                    spacing=6, wrap=True,
+                ft.Text(
+                    "اختر كيف تظهر المبالغ في كل الشاشات والفواتير والتقارير",
+                    size=12,
+                    color=Colors.TEXT_SECONDARY,
                 ),
+                ft.Row([syp_card, usd_card], spacing=10),
+                hint,
+                rate_block,
             ],
-            on_close=close, on_save=save,
-            save_label="حفظ السعر",
+            on_close=close,
+            on_save=save,
+            save_label="حفظ",
             save_icon=ft.Icons.CHECK_ROUNDED,
         )
         self.page.open(sheet)
 
     def _rate_chip(self) -> ft.Container:
-        """Compact live exchange-rate widget with inline edit — the same
-        value the admin screen edits, surfaced here so a rate update doesn't
-        require a trip to الإدارة → إعدادات العملة.
+        """Live currency control on the dashboard header.
 
-        Also carries a small "عملة العرض" badge (SYP/USD + symbol) so the
-        currently active display currency is visible at a glance right next
-        to the rate it's derived from, instead of only being inferable from
-        the "(غير مُستخدم للعرض حاليًا)" caption on the rate label itself.
+        A single modern card: large SYP/USD segmented switch for one-tap
+        display-currency changes (the daily action), plus the live rate
+        and a tune affordance that opens the full sheet for rate edits.
+        Same settings keys as لوحة الإدارة → العملة.
         """
         display_currency = currency.get_display_currency(self.ctx.settings)
         is_syp = display_currency == currency.DISPLAY_CURRENCY_SYP
         display_symbol = currency.get_display_symbol(self.ctx.settings)
         rate = currency.get_exchange_rate(self.ctx.settings)
         rate_text = f"{rate:,.0f}" if abs(rate - round(rate)) < 0.5 else f"{rate:,.2f}"
-        currency_badge = ft.Container(
+
+        def _seg(code: str, label: str, symbol: str) -> ft.Container:
+            active = display_currency == code
+
+            def _tap(_e, c=code):
+                self._set_display_currency(c)
+
+            return ft.Container(
+                ft.Row(
+                    [
+                        ft.Text(symbol, size=13, weight=ft.FontWeight.BOLD,
+                                color=Colors.WHITE if active else Colors.TEXT_SECONDARY),
+                        ft.Text(label, size=11, weight=ft.FontWeight.W_600 if active else ft.FontWeight.W_500,
+                                color=Colors.WHITE if active else Colors.TEXT_MUTED),
+                    ],
+                    spacing=4,
+                    tight=True,
+                    alignment=ft.MainAxisAlignment.CENTER,
+                ),
+                padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                bgcolor=Colors.PRIMARY if active else None,
+                border_radius=12,
+                expand=True,
+                on_click=_tap,
+                ink=True,
+                animate=ft.Animation(150, ft.AnimationCurve.EASE_OUT),
+                tooltip=f"العرض بـ {label}",
+            )
+
+        switch = ft.Container(
             ft.Row(
                 [
-                    ft.Icon(ft.Icons.PAYMENTS_ROUNDED if is_syp else ft.Icons.ATTACH_MONEY_ROUNDED, size=13, color=Colors.SUCCESS_DARK),
-                    ft.Text(f"عملة العرض: {display_currency} ({display_symbol})", size=10, weight=ft.FontWeight.BOLD, color=Colors.SUCCESS_DARK),
+                    _seg(currency.DISPLAY_CURRENCY_SYP, "ليرة", currency.DEFAULT_DISPLAY_SYMBOL),
+                    _seg(currency.DISPLAY_CURRENCY_USD, "دولار", currency.DEFAULT_USD_DISPLAY_SYMBOL),
                 ],
-                spacing=4, tight=True, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=2,
             ),
-            padding=ft.padding.symmetric(horizontal=8, vertical=4),
-            bgcolor=Colors.SUCCESS_BG, border_radius=999,
-            tooltip="عملة العرض الحالية — يمكن تغييرها من لوحة الإدارة ← العملة",
+            bgcolor=Colors.BACKGROUND_ALT,
+            border=ft.border.all(1, Colors.BORDER),
+            border_radius=14,
+            padding=3,
         )
+
+        if is_syp:
+            status_line = ft.Text(
+                f"١ $ = {rate_text} {display_symbol}",
+                size=11,
+                weight=ft.FontWeight.W_600,
+                color=Colors.TEXT_PRIMARY,
+            )
+            status_sub = ft.Text("اضغط للتعديل أو بدّل العملة أعلاه", size=9, color=Colors.TEXT_FAINT)
+        else:
+            status_line = ft.Text(
+                f"العرض بالدولار ({display_symbol})",
+                size=11,
+                weight=ft.FontWeight.W_600,
+                color=Colors.TEXT_PRIMARY,
+            )
+            status_sub = ft.Text("الأرقام كما هي مخزَّنة — دون تحويل", size=9, color=Colors.TEXT_FAINT)
+
         return ft.Container(
-            ft.Row(
+            ft.Column(
                 [
-                    ft.Container(
-                        ft.Icon(ft.Icons.CURRENCY_EXCHANGE_ROUNDED, size=18, color=Colors.PRIMARY),
-                        width=34, height=34, alignment=ft.alignment.center, bgcolor=Colors.PRIMARY_BG, border_radius=12,
-                    ),
-                    ft.Column(
+                    ft.Row(
                         [
-                            ft.Text("سعر صرف الدولار" + ("" if is_syp else " (غير مُستخدم للعرض حاليًا)"), size=10, color=Colors.TEXT_FAINT),
-                            ft.Text(f"{rate_text} ل.س", size=14, weight=ft.FontWeight.BOLD, color=Colors.TEXT_PRIMARY),
-                            currency_badge,
+                            ft.Container(
+                                ft.Icon(ft.Icons.CURRENCY_EXCHANGE_ROUNDED, size=18, color=Colors.PRIMARY),
+                                width=34, height=34, alignment=ft.alignment.center,
+                                bgcolor=Colors.PRIMARY_BG, border_radius=12,
+                            ),
+                            ft.Text("عملة العرض", size=12, weight=ft.FontWeight.W_600,
+                                    color=Colors.TEXT_SECONDARY, expand=True),
+                            ft.Container(
+                                ft.Icon(ft.Icons.TUNE_ROUNDED, size=16, color=Colors.PRIMARY),
+                                width=32, height=32, alignment=ft.alignment.center,
+                                bgcolor=Colors.PRIMARY_BG, border_radius=10,
+                                on_click=self._open_rate_sheet, ink=True,
+                                tooltip="إعداد العملة وسعر الصرف",
+                            ),
                         ],
-                        spacing=4, tight=True,
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
+                    switch,
                     ft.Container(
-                        ft.Icon(ft.Icons.EDIT_ROUNDED, size=15, color=Colors.PRIMARY),
-                        width=30, height=30, alignment=ft.alignment.center, bgcolor=Colors.PRIMARY_BG, border_radius=10,
-                        on_click=self._open_rate_sheet, ink=True, tooltip="تحديث سعر الصرف",
+                        ft.Column([status_line, status_sub], spacing=1, tight=True),
+                        on_click=self._open_rate_sheet,
+                        ink=True,
+                        padding=ft.padding.only(top=2),
                     ),
                 ],
-                spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=8,
+                tight=True,
             ),
-            padding=ft.padding.symmetric(horizontal=12, vertical=8),
+            padding=ft.padding.symmetric(horizontal=12, vertical=10),
             bgcolor=Colors.WHITE,
             border=ft.border.all(1, Colors.BORDER),
             border_radius=Radius.XL,
             shadow=Shadow.SM,
-            on_click=self._open_rate_sheet,
-            ink=True,
         )
 
     # -- smart insight banner ------------------------------------------------
@@ -423,7 +631,7 @@ class DashboardCenter:
         return ft.Column(
             [
                 ft.Text(title, size=11, color=Colors.TEXT_SECONDARY),
-                ft.Text(self.money(value), size=16, weight=ft.FontWeight.BOLD, color=Colors.TEXT_PRIMARY),
+                money_text_from_str(self.money(value), size=16, weight=ft.FontWeight.BOLD, color=Colors.TEXT_PRIMARY),
                 self._trend_badge(change, invert=invert),
             ],
             spacing=3,
@@ -528,7 +736,7 @@ class DashboardCenter:
                     width=22, height=22, alignment=ft.alignment.center, bgcolor=Colors.PRIMARY_BG, border_radius=11,
                 ),
                 ft.Text(str(row.get("item_name") or "—"), size=12, expand=True, weight=ft.FontWeight.W_600),
-                ft.Text(self.money(row.get("revenue")), size=12, color=Colors.TEXT_SECONDARY),
+                money_text_from_str(self.money(row.get("revenue")), size=12, color=Colors.TEXT_SECONDARY),
             ],
             spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
@@ -589,7 +797,7 @@ class DashboardCenter:
             ratio = max(0.04, min(1.0, value / max_flow)) if value else 0.02
             return ft.Column(
                 [
-                    ft.Row([ft.Text(label, size=12, color=Colors.TEXT_MUTED, expand=True), ft.Text(self.money(value), size=12, weight=ft.FontWeight.BOLD)]),
+                    ft.Row([ft.Text(label, size=12, color=Colors.TEXT_MUTED, expand=True), money_text_from_str(self.money(value), size=12, weight=ft.FontWeight.BOLD)]),
                     ft.Stack(
                         [
                             ft.Container(height=8, bgcolor=Colors.BACKGROUND_ALT, border_radius=10),
@@ -621,8 +829,19 @@ class DashboardCenter:
                             ),
                             ft.Column(
                                 [
-                                    ft.Text(self.money(inv.get("total")), size=13, weight=ft.FontWeight.BOLD),
-                                    ft.Text("مسددة" if remaining <= 1e-9 else f"متبقي {self.money(remaining)}", size=9, color=Colors.SUCCESS if remaining <= 1e-9 else Colors.ORANGE),
+                                    money_text_from_str(self.money(inv.get("total")), size=13, weight=ft.FontWeight.BOLD),
+                                    (
+                                        ft.Text("مسددة", size=9, color=Colors.SUCCESS)
+                                        if remaining <= 1e-9
+                                        else ft.Row(
+                                            [
+                                                ft.Text("متبقي ", size=9, color=Colors.ORANGE),
+                                                money_text_from_str(self.money(remaining), size=9, color=Colors.ORANGE),
+                                            ],
+                                            spacing=0,
+                                            tight=True,
+                                        )
+                                    ),
                                 ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.END,
                             ),
                         ],
@@ -745,7 +964,7 @@ class DashboardCenter:
                                         ),
                                         flow_row("المبيعات", sales, Colors.PRIMARY),
                                         flow_row("المشتريات", purchases, Colors.PURPLE_LIGHT),
-                                        ft.Row([ft.Text("قيمة المخزون", size=11, color=Colors.TEXT_SECONDARY, expand=True), ft.Text(self.money(summary["inventory_value"]), weight=ft.FontWeight.BOLD, size=12)]),
+                                        ft.Row([ft.Text("قيمة المخزون", size=11, color=Colors.TEXT_SECONDARY, expand=True), money_text_from_str(self.money(summary["inventory_value"]), weight=ft.FontWeight.BOLD, size=12)]),
                                     ], spacing=13,
                                 ),
                                 padding=16, bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=20, shadow=Shadow.SM,

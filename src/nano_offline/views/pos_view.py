@@ -8,7 +8,7 @@ import flet as ft
 
 from nano_offline.core.toast import toast
 
-from nano_offline.components import SearchSelect, SelectAllTextField, empty_state
+from nano_offline.components import SearchSelect, SelectAllTextField, empty_state, money_text_from_str
 from nano_offline.components.buttons import hero_button, stepper_icon_button
 from nano_offline.services.invoice_service import InvoiceLineInput
 from nano_offline.core.theme import Colors, IconSize, LazyPalette, Radius, Shadow
@@ -901,7 +901,7 @@ class POSCenter:
                         width=44, height=44, alignment=ft.alignment.center, bgcolor=Colors.BACKGROUND_ALT, border_radius=12,
                     ),
                     ft.Text(item["name"], size=12, weight=ft.FontWeight.W_600, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS, text_align=ft.TextAlign.CENTER),
-                    ft.Text(self.money(item["selling_price"]), size=13, weight=ft.FontWeight.BOLD, color=Colors.PRIMARY_DARK),
+                    money_text_from_str(self.money(item["selling_price"]), size=13, weight=ft.FontWeight.BOLD, color=Colors.PRIMARY_DARK),
                     qty_badge or ft.Container(height=1),
                 ],
                 spacing=4, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -958,7 +958,15 @@ class POSCenter:
                             ft.Column(
                                 [
                                     ft.Text(item["name"], size=12, weight=ft.FontWeight.W_600, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
-                                    ft.Text(f"{self.money(item['selling_price'])} × {self._qty(row['qty'])} = {self.money(line_total)}", size=11, color=Colors.TEXT_SECONDARY),
+                                    ft.Row(
+                                        [
+                                            money_text_from_str(self.money(item["selling_price"]), size=11, color=Colors.TEXT_SECONDARY),
+                                            ft.Text(f" × {self._qty(row['qty'])} = ", size=11, color=Colors.TEXT_SECONDARY),
+                                            money_text_from_str(self.money(line_total), size=11, color=Colors.TEXT_SECONDARY),
+                                        ],
+                                        spacing=0,
+                                        tight=True,
+                                    ),
                                 ],
                                 spacing=1, expand=True,
                             ),
