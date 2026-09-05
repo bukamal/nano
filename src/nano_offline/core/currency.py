@@ -129,6 +129,24 @@ def to_stored(amount_displayed: float | int | None, rate: float) -> float:
     return float(amount_displayed or 0) / rate
 
 
+# U+2066 LEFT-TO-RIGHT ISOLATE / U+2069 POP DIRECTIONAL ISOLATE. Every
+# "amount symbol" string this module builds gets wrapped in these, which
+# pins the run to a fixed left-to-right internal layout (amount, then
+# symbol) no matter what surrounds it -- a right-aligned Row, a table cell,
+# a print engine's own bidi pass, this app's page-wide RTL setting, etc.
+# Without the isolate, the exact same "1,000 ل.س" text can render with the
+# symbol swapped to the *other* side of the amount depending on that
+# context, which is the "symbol flips sides" bug this fixes; it does not
+# change how the Arabic symbol's own letters connect/shape, only which
+# side of the amount the whole symbol lands on.
+_LRI = "\u2066"
+_PDI = "\u2069"
+
+
+def _amount_with_symbol(text: str, symbol: str) -> str:
+    return f"{_LRI}{text} {symbol}{_PDI}"
+
+
 def format_amount(
     amount_usd: float | int | None,
     settings=None,
@@ -152,7 +170,7 @@ def format_amount(
         decimals = _default_decimals(settings)
     value = to_display(amount_usd, rate)
     text = f"{value:,.{decimals}f}"
-    return f"{text} {symbol}" if with_symbol else text
+    return _amount_with_symbol(text, symbol) if with_symbol else text
 
 
 def _round_for_input(value: float, *, decimals: int = 2) -> str:
@@ -186,7 +204,7 @@ def format_display_value(value: float | int | None, settings=None, *, symbol: st
     if decimals is None:
         decimals = _default_decimals(settings)
     text = f"{float(value or 0):,.{decimals}f}"
-    return f"{text} {symbol}" if with_symbol else text
+    return _amount_with_symbol(text, symbol) if with_symbol else text
 
 
 def amount_field_label(base_label: str, settings=None) -> str:

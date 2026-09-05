@@ -53,9 +53,15 @@ class DocumentService:
         return amount_text, symbol
 
     def _money_text(self, value: float | int | None, inv: dict | None = None) -> str:
-        """Plain "amount symbol" text, for contexts that can't hold HTML (e.g. QR payloads)."""
+        """Plain "amount symbol" text, for contexts that can't hold HTML (e.g. QR payloads).
+
+        Uses the same LRI/PDI isolate as ``currency._amount_with_symbol`` --
+        see that function's docstring -- since this plain-text path has no
+        CSS available to pin the symbol's side the way ``_money()``'s
+        ``.money-wrap`` does.
+        """
         amount_text, symbol = self._money_parts(value, inv)
-        return f"{amount_text} {symbol}"
+        return currency._amount_with_symbol(amount_text, symbol)
 
     def _money(self, value: float | int | None, inv: dict | None = None) -> str:
         """Format a stored USD amount for printing, as HTML.
@@ -78,9 +84,14 @@ class DocumentService:
         symbol always lands after the amount as intended.
         """
         amount_text, symbol = self._money_parts(value, inv)
+        # Belt-and-suspenders alongside the .money-wrap CSS above: some
+        # print/PDF engines (older Android WebView builds in particular)
+        # don't fully honor `unicode-bidi:isolate`, so the same LRI/PDI
+        # isolate used everywhere else (see currency._amount_with_symbol)
+        # goes around the whole span too.
         return (
-            '<span class="money-wrap"><span class="amt">'
-            f'{amount_text}</span><span class="sym">{self._e(symbol)}</span></span>'
+            f'{currency._LRI}<span class="money-wrap"><span class="amt">'
+            f'{amount_text}</span><span class="sym">{self._e(symbol)}</span></span>{currency._PDI}'
         )
 
     @staticmethod

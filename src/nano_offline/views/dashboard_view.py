@@ -78,23 +78,33 @@ class DashboardCenter:
     def money(self, value) -> str:
         return currency.format_amount(value, self.ctx.settings)
 
-    @staticmethod
-    def _greeting_and_date() -> tuple[str, str]:
-        """Return (Arabic time-of-day greeting, formatted Arabic date)."""
+    def _greeting_and_date(self) -> tuple[str, str, str]:
+        """Return (greeting, subtitle line, icon name) for the header.
+
+        The greeting now folds in the store name (so it reads as one
+        welcoming line instead of a generic phrase floating above it) and
+        picks a time-of-day icon to go with it; the subtitle keeps the
+        Arabic weekday/date line. Kept as an instance method (was
+        ``@staticmethod``) purely to reach ``self.ctx.settings`` for the
+        store name -- nothing else about the time-of-day logic changed.
+        """
         now = datetime.now()
         hour = now.hour
         if 5 <= hour < 12:
-            greeting = "صباح الخير"
+            greeting, icon = "صباح الخير", ft.Icons.WB_SUNNY_ROUNDED
         elif 12 <= hour < 17:
-            greeting = "نهارك سعيد"
+            greeting, icon = "نهارك سعيد", ft.Icons.LIGHT_MODE_ROUNDED
         elif 17 <= hour < 21:
-            greeting = "مساء الخير"
+            greeting, icon = "مساء الخير", ft.Icons.WB_TWILIGHT_ROUNDED
         else:
-            greeting = "مساء النور"
+            greeting, icon = "مساء النور", ft.Icons.NIGHTLIGHT_ROUND
+        company = (self.ctx.settings.get("company_name") or "").strip()
+        if company and company != "نانو":
+            greeting = f"{greeting}، {company} 👋"
         today = now.date()
         weekday = _AR_WEEKDAYS[today.weekday()]
         month = _AR_MONTHS[today.month - 1]
-        return greeting, f"{weekday}، {today.day} {month} {today.year}"
+        return greeting, f"{weekday}، {today.day} {month} {today.year}", icon
 
     # -- period helpers ---------------------------------------------------
     @staticmethod
@@ -256,10 +266,30 @@ class DashboardCenter:
     def _rate_chip(self) -> ft.Container:
         """Compact live exchange-rate widget with inline edit — the same
         value the admin screen edits, surfaced here so a rate update doesn't
-        require a trip to الإدارة → إعدادات العملة."""
-        is_syp = currency.get_display_currency(self.ctx.settings) == currency.DISPLAY_CURRENCY_SYP
+        require a trip to الإدارة → إعدادات العملة.
+
+        Also carries a small "عملة العرض" badge (SYP/USD + symbol) so the
+        currently active display currency is visible at a glance right next
+        to the rate it's derived from, instead of only being inferable from
+        the "(غير مُستخدم للعرض حاليًا)" caption on the rate label itself.
+        """
+        display_currency = currency.get_display_currency(self.ctx.settings)
+        is_syp = display_currency == currency.DISPLAY_CURRENCY_SYP
+        display_symbol = currency.get_display_symbol(self.ctx.settings)
         rate = currency.get_exchange_rate(self.ctx.settings)
         rate_text = f"{rate:,.0f}" if abs(rate - round(rate)) < 0.5 else f"{rate:,.2f}"
+        currency_badge = ft.Container(
+            ft.Row(
+                [
+                    ft.Icon(ft.Icons.PAYMENTS_ROUNDED if is_syp else ft.Icons.ATTACH_MONEY_ROUNDED, size=13, color=Colors.SUCCESS_DARK),
+                    ft.Text(f"عملة العرض: {display_currency} ({display_symbol})", size=10, weight=ft.FontWeight.BOLD, color=Colors.SUCCESS_DARK),
+                ],
+                spacing=4, tight=True, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.padding.symmetric(horizontal=8, vertical=4),
+            bgcolor=Colors.SUCCESS_BG, border_radius=999,
+            tooltip="عملة العرض الحالية — يمكن تغييرها من لوحة الإدارة ← العملة",
+        )
         return ft.Container(
             ft.Row(
                 [
@@ -271,8 +301,9 @@ class DashboardCenter:
                         [
                             ft.Text("سعر صرف الدولار" + ("" if is_syp else " (غير مُستخدم للعرض حاليًا)"), size=10, color=Colors.TEXT_FAINT),
                             ft.Text(f"{rate_text} ل.س", size=14, weight=ft.FontWeight.BOLD, color=Colors.TEXT_PRIMARY),
+                            currency_badge,
                         ],
-                        spacing=1, tight=True,
+                        spacing=4, tight=True,
                     ),
                     ft.Container(
                         ft.Icon(ft.Icons.EDIT_ROUNDED, size=15, color=Colors.PRIMARY),
@@ -618,7 +649,7 @@ class DashboardCenter:
             restock_rows.append(ft.Text("لا توجد أصناف مرشحة لإعادة الطلب حاليًا", size=11, color=Colors.TEXT_FAINT))
 
         period_label = next(l for k, l, _d in _PERIOD_OPTIONS if k == self._period)
-        greeting, date_line = self._greeting_and_date()
+        greeting, date_line, greeting_icon = self._greeting_and_date()
 
         # Greeting/date + live currency rate stay pinned above the scroll --
         # everything else (KPIs, quick actions, alerts, lists...) lives in
@@ -628,12 +659,22 @@ class DashboardCenter:
             ft.ResponsiveRow(
                 [
                     ft.Container(
-                        ft.Column(
+                        ft.Row(
                             [
-                                ft.Text(greeting, size=17, weight=ft.FontWeight.BOLD, color=Colors.TEXT_PRIMARY),
-                                ft.Text(date_line, size=11, color=Colors.TEXT_FAINT),
+                                ft.Container(
+                                    ft.Icon(greeting_icon, size=20, color=Colors.PRIMARY),
+                                    width=40, height=40, alignment=ft.alignment.center,
+                                    bgcolor=Colors.PRIMARY_BG, border_radius=13,
+                                ),
+                                ft.Column(
+                                    [
+                                        ft.Text(greeting, size=17, weight=ft.FontWeight.BOLD, color=Colors.TEXT_PRIMARY),
+                                        ft.Text(date_line, size=11, color=Colors.TEXT_FAINT),
+                                    ],
+                                    spacing=2, tight=True,
+                                ),
                             ],
-                            spacing=2,
+                            spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
                         col={"xs": 12, "md": 7},
                     ),
