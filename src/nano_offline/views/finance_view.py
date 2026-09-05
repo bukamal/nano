@@ -80,32 +80,27 @@ class FinanceCenter:
         rows = ft.Column(spacing=9)
         summary = ft.ResponsiveRow(spacing=8, run_spacing=8)
         filter_state = {"type": "all"}
-        filter_boxes: dict[str, ft.Container] = {}
-
-        def filter_box(key: str, label: str, icon):
-            box = ft.Container(
-                ft.Row([ft.Icon(icon, size=15), ft.Text(label, size=11, weight=ft.FontWeight.W_600)], spacing=5),
-                padding=ft.padding.symmetric(horizontal=11, vertical=8), border_radius=20,
-                border=ft.border.all(1, Colors.BORDER), ink=True,
-                on_click=lambda _, k=key: set_filter(k),
-            )
-            filter_boxes[key] = box
-            return box
-
-        def update_filter_styles():
-            for key, box in filter_boxes.items():
-                selected = key == filter_state["type"]
-                box.bgcolor = Colors.PRIMARY if selected else Colors.WHITE
-                box.border = ft.border.all(1, Colors.PRIMARY if selected else Colors.BORDER)
-                row = box.content
-                if isinstance(row, ft.Row):
-                    for ctrl in row.controls:
-                        if isinstance(ctrl, ft.Text): ctrl.color = Colors.WHITE if selected else Colors.TEXT_MUTED
-                        elif isinstance(ctrl, ft.Icon): ctrl.color = Colors.WHITE if selected else Colors.TEXT_SECONDARY
+        # Dropdown selector instead of filter chips -- same searchable-select
+        # control used for "نوع السند" in the new/edit voucher form, so the
+        # type filter reads as a proper field rather than a row of buttons.
+        type_filter = SearchSelect(
+            label="نوع السند",
+            value="all",
+            choices=[("all", "الكل"), ("receipt", "قبض"), ("payment", "دفع")],
+            allow_clear=False,
+        )
 
         def set_filter(key: str):
             filter_state["type"] = key
-            update_filter_styles(); refresh()
+            if type_filter.value != key:
+                type_filter.value = key
+            refresh()
+
+        def on_type_filter_change(_=None):
+            filter_state["type"] = type_filter.value or "all"
+            refresh()
+
+        type_filter.on_change = on_type_filter_change
 
         def refresh(_=None):
             vouchers = self.ctx.payments.list_vouchers()
@@ -171,14 +166,9 @@ class FinanceCenter:
                         action_label="سند قبض جديد",
                         on_action=lambda _: self.show_voucher_dialog(None, "receipt"),
                     ))
-            update_filter_styles(); self.page.update()
+            self.page.update()
 
         search.on_change = refresh
-        filters = ft.Row([
-            filter_box("all", "الكل", ft.Icons.APPS_ROUNDED),
-            filter_box("receipt", "قبض", ft.Icons.ADD_CARD),
-            filter_box("payment", "دفع", ft.Icons.PAYMENTS_OUTLINED),
-        ], wrap=True, spacing=6)
 
         # Floating "new voucher" action: one FAB that expands into the three
         # voucher types (قبض / دفع / مصروف) instead of a three-button row
@@ -275,7 +265,7 @@ class FinanceCenter:
                 [
                     self._section_nav("vouchers"),
                     search,
-                    ft.Column([ft.Text("نوع السند", size=10, color=Colors.TEXT_SECONDARY), filters], spacing=4),
+                    type_filter,
                 ],
                 spacing=10,
             ),

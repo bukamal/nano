@@ -2057,33 +2057,112 @@ class ItemsCenter:
             on_click=toggle_stats, ink=True, border_radius=8,
         )
 
-        scroll_body = ft.Column([stats_header, stats_body, rows], spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
-
-        # Sticky footer: the one action used constantly (مادة جديدة) stays
-        # one tap away regardless of scroll position; the other three
-        # (التصنيفات/الباركود/تعديل جماعي) are one tap behind "المزيد"
-        # instead of permanently occupying screen space above the search box.
-        bottom_bar = ft.Container(
-            ft.Row(
-                [
-                    ft.FilledButton("مادة جديدة", icon=ft.Icons.ADD, on_click=lambda _: open_item_editor(), expand=True),
-                    ft.OutlinedButton("المزيد", icon=ft.Icons.MORE_HORIZ, on_click=show_more_actions),
-                ],
-                spacing=10,
-            ),
-            padding=ft.padding.only(left=18, right=18, top=10, bottom=10),
-            bgcolor=Colors.WHITE,
-            border=ft.border.only(top=ft.BorderSide(1, Colors.BORDER)),
-            shadow=ft.BoxShadow(blur_radius=16, color=Colors.BORDER, offset=ft.Offset(0, -4)),
+        scroll_body = ft.Column(
+            [
+                stats_header,
+                stats_body,
+                rows,
+                # Breathing room so the last card never sits directly under
+                # the floating action button.
+                ft.Container(height=84),
+            ],
+            spacing=8, scroll=ft.ScrollMode.AUTO, expand=True,
         )
 
-        content.content = ft.Column(
+        # Floating "مادة جديدة" action instead of a fixed bottom bar --
+        # frees the bottom of the screen for the list, and matches the FAB
+        # speed-dial pattern already used on the vouchers and invoices
+        # screens. "المزيد" (categories/barcodes/bulk edit) sits behind the
+        # same expand gesture as a secondary, neutral-colored mini-action.
+        fab_state = {"open": False}
+
+        def close_fab(_=None):
+            if fab_state["open"]:
+                fab_state["open"] = False
+                render_fab()
+                page.update()
+
+        def open_new_item(_=None):
+            close_fab()
+            open_item_editor()
+
+        def open_more_from_fab(_=None):
+            close_fab()
+            show_more_actions()
+
+        def toggle_fab(_):
+            fab_state["open"] = not fab_state["open"]
+            render_fab()
+            page.update()
+
+        def mini_action(label: str, icon, bg: str, on_click) -> ft.Row:
+            return ft.Row(
+                [
+                    ft.Container(
+                        ft.Text(label, size=12, color=Colors.WHITE, weight=ft.FontWeight.W_600),
+                        padding=ft.padding.symmetric(horizontal=10, vertical=6),
+                        bgcolor=Colors.TEXT_PRIMARY,
+                        border_radius=10,
+                    ),
+                    ft.Container(
+                        ft.Icon(icon, color=Colors.WHITE, size=20),
+                        width=46, height=46, border_radius=23,
+                        bgcolor=bg, alignment=ft.alignment.center,
+                        shadow=Shadow.MD, ink=True, on_click=on_click,
+                    ),
+                ],
+                spacing=8,
+                alignment=ft.MainAxisAlignment.END,
+                animate_opacity=160,
+            )
+
+        scrim = ft.Container(
+            expand=True,
+            bgcolor=ft.Colors.with_opacity(0.001, Colors.TEXT_PRIMARY),
+            visible=False,
+            on_click=close_fab,
+            left=0, right=0, top=0, bottom=0,
+        )
+
+        mini_more = mini_action("المزيد", ft.Icons.MORE_HORIZ, Colors.TEXT_MUTED_DARK, open_more_from_fab)
+        mini_new_item = mini_action("مادة جديدة", ft.Icons.INVENTORY_2_OUTLINED, Colors.PRIMARY, open_new_item)
+        main_fab = ft.Container(
+            ft.Icon(ft.Icons.ADD_ROUNDED, color=Colors.WHITE, size=26),
+            width=56, height=56, border_radius=28,
+            bgcolor=Colors.PRIMARY, alignment=ft.alignment.center,
+            shadow=Shadow.LG, ink=True, on_click=toggle_fab,
+            rotate=ft.Rotate(0), animate_rotation=160,
+        )
+        fab_column = ft.Column(
+            [mini_more, mini_new_item, main_fab],
+            spacing=12,
+            horizontal_alignment=ft.CrossAxisAlignment.END,
+        )
+        fab_container = ft.Container(fab_column, right=16, bottom=16, animate_opacity=160)
+
+        def render_fab() -> None:
+            is_open = fab_state["open"]
+            for mini in (mini_more, mini_new_item):
+                mini.visible = is_open
+                mini.opacity = 1 if is_open else 0
+            main_fab.rotate = ft.Rotate(0.125 * 6.283) if is_open else ft.Rotate(0)  # 45°
+            scrim.visible = is_open
+
+        render_fab()
+
+        content.content = ft.Stack(
             [
-                sticky_top,
-                ft.Container(scroll_body, padding=ft.padding.only(left=18, right=18, top=14, bottom=10), expand=True),
-                bottom_bar,
+                ft.Column(
+                    [
+                        sticky_top,
+                        ft.Container(scroll_body, padding=ft.padding.only(left=18, right=18, top=14, bottom=10), expand=True),
+                    ],
+                    spacing=0, expand=True,
+                ),
+                scrim,
+                fab_container,
             ],
-            spacing=0, expand=True,
+            expand=True,
         )
         refresh()
         if prefill_barcode:
