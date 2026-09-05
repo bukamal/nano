@@ -53,6 +53,10 @@ class DashboardCenter:
         on_open_sale: Callable[[], None],
         on_open_purchase: Callable[[], None],
         on_open_notifications: Callable[..., None] | None = None,
+        on_open_purchase_draft: Callable[..., None] | None = None,
+        on_open_receipt: Callable[..., None] | None = None,
+        on_open_admin_section: Callable[..., None] | None = None,
+        native_files=None,
     ):
         self.page = page
         self.ctx = ctx
@@ -62,6 +66,10 @@ class DashboardCenter:
         self.on_open_sale = on_open_sale
         self.on_open_purchase = on_open_purchase
         self.on_open_notifications = on_open_notifications
+        self.on_open_purchase_draft = on_open_purchase_draft
+        self.on_open_receipt = on_open_receipt
+        self.on_open_admin_section = on_open_admin_section
+        self.native_files = native_files
         # Which period tab is selected for the "period performance" section
         # and the best/worst-seller lists. Persists across re-renders of
         # this same dashboard instance (e.g. after navigating away and back)

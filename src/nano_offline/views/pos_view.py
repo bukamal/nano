@@ -69,6 +69,7 @@ class POSCenter:
         self.cart: dict[int, dict] = {}
         self.cart_order: list[int] = []  # insertion order, for undo + display
         self.held: list[dict] = []  # [{"label": str, "cart": dict, "order": list, "customer_id": int|None}]
+        self.pos_mode = "flow"  # flow = minimal cashier; full = all tools
         self.customer_id: int | None = None
         self.received_digits: str = ""
         self.auto_print: bool = False
@@ -335,6 +336,7 @@ class POSCenter:
         # control can't be mounted in two places (bar + sheet) at once.
         sheet_total_text = ft.Text("0.00", size=22, weight=ft.FontWeight.BOLD, color=Colors.PRIMARY_DARK)
         count_text = ft.Text("0 بند", size=12, color=Colors.TEXT_SECONDARY)
+        bottom_count_text = ft.Text("0 بند", size=11, color=Colors.TEXT_FAINT)
         held_row = ft.Row(spacing=6, scroll=ft.ScrollMode.AUTO, wrap=False, visible=False)
 
         customer_dd = SearchSelect(
@@ -445,6 +447,7 @@ class POSCenter:
             total_text.value = self.money(total)
             sheet_total_text.value = self.money(total)
             count_text.value = f"{len(self.cart_order)} بند" if self.cart_order else "0 بند"
+            bottom_count_text.value = count_text.value
             self.received_digits = ""
             received_display.value = self.money(total)
             _apply_change_text()
@@ -701,29 +704,120 @@ class POSCenter:
             if not self.cart_order:
                 self.notify("السلة فارغة")
                 return
+            # Reset received to exact total for a one-tap confirm path
+            self.received_digits = ""
+            _sync_received_display()
+            render_quick_cash()
+            step = {"n": 1}
+
+            step_label = ft.Text("1 · المبلغ", size=13, weight=ft.FontWeight.W_600, color=Colors.PRIMARY)
+            body = ft.Column(spacing=10, tight=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+
+            def _step_chip(n: int, title: str) -> ft.Container:
+                active = step["n"] == n
+                return ft.Container(
+                    ft.Text(title, size=11, weight=ft.FontWeight.BOLD if active else ft.FontWeight.W_500,
+                            color=Colors.WHITE if active else Colors.TEXT_MUTED),
+                    padding=ft.padding.symmetric(horizontal=12, vertical=7),
+                    bgcolor=Colors.PRIMARY if active else Colors.BACKGROUND_ALT,
+                    border_radius=16,
+                )
+
+            steps_row = ft.Row(spacing=6, alignment=ft.MainAxisAlignment.CENTER)
+
+            def render_steps_row():
+                steps_row.controls = [
+                    _step_chip(1, "1 المبلغ"),
+                    _step_chip(2, "2 العميل"),
+                    _step_chip(3, "3 تأكيد"),
+                ]
+
+            def go_step(n: int):
+                step["n"] = n
+                render_steps_row()
+                body.controls.clear()
+                if n == 1:
+                    step_label.value = "المبلغ المستلم"
+                    body.controls.extend([
+                        ft.Text(self.money(total_amount()), size=28, weight=ft.FontWeight.BOLD, color=Colors.PRIMARY_DARK),
+                        ft.Text("الإجمالي المطلوب", size=11, color=Colors.TEXT_SECONDARY),
+                        ft.Container(height=4),
+                        received_display,
+                        change_text,
+                        quick_cash_row,
+                        numpad,
+                        ft.Row(
+                            [
+                                ft.OutlinedButton("إلغاء", on_click=lambda _: self.page.close(payment_sheet), expand=True),
+                                ft.FilledButton("التالي", icon=ft.Icons.ARROW_BACK if self.page.rtl else ft.Icons.ARROW_FORWARD, on_click=lambda _: go_step(2), expand=True),
+                            ],
+                            spacing=10,
+                        ),
+                    ])
+                elif n == 2:
+                    step_label.value = "العميل (اختياري)"
+                    body.controls.extend([
+                        ft.Text("اتركه فارغًا للبيع النقدي السريع", size=12, color=Colors.TEXT_SECONDARY),
+                        customer_dd,
+                        auto_print_switch,
+                        ft.Row(
+                            [
+                                ft.OutlinedButton("رجوع", on_click=lambda _: go_step(1), expand=True),
+                                ft.FilledButton("التالي", icon=ft.Icons.ARROW_BACK if self.page.rtl else ft.Icons.ARROW_FORWARD, on_click=lambda _: go_step(3), expand=True),
+                            ],
+                            spacing=10,
+                        ),
+                    ])
+                else:
+                    step_label.value = "تأكيد البيع"
+                    body.controls.extend([
+                        ft.Container(
+                            ft.Column(
+                                [
+                                    ft.Text("الإجمالي", size=12, color=Colors.TEXT_SECONDARY),
+                                    sheet_total_text,
+                                    ft.Text("المستلم", size=12, color=Colors.TEXT_SECONDARY),
+                                    ft.Text(self.money(received_amount()), size=20, weight=ft.FontWeight.BOLD),
+                                    change_text,
+                                ],
+                                spacing=4,
+                                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            padding=16,
+                            bgcolor=Colors.PRIMARY_BG,
+                            border_radius=16,
+                        ),
+                        ft.Row(
+                            [
+                                ft.OutlinedButton("رجوع", on_click=lambda _: go_step(2), expand=True),
+                                hero_button("تأكيد البيع", icon=ft.Icons.POINT_OF_SALE_OUTLINED, on_click=confirm_payment),
+                            ],
+                            spacing=10,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                    ])
+                try:
+                    payment_sheet.content.update()
+                except Exception:
+                    self.page.update()
+
+            render_steps_row()
+            go_step(1)
             payment_sheet.content = ft.Container(
                 ft.Column(
                     [
                         ft.Container(width=44, height=5, bgcolor=Colors.BORDER_STRONG, border_radius=10, alignment=ft.alignment.center),
                         ft.Text("إتمام الدفع", size=18, weight=ft.FontWeight.BOLD),
-                        customer_dd,
-                        ft.Row(
-                            [
-                                ft.Column([ft.Text("الإجمالي", size=11, color=Colors.TEXT_SECONDARY), sheet_total_text], spacing=2),
-                                ft.Column([ft.Text("المستلم", size=11, color=Colors.TEXT_SECONDARY), received_display], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.END, expand=True),
-                            ],
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        ),
-                        change_text,
-                        quick_cash_row,
-                        numpad,
-                        auto_print_switch,
-                        hero_button("بيع", icon=ft.Icons.POINT_OF_SALE_OUTLINED, on_click=confirm_payment),
+                        steps_row,
+                        step_label,
+                        body,
                     ],
-                    spacing=12, horizontal_alignment=ft.CrossAxisAlignment.CENTER, tight=True,
+                    spacing=12,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    tight=True,
                     scroll=ft.ScrollMode.AUTO,
                 ),
-                padding=ft.padding.only(left=18, right=18, top=12, bottom=24),
+                padding=ft.padding.only(left=18, right=18, top=12, bottom=28),
                 bgcolor=Colors.WHITE,
                 border_radius=ft.border_radius.only(top_left=24, top_right=24),
             )
@@ -762,6 +856,8 @@ class POSCenter:
         # customer, received-amount numpad, quick cash and auto-print all
         # moved into the payment sheet (see open_payment_sheet above), so
         # this column stays short even with several lines in the cart.
+        hold_btn = ft.IconButton(icon=ft.Icons.PAUSE_CIRCLE_OUTLINED, tooltip="تعليق الفاتورة", on_click=hold_cart, icon_size=IconSize.HEADER)
+        undo_btn = ft.IconButton(icon=ft.Icons.UNDO, tooltip="تراجع عن آخر إضافة", on_click=undo_last, icon_size=IconSize.HEADER)
         cart_pane = ft.Container(
             ft.Column(
                 [
@@ -769,8 +865,8 @@ class POSCenter:
                         [
                             ft.Text("السلة", size=16, weight=ft.FontWeight.BOLD, expand=True),
                             count_text,
-                            ft.IconButton(icon=ft.Icons.PAUSE_CIRCLE_OUTLINED, tooltip="تعليق الفاتورة", on_click=hold_cart, icon_size=IconSize.HEADER),
-                            ft.IconButton(icon=ft.Icons.UNDO, tooltip="تراجع عن آخر إضافة", on_click=undo_last, icon_size=IconSize.HEADER),
+                            hold_btn,
+                            undo_btn,
                         ],
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
@@ -791,6 +887,50 @@ class POSCenter:
         # today going" glance, all in one dense row instead of three stacked
         # ones -- reclaims vertical space specifically for the mobile
         # fullscreen layout.
+        mode_btn = ft.Container(
+            ft.Text("تدفق", size=11, weight=ft.FontWeight.BOLD, color=Colors.WHITE),
+            padding=ft.padding.symmetric(horizontal=12, vertical=7),
+            bgcolor=Colors.PRIMARY,
+            border_radius=16,
+            ink=True,
+            tooltip="التبديل بين وضع التدفق والوضع الكامل",
+        )
+
+        def apply_pos_mode():
+            flow = self.pos_mode == "flow"
+            mode_btn.content.value = "تدفق" if flow else "كامل"
+            mode_btn.bgcolor = Colors.PRIMARY if flow else Colors.PURPLE
+            # In flow: hide name search, show barcode only; hide category chips row if exists
+            try:
+                search_field.visible = not flow
+            except Exception:
+                pass
+            try:
+                hold_btn.visible = not flow
+                undo_btn.visible = not flow
+            except Exception:
+                pass
+            try:
+                today_summary_text.visible = not flow
+            except Exception:
+                pass
+            try:
+                # category chips live in chips_row if defined
+                chips_row.visible = not flow
+            except Exception:
+                pass
+            cart_column.height = 160 if flow else CART_FULL_HEIGHT
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+        def toggle_pos_mode(_=None):
+            self.pos_mode = "full" if self.pos_mode == "flow" else "flow"
+            apply_pos_mode()
+
+        mode_btn.on_click = toggle_pos_mode
+
         pos_header = ft.Container(
             ft.Row(
                 [
@@ -799,6 +939,7 @@ class POSCenter:
                         [ft.Text("نقطة البيع", size=15, weight=ft.FontWeight.BOLD), today_summary_text],
                         spacing=0, expand=True,
                     ),
+                    mode_btn,
                 ],
                 vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=6,
             ),
@@ -814,15 +955,23 @@ class POSCenter:
         bottom_pay_bar = ft.Container(
             ft.Row(
                 [
-                    ft.Column([ft.Text("الإجمالي", size=11, color=Colors.TEXT_SECONDARY), total_text], spacing=1),
-                    checkout_btn,
+                    ft.Column(
+                        [
+                            ft.Text("الإجمالي", size=11, color=Colors.TEXT_SECONDARY),
+                            total_text,
+                            bottom_count_text,
+                        ],
+                        spacing=1,
+                    ),
+                    ft.Container(checkout_btn, expand=True, padding=ft.padding.only(left=12)),
                 ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            padding=ft.padding.only(left=18, right=18, top=10, bottom=10),
+            padding=ft.padding.only(left=16, right=16, top=12, bottom=14),
             bgcolor=Colors.WHITE,
             border=ft.border.only(top=ft.BorderSide(1, Colors.BORDER)),
-            shadow=ft.BoxShadow(blur_radius=16, color=Colors.BORDER, offset=ft.Offset(0, -4)),
+            shadow=Shadow.MD,
         )
         checkout_btn.width = 160
 
@@ -884,6 +1033,7 @@ class POSCenter:
             spacing=0,
             expand=True,
         )
+        apply_pos_mode()
         self.page.update()
 
         # expose closures needed by helper methods below
