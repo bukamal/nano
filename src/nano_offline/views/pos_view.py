@@ -194,20 +194,28 @@ class POSCenter:
             prefix_icon=ft.Icons.QR_CODE_2,
             dense=True,
             expand=True,
+            # keyboard_type=NONE keeps this field focusable -- still
+            # needed for the hardware/USB "wedge" scanner to type into
+            # and for Enter to trigger barcode_submit() -- without ever
+            # raising the on-screen keyboard, since typing here by hand
+            # is never the point of this field.
+            keyboard_type=ft.KeyboardType.NONE,
         )
 
         async def _focus_barcode_after_mount() -> None:
             # NOT autofocus=True above: requesting focus that early races
             # Flutter's text-input channel attaching, so the field reports
-            # hasFocus=True without ever actually opening the on-screen
-            # keyboard -- and because it already "has focus" as far as
-            # Flutter is concerned, a real tap on it afterwards doesn't
-            # trigger a focus change either, so the keyboard stays closed
+            # hasFocus=True without the channel actually being attached --
+            # and because it already "has focus" as far as Flutter is
+            # concerned, a real tap on it afterwards doesn't trigger a
+            # focus change either, so it's left in a half-focused state
             # until the user taps a different field first. A short yield
             # after the view has finished mounting lets the channel attach,
-            # so the same focus() call actually raises the keyboard, and
-            # still gives the hardware/USB "wedge" scanner a focused field
-            # to type into without the user needing to tap first.
+            # so the same focus() call actually takes, giving the
+            # hardware/USB "wedge" scanner a genuinely focused field to
+            # type into (and Enter to submit) without the user needing to
+            # tap first -- keyboard_type=NONE on the field itself is what
+            # keeps this from ever popping the on-screen keyboard.
             await asyncio.sleep(0.2)
             barcode_field.focus()
             self.page.update()

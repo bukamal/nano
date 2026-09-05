@@ -307,8 +307,21 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         if selected_key["value"] != "dashboard":
             navigate("dashboard")
             return
-        page.window.prevent_close = False
-        page.window.close()
+        # `page.window.close()` (the previous call here) re-enters the
+        # same prevent_close-gated close intent this handler exists to
+        # intercept in the first place. On desktop that's fine -- with
+        # prevent_close now False it lets the real OS window close --
+        # but on Android there is no actual platform "window" behind an
+        # Activity, so close() quietly does nothing there. The visible
+        # symptom is exactly what was reported: back always lands you
+        # on the dashboard and a second press just... doesn't exit.
+        # os._exit() forcibly kills this process instead, which is what
+        # "exit the app" has to mean on Android, and still exits desktop
+        # builds the same way (there's no further UI to unwind at this
+        # point, so a hard exit is fine).
+        import os
+
+        os._exit(0)
 
     page.window.on_event = handle_window_event
 
