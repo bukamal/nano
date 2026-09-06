@@ -659,6 +659,7 @@ class FinanceCenter:
                             ft.Row([
                                 ft.Text(exp["description"], size=13, weight=ft.FontWeight.BOLD, expand=True),
                                 status_pill(exp.get("category_name") or "بلا تصنيف", Colors.PURPLE, Colors.PURPLE_BG),
+                                (ft.Icon(ft.Icons.IMAGE_OUTLINED, size=15, color=Colors.PRIMARY, tooltip="صورة إيصال") if exp.get("has_receipt") else ft.Container()),
                             ]),
                             ft.Text(exp.get("expense_date") or "—", size=10, color=Colors.TEXT_SECONDARY),
                         ], spacing=2, expand=True),
@@ -666,7 +667,7 @@ class FinanceCenter:
                         ft.PopupMenuButton(items=[
                             ft.PopupMenuItem(text="تعديل", icon=ft.Icons.EDIT_OUTLINED, on_click=lambda _, eid=int(exp["id"]): self.show_expense_dialog(eid)),
                             ft.PopupMenuItem(text="حذف", icon=ft.Icons.DELETE_OUTLINE, on_click=lambda _, eid=int(exp["id"]): self.confirm_delete_expense(eid)),
-                        ]),
+                        ] + ([ft.PopupMenuItem(text="عرض الإيصال", icon=ft.Icons.IMAGE_OUTLINED, on_click=lambda _, eid=int(exp["id"]): self.show_receipt_photo(eid))] if exp.get("has_receipt") else [])),
                     ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
                     padding=12, bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=16, shadow=Shadow.SM,
                 ))
@@ -736,6 +737,62 @@ class FinanceCenter:
 
     def show_expense_dialog(self, expense_id: int | None = None) -> None:
         existing = self.ctx.expenses.get_expense(expense_id) if expense_id else None
+        # PHASE10 wave2 (B4): optional receipt photo captured with the system
+        # camera (see native_files.capture_receipt). Bytes stay in memory here
+        # and are written straight into the expense row's BLOB column on save
+        # -- no temp file on the device, and it travels with every backup.
+        import base64 as _b64
+
+        _stored = self.ctx.expenses.get_expense_receipt(expense_id) if expense_id else None
+        receipt_photo: dict = {
+            "bytes": (_stored["image"] if _stored else None),
+            "name": (_stored.get("name") if _stored else None),
+        }
+
+        def _photo_preview_controls() -> list:
+            if receipt_photo["bytes"]:
+                return [
+                    ft.Container(
+                        ft.Image(src_base64=_b64.b64encode(receipt_photo["bytes"]).decode("ascii"), height=130, fit=ft.ImageFit.COVER),
+                        border_radius=12, clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                    ),
+                    ft.Text(receipt_photo["name"] or "receipt.jpg", size=11, color=Colors.TEXT_SECONDARY),
+                ]
+            return [ft.Text("لا توجد صورة إيصال — يمكنك التقاطها من زر التصوير", size=11, color=Colors.TEXT_FAINT)]
+
+        photo_area = ft.Column(_photo_preview_controls(), spacing=6, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+
+        async def _capture_receipt(_=None):
+            if self.native_files is None:
+                self.notify("صورة الإيصال غير مدعومة في هذا البناء")
+                return
+            try:
+                shot = await self.native_files.capture_receipt(filename="receipt.jpg")
+            except RuntimeError as exc:
+                self.notify(str(exc), kind="error")
+                return
+            if not shot:
+                return  # المستخدم تراجع عن التصوير — ليس خطأ
+            receipt_photo["bytes"] = _b64.b64decode(shot["bytes"])
+            receipt_photo["name"] = shot.get("name") or "receipt.jpg"
+            photo_area.controls = _photo_preview_controls()
+            self.page.update()
+            self.notify("تم التقاط صورة الإيصال", kind="success")
+
+        def _remove_receipt(_=None):
+            receipt_photo["bytes"] = None
+            receipt_photo["name"] = None
+            photo_area.controls = _photo_preview_controls()
+            self.page.update()
+
+        capture_button = ft.OutlinedButton(
+            "التقاط صورة الإيصال", icon=ft.Icons.PHOTO_CAMERA_OUTLINED,
+            on_click=lambda _: self.page.run_task(_capture_receipt),
+        )
+        remove_button = ft.TextButton(
+            "إزالة الصورة", icon=ft.Icons.DELETE_OUTLINE, on_click=_remove_receipt,
+        )
+        photo_buttons = [capture_button] + ([remove_button] if receipt_photo["bytes"] else [])
         categories = self.ctx.expenses.list_categories()
         category = SearchSelect(
             label="التصنيف",
@@ -768,6 +825,8 @@ class FinanceCenter:
                     "category_id": category_id,
                     "reference": reference.value,
                     "notes": notes.value,
+                    "receipt_image": receipt_photo["bytes"],
+                    "receipt_name": receipt_photo["name"],
                 }
                 if expense_id:
                     self.ctx.expenses.update_expense(expense_id, **kwargs)
@@ -783,10 +842,30 @@ class FinanceCenter:
         render_form_sheet(
             self.page, sheet,
             title="تعديل مصروف" if expense_id else "مصروف جديد",
-            fields=[category, new_category, description, ft.Row([amount, edate], wrap=True), reference, notes],
+            fields=[category, new_category, description, ft.Row([amount, edate], wrap=True), reference, notes,
+                    ft.Column([photo_area, ft.Row(photo_buttons)], spacing=8, horizontal_alignment=ft.CrossAxisAlignment.CENTER)],
             on_close=close, on_save=save,
         )
         self.page.open(sheet)
+
+    def show_receipt_photo(self, expense_id: int) -> None:
+        receipt = self.ctx.expenses.get_expense_receipt(expense_id)
+        if not receipt or not receipt.get("image"):
+            self.notify("لا توجد صورة إيصال لهذا المصروف")
+            return
+        import base64 as _b64
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text(receipt.get("name") or "صورة الإيصال", text_align=ft.TextAlign.CENTER),
+            content=ft.Container(
+                ft.Image(src_base64=_b64.b64encode(receipt["image"]).decode("ascii"), fit=ft.ImageFit.CONTAIN),
+                border_radius=12, clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+            ),
+            actions=[ft.FilledButton("إغلاق", on_click=lambda _: self.page.close(dialog))],
+            actions_alignment=ft.MainAxisAlignment.CENTER,
+        )
+        self.page.open(dialog)
 
     def confirm_delete_expense(self, expense_id: int) -> None:
         dialog = ft.AlertDialog(modal=True)

@@ -5,7 +5,8 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 13
+# PHASE10 wave2 (B4): expense receipt photo columns (receipt_image/receipt_name) live in the expenses table schema + migration.
+SCHEMA_VERSION = 14
 
 SCHEMA_SQL = r"""
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -232,7 +233,9 @@ CREATE TABLE IF NOT EXISTS expenses (
     reference TEXT,
     notes TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    receipt_image BLOB,  -- PHASE10 wave2 (B4): expense receipt photo (in-row, travels with backups)
+    receipt_name TEXT
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -588,6 +591,14 @@ class Database:
             if not self._has_column(conn, "expenses", "updated_at"):
                 conn.execute("ALTER TABLE expenses ADD COLUMN updated_at TEXT")
                 conn.execute("UPDATE expenses SET updated_at=created_at WHERE updated_at IS NULL")
+            # PHASE10 wave2 (B4): receipt photo captured with the system camera; stored
+            # as a downscaled JPEG BLOB directly in the row (so it travels with the
+            # existing encrypted/plain backups, which bundle this database) plus a
+            # human-readable original filename for the UI.
+            if not self._has_column(conn, "expenses", "receipt_image"):
+                conn.execute("ALTER TABLE expenses ADD COLUMN receipt_image BLOB")
+            if not self._has_column(conn, "expenses", "receipt_name"):
+                conn.execute("ALTER TABLE expenses ADD COLUMN receipt_name TEXT")
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
         """Non-destructive migrations from phases 1 and 2."""

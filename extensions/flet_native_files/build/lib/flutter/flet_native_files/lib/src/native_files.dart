@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
@@ -507,6 +508,33 @@ class _FletNativeFilesControlState extends State<FletNativeFilesControl> {
         case 'create_pdf':
           final file = await createPdfFile(args['html'] ?? '', args['filename'] ?? 'nano-report.pdf');
           return file.path;
+
+        case 'capture_receipt':
+          // PHASE10 wave2 (B4): photograph an expense receipt with the
+          // system camera app via image_picker, capped at 1600px / 85%
+          // quality so the base64 payload stays reasonable for the SQLite
+          // BLOB column, and hand the bytes straight to Python -- no temp
+          // file left behind on the device.
+          if (!Platform.isAndroid && !Platform.isIOS) {
+            return 'error:التقاط الكاميرا غير مدعوم على هذا النظام';
+          }
+          final receiptShot = await ImagePicker().pickImage(
+            source: ImageSource.camera,
+            maxWidth: 1600,
+            imageQuality: 85,
+          );
+          if (receiptShot == null) return 'cancelled';
+          final shotBytes = await receiptShot.readAsBytes();
+          final shotName = args['filename']?.isNotEmpty == true
+              ? (args['filename'] ?? 'receipt.jpg')
+              : receiptShot.name;
+          return jsonEncode({
+            'name': shotName,
+            'extension': shotName.contains('.')
+                ? shotName.split('.').last.toLowerCase()
+                : 'jpg',
+            'bytes': base64Encode(shotBytes),
+          });
 
         case 'scan_barcode':
           if (!mounted) return 'error:الواجهة غير جاهزة';

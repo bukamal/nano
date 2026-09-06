@@ -101,6 +101,33 @@ class NativeFiles(Control):
             raise RuntimeError("تعذر إنشاء ملف PDF")
         return path
 
+    async def capture_receipt(self, *, filename: str = "receipt.jpg") -> dict | None:
+        """Open the system camera to photograph an expense receipt (PHASE10 wave2, B4).
+
+        Returns a dict with ``bytes`` (base64-encoded downscaled JPEG from
+        the native camera flow, capped around 1600px by the picker) plus
+        ``name``/``extension``, or None if the user backs out. Raises
+        RuntimeError on native-side failure (including this build having no
+        camera flow). The bytes travel base64 inside the method result so
+        the backend can store the shot straight into the expense row's BLOB
+        column with no temp file to clean up.
+        """
+        raw = await self.invoke_method_async(
+            "capture_receipt",
+            {"filename": str(filename)},
+            wait_for_result=True,
+            wait_timeout=_INTERACTIVE_TIMEOUT,
+        )
+        if not raw or raw == "cancelled":
+            return None
+        if str(raw).startswith("error:"):
+            raise RuntimeError(str(raw)[6:])
+        try:
+            value = json.loads(str(raw))
+        except Exception as exc:
+            raise RuntimeError("تعذر قراءة صورة الإيصال") from exc
+        return dict(value) if value else None
+
     async def scan_barcode(self) -> str | None:
         """Open a full-screen camera scanner and return the decoded code.
 

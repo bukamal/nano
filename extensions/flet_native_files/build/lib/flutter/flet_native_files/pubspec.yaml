@@ -18,6 +18,10 @@ dependencies:
   printing: ^5.14.2
   pdf: ^3.11.3
   mobile_scanner: 6.0.10
+  # PHASE10 wave2 (B4): system-camera photography of expense receipts
+  # (see capture_receipt in native_files.py) -- the picker returns the
+  # downscaled JPEG bytes directly to the Dart bridge, no temp files.
+  image_picker: ^1.2.0
   # Added for the closed-app smart-notification check (PHASE9 follow-up):
   # workmanager runs the periodic background isolate, flutter_local_notifications
   # posts the actual system notification, and sqlite3/sqlite3_flutter_libs let
