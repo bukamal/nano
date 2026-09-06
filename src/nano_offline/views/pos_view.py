@@ -26,6 +26,21 @@ from nano_offline.core import sound as sound_engine
 # stable — which it is, since list_categories() orders by name.
 CHIP_PALETTE = LazyPalette("PRIMARY", "PURPLE_LIGHT", "ORANGE", "WARNING_DARK", "SUCCESS_ALT")
 
+# Phase C: heuristic for "sold by weight" items -- there is no dedicated
+# flag on units/items for this, so a cart line is treated as weighted when
+# its base unit's name/abbreviation matches a common weight/volume unit.
+# Deliberately a plain set match (not substring) against the trimmed,
+# case-folded unit text, so an unrelated unit that merely contains one of
+# these letters (e.g. "غرفة") never false-matches.
+WEIGHT_UNIT_HINTS = {
+    "كغ", "كجم", "كغم", "كيلو", "كيلوغرام", "كيلوجرام",
+    "غ", "غرام", "جرام",
+    "طن",
+    "لتر", "مل",
+    "kg", "kgs", "g", "gram", "grams",
+    "l", "liter", "litre", "ml",
+}
+
 
 class POSCenter:
     """Fast, touch-first counter-sale screen.
@@ -76,6 +91,11 @@ class POSCenter:
         # Session-only "last added" recall -- most-recent-first, deduped,
         # capped short on purpose (a quick-recall strip, not a history log).
         self.recent_item_ids: list[int] = []
+        # Phase C: same idea for customers -- last few used *for a
+        # completed sale* in this session, offered as quick-pick chips
+        # under the customer field so a repeat customer's next sale
+        # doesn't need a full dropdown search.
+        self.recent_customer_ids: list[int] = []
         # Phase B: floating last-scan card + success overlay state
         self._last_scan_token: int = 0
         self._success_visible: bool = False
@@ -137,6 +157,7 @@ class POSCenter:
         self.item_map = {int(i["id"]): i for i in items}
         categories = self.ctx.definitions.list_categories()
         customers = self.ctx.customers.list()
+        customer_map = {int(c["id"]): c for c in customers}
 
         state = {"query": "", "category_id": None}
 
@@ -461,7 +482,13 @@ class POSCenter:
                 held_row.controls = [
                     ft.Container(
                         ft.Row(
-                            [ft.Icon(ft.Icons.PAUSE_CIRCLE_OUTLINE, size=15, color=Colors.WARNING_DARK), ft.Text(h["label"], size=11, weight=ft.FontWeight.W_600)],
+                            [
+                                ft.Icon(
+                                    ft.Icons.PERSON_OUTLINE if h.get("has_customer") else ft.Icons.PAUSE_CIRCLE_OUTLINE,
+                                    size=15, color=Colors.WARNING_DARK,
+                                ),
+                                ft.Text(h["label"], size=11, weight=ft.FontWeight.W_600),
+                            ],
                             spacing=4, tight=True,
                         ),
                         padding=ft.padding.symmetric(horizontal=10, vertical=6),
@@ -587,15 +614,25 @@ class POSCenter:
                 return
             n_items = len(self.cart_order)
             total = total_amount()
-            first_name = ""
+            # Prefer the customer's name over the first item's name when one
+            # is attached -- "أحمد · 3 بنود · 12:40" tells the cashier *who*
+            # this ticket belongs to at a glance, which matters far more for
+            # picking the right one back up than which item happened to be
+            # scanned first.
+            display_name = ""
+            has_customer = bool(self.customer_id and customer_map.get(self.customer_id))
             try:
-                first_name = str(self.cart[self.cart_order[0]]["item"].get("name") or "")[:18]
+                if has_customer:
+                    display_name = str(customer_map[self.customer_id]["name"])[:18]
+                else:
+                    display_name = str(self.cart[self.cart_order[0]]["item"].get("name") or "")[:18]
             except Exception:
                 pass
-            label = f"{first_name or 'سلة'} · {n_items} بند · {self.money(total)} · {time.strftime('%H:%M')}"
+            label = f"{display_name or 'سلة'} · {n_items} بند · {self.money(total)} · {time.strftime('%H:%M')}"
             self.held.append(
                 {
                     "label": label,
+                    "has_customer": has_customer,
                     "cart": copy.deepcopy(self.cart),
                     "order": list(self.cart_order),
                     "customer_id": self.customer_id,
@@ -664,6 +701,7 @@ class POSCenter:
                     paid_amount=paid,
                 )
                 change_amt = max(0.0, received - total)
+                self._remember_recent_customer(self.customer_id)
                 if auto_print_switch.value and self.native_files is not None:
                     self.page.run_task(self._print_receipt, invoice_id)
                 # Keep cart data for the success screen; clear after user taps «بيع جديد»
@@ -722,6 +760,45 @@ class POSCenter:
             step_label = ft.Text("1 · المبلغ", size=13, weight=ft.FontWeight.W_600, color=Colors.PRIMARY)
             body = ft.Column(spacing=10, tight=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
 
+            def pick_recent_customer(cid: int):
+                customer_dd.value = str(cid)
+                customer_changed()
+                go_step(2)
+
+            def recent_customers_row() -> ft.Control:
+                # Phase C: "last 3 customers" quick-pick under the customer
+                # field -- a repeat customer's next sale shouldn't need a
+                # full dropdown search every time. Silently hides itself
+                # once nothing recent qualifies (session just started, or
+                # every recent id has since been deleted).
+                chips = []
+                for cid in self.recent_customer_ids[:3]:
+                    customer = customer_map.get(cid)
+                    if customer is None:
+                        continue
+                    active = self.customer_id == cid
+                    chips.append(
+                        ft.Container(
+                            ft.Text(str(customer["name"])[:16], size=11, weight=ft.FontWeight.W_600,
+                                     color=Colors.WHITE if active else Colors.PRIMARY_DARK),
+                            padding=ft.padding.symmetric(horizontal=12, vertical=7),
+                            bgcolor=Colors.PRIMARY if active else Colors.WHITE,
+                            border=ft.border.all(1, Colors.PRIMARY if active else Colors.BORDER),
+                            border_radius=18,
+                            ink=True,
+                            on_click=lambda _, c=cid: pick_recent_customer(c),
+                        )
+                    )
+                if not chips:
+                    return ft.Container(height=0)
+                return ft.Column(
+                    [
+                        ft.Text("آخر العملاء", size=10, color=Colors.TEXT_FAINT),
+                        ft.Row(chips, spacing=6, scroll=ft.ScrollMode.AUTO, wrap=False),
+                    ],
+                    spacing=4,
+                )
+
             def _step_chip(n: int, title: str) -> ft.Container:
                 active = step["n"] == n
                 return ft.Container(
@@ -768,6 +845,7 @@ class POSCenter:
                     body.controls.extend([
                         ft.Text("اتركه فارغًا للبيع النقدي السريع", size=12, color=Colors.TEXT_SECONDARY),
                         customer_dd,
+                        recent_customers_row(),
                         auto_print_switch,
                         ft.Row(
                             [
@@ -1147,6 +1225,7 @@ class POSCenter:
         item = row["item"]
         item_id = int(item["id"])
         is_service = item["item_type"] == "خدمة"
+        is_weighted = (not is_service) and self._is_weighted_item(item)
 
         def change_qty(delta: float):
             new_qty = row["qty"] + delta
@@ -1157,6 +1236,22 @@ class POSCenter:
             else:
                 row["qty"] = new_qty
             on_change()
+
+        def set_qty(value: float):
+            row["qty"] = value
+            on_change()
+
+        def qty_shortcut(label: str, value: float) -> ft.Container:
+            active = float(row["qty"] or 0) == value
+            return ft.Container(
+                ft.Text(label, size=11, weight=ft.FontWeight.BOLD, color=Colors.WHITE if active else Colors.PRIMARY_DARK),
+                padding=ft.padding.symmetric(horizontal=10, vertical=4),
+                bgcolor=Colors.PRIMARY if active else Colors.BACKGROUND_ALT,
+                border=ft.border.all(1, Colors.PRIMARY if active else Colors.BORDER),
+                border_radius=12,
+                ink=True,
+                on_click=lambda _, v=value: set_qty(v),
+            )
 
         def remove(_=None):
             self.cart.pop(item_id, None)
@@ -1234,6 +1329,16 @@ class POSCenter:
                         vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=2,
                     ),
                     *([warning_line] if warning_line else []),
+                    # Phase C: for weighted/volume items, quick-set the
+                    # actual weight instead of nudging by whole units with
+                    # the +/- stepper (a scale reading like 0.5kg or 5kg
+                    # isn't reachable one tap at a time). Sets the quantity
+                    # outright rather than adding to it -- these are
+                    # absolute reads, not increments.
+                    *([ft.Row(
+                        [qty_shortcut("½", 0.5), qty_shortcut("1", 1), qty_shortcut("5", 5), qty_shortcut("10", 10)],
+                        spacing=6,
+                    )] if is_weighted else []),
                 ],
                 spacing=2,
             ),
@@ -1432,6 +1537,34 @@ class POSCenter:
         render = getattr(self, "_render_recent", None)
         if render is not None:
             render()
+
+    def _remember_recent_customer(self, customer_id: int | None) -> None:
+        """Push ``customer_id`` to the front of the session recall strip.
+
+        Called once a sale actually completes with a customer attached --
+        not on every dropdown change -- so the suggestion reflects who was
+        actually sold to, not just who was briefly selected then cleared.
+        """
+        if not customer_id:
+            return
+        customer_id = int(customer_id)
+        if customer_id in self.recent_customer_ids:
+            self.recent_customer_ids.remove(customer_id)
+        self.recent_customer_ids.insert(0, customer_id)
+        del self.recent_customer_ids[3:]  # only the last 3, per design
+
+    @staticmethod
+    def _is_weighted_item(item: dict) -> bool:
+        """True when ``item``'s base unit looks like a weight/volume unit.
+
+        See ``WEIGHT_UNIT_HINTS`` above for why this is a heuristic rather
+        than a stored flag.
+        """
+        for key in ("unit_abbreviation", "unit_name"):
+            text = str(item.get(key) or "").strip().casefold()
+            if text and text in WEIGHT_UNIT_HINTS:
+                return True
+        return False
 
     def _add_by_barcode(self, code: str) -> None:
         found = self.ctx.items.find_by_barcode(code)
