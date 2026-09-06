@@ -89,13 +89,18 @@ allprojects {
 EOF
 echo "Installed Gradle init script for core library desugaring at ${GRADLE_INIT_DIR}/nano-core-library-desugaring.init.gradle.kts" >&2
 
-# FIX_0.9.1-CI: flet copies the extension into build/flutter-packages and
-# reuses it across retries. A stale file there (e.g. the pre-0.9.1
-# NanoGlanceWidget.kt that 0.9.1 deleted from source) survives the retry
-# loop and gets compiled against 0.9.1's Glance-free build.gradle, failing
-# :flet_native_files:compileReleaseKotlin with "Unresolved reference:
-# glance/compose" on every attempt. Wipe the staging dir so every build
-# starts from a fresh copy of the source tree.
+# FIX_0.9.1-CI (definitive): the pre-0.9.1 Glance widget file
+# NanoGlanceWidget.kt must NEVER be compiled against 0.9.1's Glance-free
+# build.gradle. If it still exists anywhere in the checkout -- in the
+# repo branch being built (the FIX_0.9.1 `git rm` must be committed AND
+# pushed for the source tree to be clean; CI run 92259598255 proved it
+# is still there) or in flet's staged copy under build/flutter-packages
+# -- Kotlin fails on every attempt with "Unresolved reference:
+# glance/compose/datastore" plus redeclaration of NanoWidgetDiagnostics
+# and conflicting mainActivityClass overloads against the new
+# NanoWidgetReceiver.kt. So delete the file wherever it appears, then
+# stage the extension fresh.
+find . -name "NanoGlanceWidget.kt" -type f -delete 2>/dev/null || true
 rm -rf build/flutter-packages 2>/dev/null || true
 
 MAX_ATTEMPTS=3
@@ -144,9 +149,10 @@ while true; do
   if [ -d build/flutter ]; then
     rm -rf build/flutter/.dart_tool build/flutter/pubspec.lock 2>/dev/null || true
   fi
-  # FIX_0.9.1-CI: also drop the stale extension staging copy (see the
-  # comment above) so a retry re-copies the current source tree instead
-  # of recompiling leftover files.
+  # FIX_0.9.1-CI: also drop any lingering Glance widget file and the
+  # stale extension staging copy (see the comment above) so a retry
+  # re-stages the source tree clean.
+  find . -name "NanoGlanceWidget.kt" -type f -delete 2>/dev/null || true
   rm -rf build/flutter-packages 2>/dev/null || true
   attempt=$((attempt + 1))
   sleep 5
