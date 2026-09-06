@@ -234,6 +234,35 @@ class PartyCenter:
             header_reserved, footer_reserved, gaps = 90, 60, 24
             body_area_height = max(180, total_sheet_h - header_reserved - footer_reserved - gaps)
 
+            def _detail_actions():
+                actions = [
+                    ft.TextButton("حذف", icon=ft.Icons.DELETE_OUTLINE, on_click=lambda _: confirm_delete(data, detail_sheet), expand=True),
+                    ft.OutlinedButton("تعديل", icon=ft.Icons.EDIT_OUTLINED, on_click=edit, expand=True),
+                ]
+                bal = abs(float(data.get("balance") or 0))
+                if title == "العملاء" and self.on_open_receipt and bal > 1e-9:
+                    def _receipt(_=None):
+                        close()
+                        self.on_open_receipt(
+                            customer_id=int(data["id"]),
+                            amount=max(0.0, float(data.get("balance") or 0)),
+                        )
+                    actions.append(
+                        ft.FilledButton("سند قبض", icon=ft.Icons.PAYMENTS_OUTLINED, on_click=_receipt, expand=True)
+                    )
+                elif title == "الموردون" and self.on_open_payment and bal > 1e-9:
+                    def _pay(_=None):
+                        close()
+                        self.on_open_payment(
+                            supplier_id=int(data["id"]),
+                            amount=max(0.0, float(data.get("balance") or 0)),
+                        )
+                    actions.append(
+                        ft.FilledButton("سند صرف", icon=ft.Icons.PAYMENTS_OUTLINED, on_click=_pay, expand=True)
+                    )
+                actions.append(ft.FilledButton("إغلاق", on_click=close, expand=True))
+                return actions
+
             detail_sheet.content = ft.Container(
                 ft.Column(
                     [
@@ -292,35 +321,6 @@ class PartyCenter:
                 border_radius=ft.border_radius.only(top_left=28, top_right=28),
                 shadow=Shadow.LG,
             )
-
-            def _detail_actions():
-                actions = [
-                    ft.TextButton("حذف", icon=ft.Icons.DELETE_OUTLINE, on_click=lambda _: confirm_delete(data, detail_sheet), expand=True),
-                    ft.OutlinedButton("تعديل", icon=ft.Icons.EDIT_OUTLINED, on_click=edit, expand=True),
-                ]
-                bal = abs(float(data.get("balance") or 0))
-                if title == "العملاء" and self.on_open_receipt and bal > 1e-9:
-                    def _receipt(_=None):
-                        close()
-                        self.on_open_receipt(
-                            customer_id=int(data["id"]),
-                            amount=max(0.0, float(data.get("balance") or 0)),
-                        )
-                    actions.append(
-                        ft.FilledButton("سند قبض", icon=ft.Icons.PAYMENTS_OUTLINED, on_click=_receipt, expand=True)
-                    )
-                elif title == "الموردون" and self.on_open_payment and bal > 1e-9:
-                    def _pay(_=None):
-                        close()
-                        self.on_open_payment(
-                            supplier_id=int(data["id"]),
-                            amount=max(0.0, float(data.get("balance") or 0)),
-                        )
-                    actions.append(
-                        ft.FilledButton("سند صرف", icon=ft.Icons.PAYMENTS_OUTLINED, on_click=_pay, expand=True)
-                    )
-                actions.append(ft.FilledButton("إغلاق", on_click=close, expand=True))
-                return actions
 
             page.open(detail_sheet)
 
