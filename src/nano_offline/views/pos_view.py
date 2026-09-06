@@ -1407,6 +1407,15 @@ class POSCenter:
             border=ft.border.all(1.5, Colors.SUCCESS),
             border_radius=16,
             shadow=Shadow.MD,
+            # Without an explicit width this Container has nothing to
+            # shrink-wrap to reliably once it's nested inside the
+            # alignment-based full-screen overlay wrapper (see
+            # last_scan_overlay in _build()) -- it was expanding to fill
+            # the entire screen instead of staying a small floating chip,
+            # dragging the icon and text far apart in the process. The
+            # sale-success card just below this one already sets an
+            # explicit width for the same reason; this mirrors that.
+            width=320,
         )
         overlay.visible = True
         try:
