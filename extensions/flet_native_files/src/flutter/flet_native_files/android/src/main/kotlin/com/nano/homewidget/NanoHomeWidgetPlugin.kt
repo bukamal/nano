@@ -13,18 +13,20 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * FIX_0.9.1: same channel contract as PHASE10 ("nano/home_widget" with
- * "push" and "diagnose", identical JSON), but the widget state now lives in
- * a single SharedPreferences key and rendering is done by
- * NanoWidgetReceiver (plain AppWidgetProvider) instead of Glance -- see
- * NanoWidgetReceiver.kt for why. Nothing on the Python or Dart side of the
- * bridge needed to change.
+ * FIX_0.9.2: extends the PHASE10 / 0.9.1 bridge with two new methods
+ * specifically to make backup-restore stop leaving a stale snapshot in the
+ * widget SharedPreferences:
  *
- * Both PHASE10 update paths still funnel through "push":
- *   1. Immediate -- native_files.py's push_home_widget() after a sale or
- *      voucher save while the app is open.
- *   2. Periodic fallback -- native_files.dart's _pushHomeWidgetSnapshot
- *      from the same WorkManager isolate PHASE9 already uses.
+ *   - "clear": wipe the widget's stored snapshot so a previous install's
+ *     or pre-restore data can never be shown against the restored DB.
+ *   - "refresh_now": force-update every placed widget instance right now,
+ *     independently of the next periodic pass.
+ *
+ * "push" is unchanged. "diagnose" still returns the same JSON shape (just
+ * with two extra fields, last_clear_at / last_refresh_now_at).
+ *
+ * No Python or Dart surface area moved; admin_view.py reaches these via
+ * native_files.clear_home_widget / native_files.force_refresh_home_widget.
  */
 class NanoHomeWidgetPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private lateinit var channel: MethodChannel
@@ -39,6 +41,8 @@ class NanoHomeWidgetPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "push" -> handlePush(call, result)
+            "clear" -> handleClear(result)
+            "refresh_now" -> handleRefreshNow(result)
             "diagnose" -> handleDiagnose(result)
             else -> result.notImplemented()
         }
@@ -54,10 +58,6 @@ class NanoHomeWidgetPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 NanoWidgetDiagnostics.lastPushError = null
                 withContext(Dispatchers.Main) { result.success(null) }
             } catch (error: Exception) {
-                // Never surface a widget failure back into the Python
-                // sale/receipt flow that triggered the push (matches the
-                // push_home_widget() swallow-everything contract). It is
-                // still recorded for "diagnose" instead of vanishing.
                 NanoWidgetDiagnostics.lastPushOk = false
                 NanoWidgetDiagnostics.lastPushError = error.toString()
                 withContext(Dispatchers.Main) { result.success(null) }
@@ -67,10 +67,29 @@ class NanoHomeWidgetPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    /** Backs the admin widget diagnostics panel (admin_view.py), mirroring
-     *  diagnose_sound's contract: a plain JSON object, no swallowing on
-     *  this side -- callers that cannot reach the channel at all already
-     *  report that as their own diagnosis line on the Dart/Python side. */
+    private fun handleClear(result: MethodChannel.Result) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                NanoWidgetReceiver.clearSnapshot(context)
+                NanoWidgetReceiver.refreshAllNow(context)
+                withContext(Dispatchers.Main) { result.success(null) }
+            } catch (error: Exception) {
+                withContext(Dispatchers.Main) { result.success(null) }
+            }
+        }
+    }
+
+    private fun handleRefreshNow(result: MethodChannel.Result) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                NanoWidgetReceiver.refreshAllNow(context)
+                withContext(Dispatchers.Main) { result.success(null) }
+            } catch (error: Exception) {
+                withContext(Dispatchers.Main) { result.success(null) }
+            }
+        }
+    }
+
     private fun handleDiagnose(result: MethodChannel.Result) {
         CoroutineScope(Dispatchers.IO).launch {
             val widgetCount = try {
@@ -89,6 +108,8 @@ class NanoHomeWidgetPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 put("last_push_at", NanoWidgetDiagnostics.lastPushAt)
                 put("last_push_ok", NanoWidgetDiagnostics.lastPushOk)
                 put("last_push_error", NanoWidgetDiagnostics.lastPushError)
+                put("last_clear_at", NanoWidgetDiagnostics.lastClearAt)
+                put("last_refresh_now_at", NanoWidgetDiagnostics.lastRefreshNowAt)
             }
             withContext(Dispatchers.Main) { result.success(json.toString()) }
         }

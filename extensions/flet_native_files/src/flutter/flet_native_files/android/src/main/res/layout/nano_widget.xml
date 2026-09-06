@@ -1,9 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  FIX_0.9.1: home-screen widget layout, rendered by NanoWidgetReceiver via
-  plain RemoteViews (no Glance/Compose). Only framework-supported views and
-  a shape drawable background. Safe for RemoteViews. Renders RTL
-  automatically on Arabic locales (LinearLayout is direction-aware).
+  FIX_0.9.2: widget layout, rendered by NanoWidgetReceiver via plain
+  RemoteViews. Refreshed to match Nano's brand palette in theme.py:
+    #0F766E PRIMARY (deep teal)
+    #115E59 PRIMARY_DARK
+    #5EEAD4 accent / live dot
+    #F0FDFA / #C7E5E0 muted foreground on accent
+    #FFD9C2 alert text
+    #FFFFFF primary text
+  Only framework-supported views and a shape drawable background. Safe for
+  RemoteViews. Renders RTL automatically on Arabic locales (LinearLayout is
+  direction-aware).
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/nano_widget_root"
@@ -11,21 +18,44 @@
     android:layout_height="match_parent"
     android:background="@drawable/nano_widget_bg"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="14dp"
+    android:paddingBottom="14dp">
 
-    <TextView
-        android:id="@+id/nano_widget_title"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Nano | نانو"
-        android:textColor="#FFFFFF"
-        android:textSize="14sp"
-        android:textStyle="bold" />
-
+    <!-- Header row: brand title on the start, live status dot on the end. -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/nano_widget_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:letterSpacing="0.04"
+            android:text="Nano | نانو"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/nano_widget_live"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:contentDescription="@null"
+            android:src="@drawable/ic_nano_dot" />
+    </LinearLayout>
+
+    <!-- KPIs row: مبيعات اليوم | رصيد الصندوق. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:baselineAligned="false"
         android:orientation="horizontal">
 
         <LinearLayout
@@ -37,6 +67,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:letterSpacing="0.06"
                 android:text="مبيعات اليوم"
                 android:textColor="#C7E5E0"
                 android:textSize="11sp" />
@@ -45,9 +76,10 @@
                 android:id="@+id/nano_widget_sales_value"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
                 android:text="0"
                 android:textColor="#FFFFFF"
-                android:textSize="18sp"
+                android:textSize="22sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
@@ -55,11 +87,13 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:layout_marginStart="12dp"
             android:orientation="vertical">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:letterSpacing="0.06"
                 android:text="رصيد الصندوق"
                 android:textColor="#C7E5E0"
                 android:textSize="11sp" />
@@ -68,28 +102,48 @@
                 android:id="@+id/nano_widget_cash_value"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
                 android:text="0"
                 android:textColor="#FFFFFF"
-                android:textSize="18sp"
+                android:textSize="22sp"
                 android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>
 
+    <!-- Alert row: hidden until overdue / low-stock exist. -->
     <TextView
         android:id="@+id/nano_widget_alert"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/nano_widget_alert_pill"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
         android:textColor="#FFD9C2"
         android:textSize="12sp"
         android:visibility="gone" />
 
+    <!-- Freshness footer: driven by updated_at ISO 8601. -->
+    <TextView
+        android:id="@+id/nano_widget_footer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:letterSpacing="0.04"
+        android:textColor="#99F6E4"
+        android:textSize="10sp"
+        android:visibility="gone" />
+
+    <!-- First-run hint: shown only before any push has landed. -->
     <TextView
         android:id="@+id/nano_widget_hint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:text="افتح التطبيق للتحديث"
+        android:layout_marginTop="8dp"
+        android:gravity="center"
+        android:text="@string/nano_widget_hint"
         android:textColor="#C7E5E0"
         android:textSize="12sp"
         android:visibility="gone" />

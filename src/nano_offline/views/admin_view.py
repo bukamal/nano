@@ -439,7 +439,33 @@ class AdminCenter:
                         # never reaches the screen and it looks like "restore does
                         # nothing" even though the file on disk is correct.
                         self.ctx.reload(self.ctx.db.path)
-                        log("4: context reloaded, showing success state")
+                        log("4: context reloaded, syncing home widget with restored DB")
+                        # FIX_0.9.2: without this step the widget keeps showing
+                        # the LAST-PUSH snapshot (or the first-run hint seen in
+                        # the bug screenshot) because the widget's own
+                        # SharedPreferences live outside the swapped .db file.
+                        # core/home_widget.py can clear → force_refresh → push
+                        # in one call, sourcing sales_today/cash_balance from
+                        # DashboardService post-reload (same source as the
+                        # in-app dashboard, so the two cannot disagree).
+                        try:
+                            from nano_offline.core.home_widget import (
+                                refresh_home_widget_after_restore,
+                            )
+                            refresh_home_widget_after_restore(
+                                self.page, self.native_files, self.ctx.dashboard
+                            )
+                        except Exception as widget_exc:
+                            # Never let a widget-side failure abort a
+                            # successful restore -- the DB swap already
+                            # succeeded, the user-visible data is correct,
+                            # and the next sale or periodic pass will update
+                            # the widget on its own. Just make it loud.
+                            print(
+                                f"[nano-restore] widget resync skipped: {widget_exc!r}",
+                                flush=True,
+                            )
+                        log("5: home widget synced, showing success state")
                         # Every view currently on screen was built from
                         # pre-restore data, so the user still needs to go back to
                         # login and let the shell rebuild from scratch against the

@@ -706,6 +706,30 @@ class _FletNativeFilesControlState extends State<FletNativeFilesControl> {
           }
           return await _diagnoseHomeWidget();
 
+        case 'clear_home_widget':
+          // FIX_0.9.2 -- wipe the widget's stored snapshot so a stale
+          // pre-restore snapshot cannot be shown against the restored
+          // database on the next periodic pass. Used after restore.
+          if (!Platform.isAndroid) return 'ok';
+          try {
+            await _homeWidgetChannel.invokeMethod('clear');
+          } catch (error) {
+            debugPrint('nano home widget clear failed: $error');
+          }
+          return 'ok';
+
+        case 'force_refresh_home_widget':
+          // FIX_0.9.2 -- re-render every placed widget instance now,
+          // without changing the underlying snapshot. Collapses the
+          // cached frame the launcher is still holding across a restore.
+          if (!Platform.isAndroid) return 'ok';
+          try {
+            await _homeWidgetChannel.invokeMethod('refresh_now');
+          } catch (error) {
+            debugPrint('nano home widget refresh_now failed: $error');
+          }
+          return 'ok';
+
         default:
           return null;
       }

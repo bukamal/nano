@@ -10,36 +10,23 @@ import android.content.Intent
 import android.view.View
 import android.widget.RemoteViews
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 
 /**
- * FIX_0.9.1: the PHASE10 home-screen widget, rebuilt on the plain Android
- * framework instead of Jetpack Glance.
+ * FIX_0.9.2: rebuilt on the plain Android framework (was Jetpack Glance, dropped
+ * in 0.9.1 because provideGlance() never fired) -- and now also blends into
+ * Nano's theme tokens (theme.py: #0F766E / #115E59 / #5EEAD4 / #C7E5E0 /
+ * #FFD9C2 / #FFFFFF) so the widget reads as part of the app rather than a
+ * generic card from another vendor.
  *
- * Why the swap (full trail in FIX_0.9.1_HOME_WIDGET_APPPROVIDER_AR.md):
- * fixes 0.8.2 -> 0.8.5 hardened every line of the Glance implementation --
- * exported receiver, preview image, try/catch around getAppWidgetState(),
- * around the tap-to-open reflection and around the whole render -- yet the
- * widget still showed Android's "يتعذّر عرض المحتوى" placeholder. The
- * in-app diagnostics added in 0.8.4 proved the decisive fact: widget_count=1
- * and pushes kept merging into stored state, but provideGlance() was NEVER
- * invoked a single time. A failure that deep sits inside Glance's own
- * session machinery (GlanceAppWidgetReceiver -> AppWidgetSession ->
- * RemoteViewsService, a library layer no project try/catch can reach) and
- * cannot be fixed from the app's side of that library.
- *
- * An AppWidgetProvider + RemoteViews implementation has none of that
- * machinery: rendering happens in onUpdate() with framework APIs only
- * (android.appwidget / android.widget), synchronously and deterministically
- * -- if onUpdate runs, the widget renders. The bridge contract is
- * unchanged: channel "nano/home_widget", methods "push"/"diagnose", and the
- * same JSON keys (sales_today / cash_balance / overdue_count /
- * low_stock_count), so core/home_widget.py, native_files.py and
- * native_files.dart do not move at all.
+ * Contract vs 0.8.x: same channel "nano/home_widget", same methods
+ * "push"/"diagnose"/"clear"/"refresh_now", same JSON keys (sales_today,
+ * cash_balance, overdue_count, low_stock_count, updated_at). Adding "clear"
+ * and "refresh_now" is purely additive -- 0.9.x callers that don't use them
+ * still work.
  */
-
-/** In-memory breadcrumbs for the plugin's "diagnose" method, kept on the
- *  same JSON keys as 0.8.5 so any existing admin-panel consumer keeps
- *  working unchanged. */
 object NanoWidgetDiagnostics {
     @Volatile var lastProvideGlanceAt: Long = 0L
     @Volatile var lastStateReadError: String? = null
@@ -48,6 +35,8 @@ object NanoWidgetDiagnostics {
     @Volatile var lastPushAt: Long = 0L
     @Volatile var lastPushOk: Boolean? = null
     @Volatile var lastPushError: String? = null
+    @Volatile var lastClearAt: Long = 0L
+    @Volatile var lastRefreshNowAt: Long = 0L
 }
 
 class NanoWidgetReceiver : AppWidgetProvider() {
@@ -70,10 +59,6 @@ class NanoWidgetReceiver : AppWidgetProvider() {
             }
         }
 
-        /** Merges an incoming push into the stored snapshot -- the same
-         *  per-key merge semantics the Glance plugin used, never a full
-         *  overwrite, so an instant sales/cash push cannot blank the
-         *  overdue/low-stock fields the periodic pass stored. */
         fun saveMerged(context: Context, incomingJson: String) {
             val merged = loadSnapshot(context)
             val incoming = try {
@@ -88,9 +73,35 @@ class NanoWidgetReceiver : AppWidgetProvider() {
             NanoWidgetDiagnostics.lastSnapshotJson = stored
         }
 
-        /** Renders every given widget id from the current shared state and
-         *  records the outcome for "diagnose". A failing single id never
-         *  takes the rest down: each update is caught individually. */
+        /**
+         * FIX_0.9.2: wipe the persisted snapshot entirely so a stale pre-restore
+         * snapshot (or a snapshot from a previous install) cannot survive a
+         * backup restore and keep showing numbers that don't belong in the
+         * freshly restored database. After clear(), the next push overwrites
+         * from scratch.
+         */
+        fun clearSnapshot(context: Context) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().remove(KEY_SNAPSHOT).apply()
+            NanoWidgetDiagnostics.lastSnapshotJson = null
+            NanoWidgetDiagnostics.lastClearAt = System.currentTimeMillis()
+        }
+
+        /**
+         * FIX_0.9.2: belt-and-braces refresh entry point called by the plugin
+         * immediately after a clear()/push(). updateAppWidget() always rebuilds
+         * the RemoteViews tree even when the underlying snapshot is identical
+         * to what was just rendered, which is exactly what's needed to force
+         * the launcher to drop the cached frame after a restore.
+         */
+        fun refreshAllNow(context: Context) {
+            val ctx = context.applicationContext
+            val manager = AppWidgetManager.getInstance(ctx)
+            val ids = manager.getAppWidgetIds(ComponentName(ctx, NanoWidgetReceiver::class.java))
+            refresh(ctx, manager, ids)
+            NanoWidgetDiagnostics.lastRefreshNowAt = System.currentTimeMillis()
+        }
+
         fun refresh(context: Context, manager: AppWidgetManager, ids: IntArray) {
             if (ids.isEmpty()) return
             val data = loadSnapshot(context)
@@ -107,8 +118,6 @@ class NanoWidgetReceiver : AppWidgetProvider() {
             NanoWidgetDiagnostics.lastProvideGlanceAt = System.currentTimeMillis()
         }
 
-        /** Re-renders every placed instance from the current shared state
-         *  (invoked by NanoHomeWidgetPlugin right after a push). */
         fun updateAll(context: Context) {
             val ctx = context.applicationContext
             val manager = AppWidgetManager.getInstance(ctx)
@@ -118,10 +127,22 @@ class NanoWidgetReceiver : AppWidgetProvider() {
 
         fun buildViews(context: Context, data: JSONObject): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.nano_widget)
-            views.setTextViewText(R.id.nano_widget_sales_value, formatMoney(data.optDouble("sales_today", 0.0)))
-            views.setTextViewText(R.id.nano_widget_cash_value, formatMoney(data.optDouble("cash_balance", 0.0)))
 
-            val alert = alertLine(data.optInt("overdue_count", 0), data.optInt("low_stock_count", 0))
+            // KPIs -- values formatted with thousands grouping, large bold white.
+            views.setTextViewText(
+                R.id.nano_widget_sales_value,
+                formatMoney(data.optDouble("sales_today", 0.0)),
+            )
+            views.setTextViewText(
+                R.id.nano_widget_cash_value,
+                formatMoney(data.optDouble("cash_balance", 0.0)),
+            )
+
+            // Alert pill -- collapsed when there's nothing to flag.
+            val alert = alertLine(
+                data.optInt("overdue_count", 0),
+                data.optInt("low_stock_count", 0),
+            )
             if (alert.isNotEmpty()) {
                 views.setTextViewText(R.id.nano_widget_alert, alert)
                 views.setViewVisibility(R.id.nano_widget_alert, View.VISIBLE)
@@ -129,15 +150,22 @@ class NanoWidgetReceiver : AppWidgetProvider() {
                 views.setViewVisibility(R.id.nano_widget_alert, View.GONE)
             }
 
-            // First placement before any push/periodic pass: show a legible
-            // hint instead of a blank panel -- never the system's
-            // "يتعذّر عرض المحتوى" placeholder.
+            // Freshness footer -- "تم التحديث قبل X" / "قبل لحظة".
+            // Driven by updated_at (ISO 8601, UTC) pushed by both Dart paths.
+            val footer = timeAgo(data.optString("updated_at", ""))
+            if (footer.isNotEmpty()) {
+                views.setTextViewText(R.id.nano_widget_footer, footer)
+                views.setViewVisibility(R.id.nano_widget_footer, View.VISIBLE)
+            } else {
+                views.setViewVisibility(R.id.nano_widget_footer, View.GONE)
+            }
+
+            // First placement before any data -- show a legible hint instead of
+            // a blank panel, never Android's "Couldn't load widget" placeholder.
             val hasData = data.has("sales_today") || data.has("cash_balance")
             views.setViewVisibility(R.id.nano_widget_hint, if (hasData) View.GONE else View.VISIBLE)
 
-            // Tap-to-open the app (reflection on the generated launcher
-            // Activity, guarded): if it ever fails the widget still renders,
-            // just without the shortcut -- degrading beats vanishing.
+            // Tap-to-open the app, reflection-guarded -- degrading beats vanishing.
             try {
                 val launchIntent = Intent(context, mainActivityClass(context)).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -157,12 +185,6 @@ class NanoWidgetReceiver : AppWidgetProvider() {
     }
 }
 
-/**
- * Flet's generated MainActivity always lives at <applicationId>.MainActivity
- * (com.nano here, per [tool.flet] org/product in pyproject.toml) -- resolved
- * by name so this plugin module never needs a compile-time dependency on
- * the generated app module.
- */
 @Suppress("UNCHECKED_CAST")
 internal fun mainActivityClass(context: Context): Class<out Activity> =
     Class.forName("${context.packageName}.MainActivity") as Class<out Activity>
@@ -179,4 +201,42 @@ private fun alertLine(overdue: Int, lowStock: Int): String = when {
     overdue > 0 -> "$overdue فواتير آجلة متأخرة"
     lowStock > 0 -> "$lowStock صنف وصل الحد الأدنى"
     else -> ""
+}
+
+// FIX_0.9.2: minimal-allocation ISO 8601 parser that doesn't need java.time
+// (avoids the API 26 requirement and a desugaring dependency).
+private val FOOTER_FORMATS = arrayOf(
+    "yyyy-MM-dd'T'HH:mm:ssXXX",
+    "yyyy-MM-dd'T'HH:mm:ssZ",
+    "yyyy-MM-dd'T'HH:mm:ss",
+)
+
+private fun parsePushedAt(iso: String): Long? {
+    if (iso.isBlank()) return null
+    for (pattern in FOOTER_FORMATS) {
+        try {
+            val sdf = SimpleDateFormat(pattern, Locale.US)
+            sdf.timeZone = TimeZone.getTimeZone("UTC")
+            return sdf.parse(iso)?.time
+        } catch (_: Exception) { continue }
+    }
+    return null
+}
+
+private fun timeAgo(iso: String): String {
+    val pushed = parsePushedAt(iso) ?: return ""
+    val ageMs = System.currentTimeMillis() - pushed
+    if (ageMs < 0) return ""
+    val minutes = ageMs / 60_000L
+    return when {
+        minutes < 1L -> "تم التحديث قبل لحظة"
+        minutes < 2L -> "تم التحديث قبل دقيقة"
+        minutes < 60L -> "تم التحديث قبل $minutes دقيقة"
+        ageMs < 24L * 3_600_000L -> "تم التحديث قبل ${ageMs / 3_600_000L} ساعة"
+        else -> {
+            val sdf = SimpleDateFormat("HH:mm", Locale("ar"))
+            sdf.timeZone = TimeZone.getDefault()
+            "تم التحديث ${sdf.format(java.util.Date(pushed))}"
+        }
+    }
 }
