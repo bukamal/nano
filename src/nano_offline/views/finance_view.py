@@ -80,6 +80,11 @@ class FinanceCenter:
         rows = ft.Column(spacing=9)
         summary = ft.ResponsiveRow(spacing=8, run_spacing=8)
         filter_state = {"type": "all"}
+        # Same client-visible paging as parties/items/invoices (see
+        # parties_view.py): vouchers only accumulate over the life of the
+        # business, so building a card for every single one on every
+        # refresh does not scale. Render a page at a time instead.
+        render_limit = {"n": 60}
         # Real dropdown (ft.Dropdown) instead of a search-style field or a
         # row of chips -- same control used for "ترتيب حسب" on the items
         # screen: tap once, pick from the list, no typing involved.
@@ -101,10 +106,12 @@ class FinanceCenter:
             filter_state["type"] = key
             if type_filter.value != key:
                 type_filter.value = key
+            render_limit["n"] = 60
             refresh()
 
         def on_type_filter_change(_=None):
             filter_state["type"] = type_filter.value or "all"
+            render_limit["n"] = 60
             refresh()
 
         type_filter.on_change = on_type_filter_change
@@ -129,7 +136,7 @@ class FinanceCenter:
                     continue
                 filtered.append(v)
             rows.controls = []
-            for voucher in filtered:
+            for voucher in filtered[: render_limit["n"]]:
                 receipt = voucher["voucher_type"] == "receipt"
                 title = "سند قبض" if receipt else "سند دفع"
                 accent = Colors.SUCCESS if receipt else Colors.DANGER_DARK
@@ -173,9 +180,27 @@ class FinanceCenter:
                         action_label="سند قبض جديد",
                         on_action=lambda _: self.show_voucher_dialog(None, "receipt"),
                     ))
+            elif len(filtered) > render_limit["n"]:
+                remaining = len(filtered) - render_limit["n"]
+
+                def load_more(_=None):
+                    render_limit["n"] += 60
+                    refresh()
+
+                rows.controls.append(
+                    ft.OutlinedButton(
+                        f"تحميل المزيد ({remaining})",
+                        icon=ft.Icons.EXPAND_MORE_ROUNDED,
+                        on_click=load_more,
+                    )
+                )
             self.page.update()
 
-        search.on_change = refresh
+        def refresh_from_search(_=None):
+            render_limit["n"] = 60
+            refresh()
+
+        search.on_change = refresh_from_search
 
         # Floating "new voucher" action: one FAB that expands into the three
         # voucher types (قبض / دفع / مصروف) instead of a three-button row
@@ -599,9 +624,13 @@ class FinanceCenter:
         rows = ft.Column(spacing=9)
         summary = ft.ResponsiveRow(spacing=8, run_spacing=8)
         filter_state = {"month_only": False}
+        # Same client-visible paging as parties/items/invoices/vouchers —
+        # see parties_view.py.
+        render_limit = {"n": 60}
 
         def toggle_month(_=None):
             filter_state["month_only"] = not filter_state["month_only"]
+            render_limit["n"] = 60
             refresh()
 
         def refresh(_=None):
@@ -622,7 +651,7 @@ class FinanceCenter:
                 ft.Container(kpi_card("التصنيفات", str(len(categories)), ft.Icons.CATEGORY_OUTLINED, Colors.PURPLE), col={"xs": 12, "md": 4}),
             ]
             rows.controls = []
-            for exp in filtered:
+            for exp in filtered[: render_limit["n"]]:
                 rows.controls.append(ft.Container(
                     ft.Row([
                         ft.Container(ft.Icon(ft.Icons.RECEIPT_OUTLINED, size=18, color=Colors.ORANGE), width=44, height=44, alignment=ft.alignment.center, bgcolor=Colors.WARNING_BG_ALT, border_radius=14),
@@ -656,9 +685,27 @@ class FinanceCenter:
                         action_label="مصروف جديد",
                         on_action=lambda _: self.show_expense_dialog(),
                     ))
+            elif len(filtered) > render_limit["n"]:
+                remaining = len(filtered) - render_limit["n"]
+
+                def load_more(_=None):
+                    render_limit["n"] += 60
+                    refresh()
+
+                rows.controls.append(
+                    ft.OutlinedButton(
+                        f"تحميل المزيد ({remaining})",
+                        icon=ft.Icons.EXPAND_MORE_ROUNDED,
+                        on_click=load_more,
+                    )
+                )
             self.page.update()
 
-        search.on_change = refresh
+        def refresh_from_search(_=None):
+            render_limit["n"] = 60
+            refresh()
+
+        search.on_change = refresh_from_search
         # Same sticky-header / scrolling-body split as show_vouchers and
         # invoice_view: section tabs + search stay pinned, KPI cards and the
         # expense list scroll together beneath them.
@@ -776,6 +823,13 @@ class FinanceCenter:
         date_to = SmartDateField(label="إلى تاريخ", hint_text="YYYY-MM-DD")
         result = ft.Column(spacing=8)
         export_actions = ft.Row(visible=False, wrap=True)
+        # Same client-visible paging as parties/items/invoices/vouchers/
+        # expenses — see parties_view.py. A long-lived account's full
+        # history can run to hundreds of movements; render a page of the
+        # (already fully computed, running-balance) rows at a time. Print
+        # and PDF export are untouched — they always use the complete
+        # `data["rows"]` regardless of what's currently rendered on screen.
+        render_limit = {"n": 60}
 
         async def print_statement(_):
             if not party_dd.value:
@@ -849,7 +903,7 @@ class FinanceCenter:
                 # Same icon-badge card language as the vouchers/invoices
                 # list rows -- an inflow is styled like a "قبض" row, an
                 # outflow like a "دفع" row, instead of a plain bordered line.
-                for row in data["rows"]:
+                for row in data["rows"][: render_limit["n"]]:
                     movement = float(row["movement"])
                     inflow = movement >= 0
                     movement_text = f"+{self.money(movement)}" if inflow else f"-{self.money(abs(movement))}"
@@ -886,12 +940,33 @@ class FinanceCenter:
                         icon=ft.Icons.SWAP_VERT_ROUNDED,
                         hint="جرّب توسيع نطاق التاريخ",
                     ))
+                elif len(data["rows"]) > render_limit["n"]:
+                    remaining = len(data["rows"]) - render_limit["n"]
+
+                    def load_more(_=None):
+                        render_limit["n"] += 60
+                        render()
+
+                    result.controls.append(
+                        ft.OutlinedButton(
+                            f"تحميل المزيد ({remaining})",
+                            icon=ft.Icons.EXPAND_MORE_ROUNDED,
+                            on_click=load_more,
+                        )
+                    )
             except Exception as exc:
                 export_actions.visible = False
                 self.notify(str(exc), kind="error")
             self.page.update()
 
-        party_dd.on_change = render
+        def render_from_filters(_=None):
+            # A new account or date range is a fresh query, not a
+            # continuation of whatever page the previous account had
+            # scrolled to — always start back at the first page.
+            render_limit["n"] = 60
+            render()
+
+        party_dd.on_change = render_from_filters
         # Same sticky-header / scrolling-body split as the other finance
         # sections: section tabs and the account/date filters stay pinned,
         # the KPI cards and statement rows scroll beneath them.
@@ -906,7 +981,7 @@ class FinanceCenter:
                             ft.Container(date_to, col={"xs": 6, "md": 3}),
                         ]
                     ),
-                    ft.Row([ft.FilledButton("عرض الكشف", icon=ft.Icons.SEARCH, on_click=render), export_actions], wrap=True),
+                    ft.Row([ft.FilledButton("عرض الكشف", icon=ft.Icons.SEARCH, on_click=render_from_filters), export_actions], wrap=True),
                 ],
                 spacing=10,
             ),

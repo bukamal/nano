@@ -1278,6 +1278,15 @@ class AdminCenter:
             width=160,
         )
         audit_count_label = ft.Text("", size=11, color=Colors.TEXT_FAINT)
+        # Same client-visible paging as parties/items/invoices (see
+        # parties_view.py): the audit log only ever grows, so a fixed
+        # fetch of 300 rows used to be rendered as 300 controls in one
+        # shot every time the tab opened or a filter changed. Now the
+        # DB fetch itself grows with render_limit["n"] (capped at the
+        # service's own 1000-row ceiling), so "تحميل المزيد" pulls a
+        # fresh, larger page from the database instead of just re-slicing
+        # an already-fetched batch.
+        audit_render_limit = {"n": 60}
 
         _ACTION_AR = {
             "create": "إنشاء",
@@ -1322,7 +1331,7 @@ class AdminCenter:
         def refresh_audit(_=None):
             audit_list.controls = []
             try:
-                rows = self.ctx.auth.audit_entries(300)
+                rows = self.ctx.auth.audit_entries(audit_render_limit["n"])
             except Exception as exc:
                 audit_list.controls.append(ft.Text(str(exc), color=Colors.DANGER))
                 audit_count_label.value = ""
@@ -1386,11 +1395,31 @@ class AdminCenter:
                         padding=16,
                     )
                 )
+            elif len(rows) >= audit_render_limit["n"] and audit_render_limit["n"] < 1000:
+                # There may be older rows the DB fetch hasn't reached yet
+                # (len(rows) == the fetch limit is our only signal, since
+                # audit_entries() doesn't report a total count) — offer to
+                # pull a bigger page rather than assuming this is everything.
+                def load_more_audit(_=None):
+                    audit_render_limit["n"] = min(1000, audit_render_limit["n"] + 60)
+                    refresh_audit()
+
+                audit_list.controls.append(
+                    ft.OutlinedButton(
+                        "تحميل المزيد",
+                        icon=ft.Icons.EXPAND_MORE_ROUNDED,
+                        on_click=load_more_audit,
+                    )
+                )
             audit_count_label.value = f"عرض {shown} من أصل {len(rows)}"
             self.page.update()
 
-        audit_search.on_change = refresh_audit
-        audit_entity_dd.on_change = refresh_audit
+        def refresh_audit_from_filter(_=None):
+            audit_render_limit["n"] = 60
+            refresh_audit()
+
+        audit_search.on_change = refresh_audit_from_filter
+        audit_entity_dd.on_change = refresh_audit_from_filter
         refresh_audit()
 
         # --- Modern layout: one focused section at a time behind a

@@ -155,7 +155,11 @@ class PartyCenter:
                 ]
             except Exception:
                 open_rows = []
-            rel = grade_party(balance=balance, outstanding_rows=open_rows)
+            try:
+                rel = grade_party(balance=balance, outstanding_rows=open_rows)
+            except Exception as exc:
+                notify(str(exc), kind="error")
+                return
             grade_color = getattr(Colors, rel["color_token"], Colors.PRIMARY)
             grade_bg = getattr(Colors, rel["bg_token"], Colors.PRIMARY_BG)
             recent = []
