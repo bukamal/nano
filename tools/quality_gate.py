@@ -56,6 +56,7 @@ SCRIPTS = [
     "tools/barcode_labels_branding_smoke_test.py",
     "tools/phase10_audit_chain_smoke_test.py",
     "tools/phase10_backup_encryption_smoke_test.py",
+    "tools/phase10_public_qr_verify_smoke_test.py",
     "tools/apk_release_preflight.py",
 ]
 

@@ -54,6 +54,7 @@ native_py = (ROOT / "extensions/flet_native_files/src/flet_native_files/native_f
 native_dart = (ROOT / "extensions/flet_native_files/src/flutter/flet_native_files/lib/src/native_files.dart").read_text(encoding="utf-8")
 admin = (ROOT / "src/nano_offline/views/admin_view.py").read_text(encoding="utf-8")
 invoice_ui = (ROOT / "src/nano_offline/views/invoice_view.py").read_text(encoding="utf-8")
+pos_ui = (ROOT / "src/nano_offline/views/pos_view.py").read_text(encoding="utf-8")
 
 # PDF must be materialized, then shared through the same share_file/shareXFiles path as backups.
 for needle in ['invoke_method_async("create_pdf"', 'mime_type="application/pdf"']:
@@ -68,7 +69,10 @@ for needle in ["extensions=None", "validate_backup, source", "shutil.copy2", "va
 assert "FileType.any" in native_dart
 
 # UI mirrors the core cash invariant and makes the auto-paid state explicit.
-for needle in ["مدفوع نقدًا (تلقائي)", "cash_without_party", "نقدي بدون عميل"]:
+# "نقدي بدون عميل" moved to the POS quick-sale party placeholder; the invoice
+# editor itself shows the auto-paid label and the cash_without_party logic.
+for needle in ["مدفوع نقدًا (تلقائي)", "cash_without_party"]:
     assert needle in invoice_ui, needle
+assert "نقدي بدون عميل" in pos_ui
 
 print("cash_backup_pdf_android_smoke_test passed")

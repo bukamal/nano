@@ -9,6 +9,7 @@ from flet_native_files import NativeFiles
 
 from nano_offline.app_context import AppContext
 from nano_offline.core.invoice_signing import verify_payload
+from nano_offline.core import public_verify
 from nano_offline.core import backup_settings
 from nano_offline.core import sound
 from nano_offline.core.paths import database_path, migrate_legacy_database
@@ -575,8 +576,88 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         is_valid, reason = verify_payload(ctx.db, payload)
         _show_verify_result(is_valid, reason)
 
+    def _manual_verify_dialog() -> None:
+        inv_field = ft.TextField(
+            label="رقم الفاتورة (كما على الورقة)",
+            hint_text="مثال: 12 أو INV-00012",
+            width=320, dense=True,
+        )
+        token_field = ft.TextField(
+            label="رمز التحقق (من أسفل الورقة)",
+            hint_text="6 أحرف — مثال: 4K7M2Q",
+            width=320, dense=True, max_length=12,
+        )
+
+        def run_manual(_) -> None:
+            ok_manual, reason_manual, _invoice_row = public_verify.verify_manual(
+                ctx.db, inv_field.value or "", token_field.value or ""
+            )
+            page.close(manual_dialog)
+            _show_verify_result(ok_manual, reason_manual)
+
+        manual_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("تحقق يدوي من الفاتورة", text_align=ft.TextAlign.CENTER),
+            content=ft.Column(
+                [inv_field, token_field],
+                tight=True, spacing=12, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            actions=[
+                ft.FilledButton("تحقق", on_click=run_manual),
+                ft.TextButton("إلغاء", on_click=lambda _: page.close(manual_dialog)),
+            ],
+            actions_alignment=ft.MainAxisAlignment.CENTER,
+        )
+        page.open(manual_dialog)
+
     def open_verify_invoice(_=None) -> None:
-        page.run_task(_verify_invoice_scan)
+        # Two ways to check a printed invoice: scan its QR with the camera,
+        # or type the printed number + the 6-character public token (which
+        # works even when the device has no camera/scanner at hand). Both
+        # verify fully offline against this database -- no network needed.
+        verify_sheet = ft.BottomSheet(
+            ft.Container(
+                ft.Column(
+                    [
+                        ft.Container(width=44, height=5, bgcolor=Colors.BORDER_STRONG, border_radius=10, alignment=ft.alignment.center),
+                        ft.Text("التحقق من فاتورة", size=20, weight=ft.FontWeight.BOLD),
+                        ft.Text("تأكد من أن الأرقام المطبوعة لم تُعدَّل بعد الطباعة", size=11, color=Colors.TEXT_SECONDARY),
+                        ft.Container(
+                            ft.Row(
+                                [
+                                    ft.Container(ft.Icon(ft.Icons.QR_CODE_SCANNER_OUTLINED, color=Colors.PRIMARY, size=24), width=46, height=46, alignment=ft.alignment.center, bgcolor=Colors.PRIMARY_BG, border_radius=15),
+                                    ft.Column([ft.Text("مسح رمز QR بالكاميرا", size=14, weight=ft.FontWeight.W_600), ft.Text("يفتح الكاميرا ويقرأ رمز الفاتورة", size=11, color=Colors.TEXT_SECONDARY)], spacing=2, expand=True),
+                                    ft.Icon(ft.Icons.CHEVRON_LEFT, size=16, color=Colors.BORDER_STRONG),
+                                ],
+                                spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            padding=ft.padding.symmetric(horizontal=14, vertical=12),
+                            border_radius=14, ink=True,
+                            on_click=lambda _: (page.close(verify_sheet), page.run_task(_verify_invoice_scan)),
+                        ),
+                        ft.Container(
+                            ft.Row(
+                                [
+                                    ft.Container(ft.Icon(ft.Icons.KEYBOARD_OUTLINED, color=Colors.PURPLE, size=24), width=46, height=46, alignment=ft.alignment.center, bgcolor=Colors.PURPLE_BG, border_radius=15),
+                                    ft.Column([ft.Text("إدخال يدوي", size=14, weight=ft.FontWeight.W_600), ft.Text("رقم الفاتورة + رمز التحقق المطبوع", size=11, color=Colors.TEXT_SECONDARY)], spacing=2, expand=True),
+                                    ft.Icon(ft.Icons.CHEVRON_LEFT, size=16, color=Colors.BORDER_STRONG),
+                                ],
+                                spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            padding=ft.padding.symmetric(horizontal=14, vertical=12),
+                            border_radius=14, ink=True,
+                            on_click=lambda _: (page.close(verify_sheet), _manual_verify_dialog()),
+                        ),
+                    ],
+                    spacing=12, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                padding=ft.padding.only(left=18, right=18, top=12, bottom=24),
+                bgcolor=Colors.WHITE,
+                border_radius=ft.border_radius.only(top_left=28, top_right=28),
+                shadow=Shadow.LG,
+            )
+        )
+        page.open(verify_sheet)
 
     def show_more(_=None):
         entries: list[tuple[str, str, object, object]] = []

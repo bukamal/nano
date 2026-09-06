@@ -5,6 +5,7 @@ from html import escape
 from nano_offline.core.barcode128 import code128b_svg
 from nano_offline.core.qr_gen import qr_svg
 from nano_offline.core.invoice_signing import sign_invoice
+from nano_offline.core import public_verify
 from nano_offline.core.database import Database
 from nano_offline.core import currency
 from nano_offline.core import invoice_settings
@@ -244,6 +245,8 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
   flex:0 0 auto; text-align:center; font-size:9px; color:#64748B; line-height:1.4;
 }}
 .verify-box svg {{ width:64px; height:64px; display:block; margin:0 auto 4px; }}
+.verify-token {{ font-size:10px; color:#475569; text-align:center; margin-top:6px; }}
+.verify-token b {{ font-family:monospace; font-size:12px; letter-spacing:2px; color:#0F172A; }}
 </style>
 </head>
 <body><div class="sheet">
@@ -312,6 +315,14 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
             self.db, invoice_id=int(inv["id"]), invoice_date=str(inv["invoice_date"]), total=total, party_key=party_key
         )
         verify_qr = qr_svg(verify_token, size=64, level="M", quiet_zone=1, dark="#0F172A")
+        # Secret-free 6-char token printed under the QR: anyone (customer,
+        # auditor) can recompute it from the printed number/date/total/party
+        # using core/public_verify.py and confirm the paper wasn't altered --
+        # no app, no network, no secret needed.
+        public_token = public_verify.public_fingerprint(
+            invoice_id=int(inv["id"]), invoice_date=str(inv["invoice_date"]),
+            total=total, party_key=party_key, lines=len(inv.get("lines") or []),
+        )
         paid = float(inv.get("paid_amount") or 0)
         paid_ratio = max(0.0, min(1.0, (paid / total))) if total > 1e-9 else 1.0
         watermark_html = '<div class="watermark">غير مدفوعة</div>' if status_key == "unpaid" else ""
@@ -335,7 +346,9 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
             else ""
         )
         verify_box_html = (
-            f'<div class="verify-box">{verify_qr}<span>تحقق من الفاتورة</span></div>'
+            f'<div class="verify-box">{verify_qr}'
+            f'<span>تحقق من الفاتورة</span>'
+            f'<div class="verify-token">رمز التحقق: <b>{public_token}</b></div></div>'
             if invoice_settings.show_verify_qr(settings)
             else ""
         )

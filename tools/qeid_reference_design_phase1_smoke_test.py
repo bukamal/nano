@@ -22,7 +22,7 @@ for token in [
 for token in [
     'ft.Text("إجراءات سريعة"',
     'ft.Text("آخر الفواتير"',
-    'ft.Text("استمر بأداء عملك — لا توجد تنبيهات مهمة حاليًا."',
+    '"استمر بأداء عملك — لا توجد تنبيهات مهمة حاليًا."',
 ]:
     assert token in dashboard, token
 
@@ -31,8 +31,8 @@ for token in [
     'filters = {"type": "all", "status": "all"}',
     'chip("مبيعات"',
     'chip("مشتريات"',
-    'ft.FilledButton("بيع جديد"',
-    'ft.OutlinedButton("شراء جديد"',
+    'action_label="بيع جديد"',
+    'mini_action("شراء جديد"',
 ]:
     assert token in invoice, token
 
