@@ -1122,11 +1122,26 @@ class POSCenter:
         )
 
         # Phase B overlays: last-scan floating card (top) + full success screen
+        # last_scan_overlay is positioned via top/left/right (real Stack
+        # positioning) rather than padding+alignment: a Container with
+        # alignment set expands to fill whichever constraint axis its
+        # parent gives it as *bounded* -- inside a plain (non-positioned)
+        # Stack child that axis is bounded in both width AND height, which
+        # was stretching this down the full screen height instead of
+        # shrink-wrapping to the small floating card inside it. Setting
+        # left+right (bounded width band to center the card in) while
+        # leaving bottom unset (unbounded height) keeps the width behavior
+        # we want while letting the height shrink to the card's own
+        # intrinsic size, matching how it renders in _show_last_scan_card().
         last_scan_overlay = ft.Container(
             visible=False,
-            alignment=ft.alignment.top_center,
-            padding=ft.padding.only(top=72, left=20, right=20),
             content=ft.Container(),
+            top=72,
+            left=20,
+            right=20,
+            alignment=ft.alignment.top_center,
+            opacity=0,
+            animate_opacity=ft.Animation(180, ft.AnimationCurve.EASE_OUT),
         )
         success_overlay = ft.Container(
             visible=False,
@@ -1407,17 +1422,14 @@ class POSCenter:
             border=ft.border.all(1.5, Colors.SUCCESS),
             border_radius=16,
             shadow=Shadow.MD,
-            # Without an explicit width this Container has nothing to
-            # shrink-wrap to reliably once it's nested inside the
-            # alignment-based full-screen overlay wrapper (see
-            # last_scan_overlay in _build()) -- it was expanding to fill
-            # the entire screen instead of staying a small floating chip,
-            # dragging the icon and text far apart in the process. The
-            # sale-success card just below this one already sets an
-            # explicit width for the same reason; this mirrors that.
+            # Explicit width so the card stays a compact floating chip --
+            # see the note on last_scan_overlay's own top/left/right in
+            # _build() for the actual full-screen-stretch bug this and
+            # that positioning change fix together.
             width=320,
         )
         overlay.visible = True
+        overlay.opacity = 1
         try:
             overlay.update()
         except Exception:
@@ -1427,6 +1439,17 @@ class POSCenter:
             await asyncio.sleep(1.5)
             if self._last_scan_token != token:
                 return  # a newer scan already replaced this card
+            overlay.opacity = 0
+            try:
+                overlay.update()
+            except Exception:
+                pass
+            # Let the fade-out finish before actually hiding -- otherwise
+            # visible=False cuts the animation off mid-fade instead of
+            # completing it.
+            await asyncio.sleep(0.18)
+            if self._last_scan_token != token:
+                return
             overlay.visible = False
             try:
                 overlay.update()
@@ -1464,6 +1487,7 @@ class POSCenter:
         last = getattr(self, "_last_scan_overlay", None)
         if last is not None:
             last.visible = False
+            last.opacity = 0
 
         def start_new_sale(_=None):
             clear_cart_fn()
