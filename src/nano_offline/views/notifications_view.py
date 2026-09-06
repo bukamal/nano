@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from typing import Callable
 
@@ -579,6 +580,176 @@ class NotificationCenter:
             padding=14, bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=Radius.LG, shadow=Shadow.SM,
         )
 
+        # ---- PHASE11.1: قنوات الإرسال الخارجية (تيليغرام / بريد / Webhook) ----
+        ext_cfg = self.ctx.external_notifications.get_config()
+        ext_chan_cfg = ext_cfg.get("channels") or {}
+        ext_rules_cfg = ext_cfg.get("rules") or {}
+        ext_channel_switches: dict[str, ft.Switch] = {}
+        route_state: dict[tuple[str, str], bool] = {}
+
+        def ext_text_field(key: str, value, *, password: bool = False, hint: str = "", width: int | None = None) -> ft.TextField:
+            f = SelectAllTextField(
+                value=str(value or ""),
+                password=password, can_reveal_password=password,
+                hint_text=hint, dense=True, border_radius=Radius.SM,
+                filled=True, bgcolor=Colors.BACKGROUND_ALT, border_color=Colors.BORDER,
+                content_padding=ft.padding.symmetric(horizontal=10, vertical=8),
+                width=width,
+            )
+            field_refs[key] = f
+            return f
+
+        def labeled(label: str, field: ft.TextField) -> ft.Row:
+            return ft.Row([ft.Text(label, size=12, color=Colors.TEXT_MUTED, width=110), field], spacing=8)
+
+        def make_test_button(channel: str, label: str) -> ft.OutlinedButton:
+            def _run(_e=None):
+                async def _task():
+                    self.notify(f"جارٍ اختبار قناة {label}...")
+                    try:
+                        result = await asyncio.to_thread(self.ctx.external_notifications.test_channel, channel)
+                    except Exception as exc:
+                        self.notify(f"تعذر اختبار {label}: {exc}")
+                        return
+                    if result.ok:
+                        self.notify(f"نجح اختبار {label} (محاولة {result.attempts})")
+                    else:
+                        self.notify(f"فشل اختبار {label}: {(result.error or 'خطأ غير معروف')[:80]}")
+                self.page.run_task(_task)
+            return ft.OutlinedButton("اختبار القناة", icon=ft.Icons.SEND_OUTLINED, on_click=_run)
+
+        def ext_channel_card(channel: str, title: str, description: str, icon: str, fields: list) -> ft.Container:
+            cfg_c = ext_chan_cfg.get(channel, {})
+            sw = ft.Switch(value=bool(cfg_c.get("enabled", False)), active_color=Colors.PRIMARY)
+            ext_channel_switches[channel] = sw
+            return ft.Container(
+                ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.Container(ft.Icon(icon, size=18, color=Colors.PRIMARY), width=36, height=36, alignment=ft.alignment.center, bgcolor=Colors.PRIMARY_BG, border_radius=Radius.MD),
+                                ft.Column([ft.Text(title, size=14, weight=ft.FontWeight.BOLD), ft.Text(description, size=11, color=Colors.TEXT_SECONDARY)], spacing=1, expand=True),
+                                sw,
+                            ],
+                            spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        *fields,
+                    ],
+                    spacing=12,
+                ),
+                padding=14, bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=Radius.LG, shadow=Shadow.SM,
+            )
+
+        tg_cfg = ext_chan_cfg.get("telegram", {})
+        telegram_card = ext_channel_card(
+            "telegram", "تيليغرام", "أرسل التنبيهات إلى دردشة أو مجموعة عبر بوت",
+            ft.Icons.SEND_OUTLINED,
+            [
+                labeled("Bot Token", ext_text_field("ext.telegram.bot_token", tg_cfg.get("bot_token"), password=True, hint="123456:ABC-DEF...")),
+                labeled("Chat ID", ext_text_field("ext.telegram.chat_id", tg_cfg.get("chat_id"), hint="-1001234567890")),
+                make_test_button("telegram", "تيليغرام"),
+            ],
+        )
+        em_cfg = ext_chan_cfg.get("email", {})
+        email_card = ext_channel_card(
+            "email", "البريد الإلكتروني", "عبر أي خادم SMTP (Gmail مع كلمة مرور تطبيق مثلًا)",
+            ft.Icons.MAIL_OUTLINED,
+            [
+                labeled("خادم SMTP", ext_text_field("ext.email.smtp_host", em_cfg.get("smtp_host"), hint="smtp.gmail.com")),
+                labeled("المنفذ", ext_text_field("ext.email.smtp_port", em_cfg.get("smtp_port") or 587, width=110)),
+                labeled("اسم المستخدم", ext_text_field("ext.email.username", em_cfg.get("username"), hint="you@gmail.com")),
+                labeled("كلمة المرور", ext_text_field("ext.email.password", em_cfg.get("password"), password=True, hint="App Password")),
+                labeled("إلى", ext_text_field("ext.email.to_address", em_cfg.get("to_address"), hint="you@gmail.com")),
+                make_test_button("email", "البريد"),
+            ],
+        )
+        wh_cfg = ext_chan_cfg.get("webhook", {})
+        webhook_card = ext_channel_card(
+            "webhook", "Webhook", "رابط عام يستقبل JSON لكل تنبيه (n8n / Make / Zapier...)",
+            ft.Icons.LINK_OUTLINED,
+            [
+                labeled("الرابط", ext_text_field("ext.webhook.url", wh_cfg.get("url"), hint="https://example.com/hook")),
+                make_test_button("webhook", "Webhook"),
+            ],
+        )
+
+        _EXT_RULE_LABELS = [
+            ("default", "كل الأنواع"),
+            ("receivables_overdue", "ذمم متأخرة"),
+            ("receivables_due_soon", "ذمم تقترب"),
+            ("low_stock", "مخزون منخفض"),
+            ("backup_missing", "نسخة احتياطية مفقودة"),
+            ("backup_due", "نسخة احتياطية مستحقة"),
+            ("license_expiry", "انتهاء الترخيص"),
+            ("sales_drop", "هبوط المبيعات"),
+        ]
+        _CHANNEL_LABELS = {"telegram": "تيليغرام", "email": "بريد", "webhook": "Webhook"}
+
+        def route_chip(rule: str, channel: str) -> ft.Container:
+            state_key = (rule, channel)
+            present = rule in ext_rules_cfg
+            base = ext_rules_cfg.get(rule) if present else ext_rules_cfg.get("default") or []
+            route_state[state_key] = channel in base
+            text_ref = ft.Text(_CHANNEL_LABELS[channel], size=11, weight=ft.FontWeight.W_600, color=Colors.WHITE if route_state[state_key] else Colors.TEXT_MUTED)
+            box = ft.Container(
+                text_ref, padding=ft.padding.symmetric(horizontal=12, vertical=6),
+                bgcolor=Colors.PRIMARY if route_state[state_key] else Colors.BACKGROUND_ALT,
+                border_radius=Radius.MD, ink=True,
+            )
+
+            def toggle(_e=None):
+                route_state[state_key] = not route_state[state_key]
+                box.bgcolor = Colors.PRIMARY if route_state[state_key] else Colors.BACKGROUND_ALT
+                text_ref.color = Colors.WHITE if route_state[state_key] else Colors.TEXT_MUTED
+                try:
+                    box.update()
+                except Exception:
+                    pass
+
+            box.on_click = toggle
+            return box
+
+        ext_header = ft.Container(
+            ft.Row(
+                [
+                    ft.Container(ft.Icon(ft.Icons.CLOUD_OUTLINED, size=18, color=Colors.PRIMARY), width=36, height=36, alignment=ft.alignment.center, bgcolor=Colors.PRIMARY_BG, border_radius=Radius.MD),
+                    ft.Column(
+                        [ft.Text("الإرسال الخارجي", size=15, weight=ft.FontWeight.BOLD),
+                         ft.Text("التنبيه الداخلي نفسه يُرسل أيضًا إلى تيليغرام والبريد وWebhook — نفس القواعد وساعات الهدوء، وبدون إرسال مزدوج. الأسرار تُحفظ محليًا فقط.", size=11, color=Colors.TEXT_SECONDARY)],
+                        spacing=1, expand=True,
+                    ),
+                ],
+                spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=14, bgcolor=Colors.PRIMARY_BG, border=ft.border.all(1, Colors.PRIMARY_BORDER), border_radius=Radius.LG,
+        )
+
+        routing_card = ft.Container(
+            ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Container(ft.Icon(ft.Icons.CALL_SPLIT, size=18, color=Colors.PRIMARY), width=36, height=36, alignment=ft.alignment.center, bgcolor=Colors.PRIMARY_BG, border_radius=Radius.MD),
+                            ft.Column([ft.Text("توزيع القنوات حسب نوع التنبيه", size=14, weight=ft.FontWeight.BOLD), ft.Text("النوع غير المحدد يتبع «كل الأنواع» — اختر القنوات لكل صف", size=11, color=Colors.TEXT_SECONDARY)], spacing=1, expand=True),
+                        ],
+                        spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    *[
+                        ft.Row(
+                            [
+                                ft.Text(label, size=12, color=Colors.TEXT_MUTED, width=135),
+                                ft.Row([route_chip(rule, ch) for ch in ("telegram", "email", "webhook")], spacing=6),
+                            ],
+                            spacing=8,
+                        )
+                        for rule, label in _EXT_RULE_LABELS
+                    ],
+                ],
+                spacing=12,
+            ),
+            padding=14, bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=Radius.LG, shadow=Shadow.SM,
+        )
+
         cards = [
             rule_card("receivables", *_RULE_META[0][1:], receivables_extra),
             rule_card("low_stock", *_RULE_META[1][1:], low_stock_extra),
@@ -587,6 +758,11 @@ class NotificationCenter:
             rule_card("insights", *_RULE_META[4][1:], insights_extra),
             quiet_card,
             daily_hour_card,
+            ext_header,
+            telegram_card,
+            email_card,
+            webhook_card,
+            routing_card,
             test_notification_card,
         ]
 
@@ -614,6 +790,26 @@ class NotificationCenter:
             new_cfg["quiet_hours"]["end_hour"] = _int("quiet_hours.end_hour", new_cfg["quiet_hours"]["end_hour"])
             new_cfg["daily_check_hour"] = max(0, min(23, _int("daily_check_hour", new_cfg.get("daily_check_hour", 9))))
             self.ctx.notifications.save_config(new_cfg)
+            ext_new = self.ctx.external_notifications.get_config()
+            ext_new["channels"]["telegram"]["enabled"] = ext_channel_switches["telegram"].value
+            ext_new["channels"]["telegram"]["bot_token"] = str(field_refs["ext.telegram.bot_token"].value or "").strip()
+            ext_new["channels"]["telegram"]["chat_id"] = str(field_refs["ext.telegram.chat_id"].value or "").strip()
+            ext_new["channels"]["email"]["enabled"] = ext_channel_switches["email"].value
+            ext_new["channels"]["email"]["smtp_host"] = str(field_refs["ext.email.smtp_host"].value or "").strip()
+            try:
+                ext_new["channels"]["email"]["smtp_port"] = int(str(field_refs["ext.email.smtp_port"].value or "587"))
+            except (TypeError, ValueError):
+                ext_new["channels"]["email"]["smtp_port"] = 587
+            ext_new["channels"]["email"]["username"] = str(field_refs["ext.email.username"].value or "").strip()
+            ext_new["channels"]["email"]["password"] = str(field_refs["ext.email.password"].value or "")
+            ext_new["channels"]["email"]["to_address"] = str(field_refs["ext.email.to_address"].value or "").strip()
+            ext_new["channels"]["webhook"]["enabled"] = ext_channel_switches["webhook"].value
+            ext_new["channels"]["webhook"]["url"] = str(field_refs["ext.webhook.url"].value or "").strip()
+            ext_new["rules"] = {
+                rule: [ch for ch in ("telegram", "email", "webhook") if route_state.get((rule, ch))]
+                for rule, _lbl in _EXT_RULE_LABELS
+            }
+            self.ctx.external_notifications.save_config(ext_new)
             self.refresh_badge()
             self._sync_background_notifications()
             self.notify("تم حفظ إعدادات الإشعارات")
@@ -621,7 +817,7 @@ class NotificationCenter:
         self.content.content = ft.Column(
             [
                 ft.Text(
-                    "كل نوع تنبيه يعتمد على بياناتك الحالية مباشرة (الفواتير، المخزون، الترخيص) — بدون أي اتصال إضافي بالإنترنت.",
+                    "كل تنبيه يعتمد على بياناتك الحالية مباشرة (الفواتير، المخزون، الترخيص). الإرسال الخارجي (تيليغرام/بريد/Webhook) اختياري ويتصل بالإنترنت فقط عند تفعيله.",
                     size=11, color=Colors.TEXT_SECONDARY,
                 ),
                 *cards,

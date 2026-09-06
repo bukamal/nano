@@ -25,7 +25,7 @@
           screen but never actually renders, which is exactly the
           "يتعذر عرض المحتوى" / "Couldn't load widget" placeholder Android
           shows for a provider that never responded, not a crash inside
-          NanoGlanceWidget's own compose content.
+          NanoWidgetReceiver's own onUpdate() rendering (see FIX_0.9.1).
         -->
         <receiver
             android:name="com.nano.homewidget.NanoWidgetReceiver"

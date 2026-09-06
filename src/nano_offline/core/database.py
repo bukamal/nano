@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterator
 
 # PHASE10 wave2 (B4): expense receipt photo columns (receipt_image/receipt_name) live in the expenses table schema + migration.
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15  # PHASE11: adds notification_delivery_log (external dispatch)
 
 SCHEMA_SQL = r"""
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -312,6 +312,27 @@ CREATE TABLE IF NOT EXISTS notification_log (
 
 CREATE INDEX IF NOT EXISTS idx_notification_log_created ON notification_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notification_log_unread ON notification_log(read_at) WHERE read_at IS NULL;
+
+-- External notification delivery log (PHASE11 / schema 15): one row per
+-- (dedupe_key, channel) so the external dispatch layer (see
+-- services/external_notifications.py) never double-sends an alert the
+-- internal engine already surfaced, and failures stay inspectable instead
+-- of silent. Mirrors notification_log's dedupe convention.
+CREATE TABLE IF NOT EXISTS notification_delivery_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dedupe_key TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    rule_key TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'info',
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'failed' CHECK(status IN ('sent','failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    sent_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(dedupe_key, channel)
+);
 
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,

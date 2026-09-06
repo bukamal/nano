@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FIX_0.9.1: widget card background (brand teal, rounded) as a plain
+     shape drawable, fully supported as a RemoteViews background. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#0F766E" />
+    <corners android:radius="16dp" />
+</shape>

@@ -807,8 +807,32 @@ def main(page: ft.Page):
             await native_files.schedule_notifications(**ctx.notifications.native_schedule_payload())
         except Exception:
             pass
+        # PHASE9 fix: on Android 13+ a notification is silently dropped
+        # unless the POST_NOTIFICATIONS runtime permission was granted. The
+        # settings screen asks for it, but a user who never opens that
+        # screen got no external notifications at all -- so request it here
+        # too, right after the background check is registered, so the
+        # system prompt appears on first launch and closed-app alerts can
+        # actually be delivered. Best-effort like the rest of this task.
+        try:
+            await native_files.request_notification_permission()
+        except Exception:
+            pass
 
     page.run_task(_sync_background_notifications)
+
+    async def _dispatch_external_alerts():
+        # PHASE11: fan out any pending smart alerts through the external
+        # channels the admin enabled (Telegram / email / webhook) on
+        # startup, so a condition first detected while the app was closed
+        # still reaches the owner. Best-effort -- external delivery must
+        # never block or break app startup.
+        try:
+            await ctx.external_notifications.dispatch_async()
+        except Exception:
+            pass
+
+    page.run_task(_dispatch_external_alerts)
 
     page.title = "Nano | نانو"
     page.rtl = True

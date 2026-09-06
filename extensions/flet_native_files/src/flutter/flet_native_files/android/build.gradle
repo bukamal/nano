@@ -30,13 +30,9 @@ android {
     defaultConfig {
         // Must not exceed the app module's own minSdkVersion (21, set by
         // Flet from pyproject.toml) -- Gradle's manifest merger hard-fails
-        // otherwise ("uses-sdk:minSdkVersion 21 cannot be smaller than
-        // version 23 declared in library [:flet_native_files]"). Nothing
-        // in this module actually requires API 23+: the one component
-        // that needs a newer API (NanoQuickSettingsTileService, API 24)
-        // already guards itself with @RequiresApi + a runtime SDK_INT
-        // check, so the OS simply never discovers/binds it on pre-24
-        // devices instead of crashing.
+        // otherwise. NanoQuickSettingsTileService (API 24) guards itself
+        // with @RequiresApi + a runtime SDK_INT check, so pre-24 devices
+        // simply never discover it instead of crashing.
         minSdk 21
     }
 
@@ -48,29 +44,16 @@ android {
     kotlinOptions {
         jvmTarget = '1.8'
     }
-
-    buildFeatures {
-        compose true
-    }
-    composeOptions {
-        kotlinCompilerExtensionVersion '1.5.8'
-    }
 }
 
+// FIX_0.9.1: the widget was rebuilt on the plain framework -- see
+// NanoWidgetReceiver.kt for why the Jetpack Glance layer was removed.
+// All Glance/Compose/DataStore dependencies (glance-appwidget,
+// glance-material3, ui-graphics, ui-unit, datastore-preferences) and the
+// compose buildFeatures block are gone with it. What remains is the bare
+// minimum the plugin module still needs: coroutines for the channel handler
+// and androidx.annotation (transitively used by Flutter plugin APIs).
 dependencies {
-    // Jetpack Glance: the modern, Compose-based widget toolkit this whole
-    // PHASE10 note is built around (see PHASE10_HOME_WIDGET_GLANCE_AR.md's
-    // "لماذا Jetpack Glance تحديدًا"). glance-appwidget pulls the core
-    // Glance + AppWidget integration; the plain compose runtime dependency
-    // is required for Glance's @Composable content, not for any regular UI.
-    implementation "androidx.glance:glance-appwidget:1.1.0"
-    implementation "androidx.glance:glance-material3:1.1.0"
-    implementation "androidx.compose.ui:ui-graphics:1.6.1"
-    // Required separately from ui-graphics above: the `.dp` unit extension
-    // used for Glance padding/height/spacer sizing lives in this module,
-    // not in ui-graphics, and isn't pulled in transitively as an api dep.
-    implementation "androidx.compose.ui:ui-unit:1.6.1"
-    implementation "androidx.datastore:datastore-preferences:1.0.0"
     implementation "androidx.annotation:annotation:1.7.1"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
 }

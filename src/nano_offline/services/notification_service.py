@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from typing import Callable
 
 from nano_offline.core.database import Database
 from nano_offline.repositories.item_repository import ItemRepository
@@ -109,6 +110,10 @@ class NotificationService:
         self.reports = reports
         self.license = license
         self.dashboard = dashboard
+        # PHASE11.1: external push callback wired by AppContext.create().
+        # Kept as a plain callback (not an import) so the rules engine never
+        # depends on the external layer -- no service import cycle.
+        self._external_hook: Callable[[list[Alert]], None] | None = None
 
     # -- configuration --------------------------------------------------
     def get_config(self) -> dict:
@@ -153,7 +158,15 @@ class NotificationService:
         target = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
         if target <= now:
             target += timedelta(days=1)
-        return max(0, int((target - now).total_seconds() // 60))
+        minutes = max(0, int((target - now).total_seconds() // 60))
+        # PHASE9 fix: without a cap, the first closed-app check is delayed
+        # all the way until tomorrow's daily-check hour (up to ~24h), which
+        # made external notifications look dead right after setup -- a user
+        # enabling alerts then closing the app saw nothing for a whole day.
+        # Capping it keeps the "anchor near the daily-check hour" intent
+        # while guaranteeing the first check lands within the hour; the
+        # fixed 6h interval takes over from there.
+        return min(minutes, 60)
 
     def save_config(self, config: dict) -> None:
         self.settings.set(SETTINGS_KEY, json.dumps(_merge_config(config), ensure_ascii=False))
@@ -391,9 +404,10 @@ class NotificationService:
         alerts = self.generate_alerts()
         if not alerts:
             return
+        fresh: list[Alert] = []
         with self.db.transaction() as conn:
             for alert in alerts:
-                conn.execute(
+                cur = conn.execute(
                     """INSERT OR IGNORE INTO notification_log
                        (dedupe_key, rule_key, severity, title, body, entity_type, entity_id)
                        VALUES (?,?,?,?,?,?,?)""",
@@ -407,6 +421,21 @@ class NotificationService:
                         alert.entity_id,
                     ),
                 )
+                if cur.rowcount and cur.rowcount > 0:
+                    fresh.append(alert)
+        if fresh and self._external_hook is not None:
+            # PHASE11.1: push each NEWLY generated alert out through the
+            # enabled external channels immediately, not only on next app
+            # launch. The hook is fire-and-forget (daemon thread inside the
+            # external service) and the dispatch layer still enforces quiet
+            # hours + its own delivery log, so the same alert is never sent
+            # twice by any path (bell, Telegram, email, webhook, startup).
+            self._external_hook(fresh)
+
+    def set_external_hook(self, hook: Callable[[list[Alert]], None] | None) -> None:
+        """Register/unregister the external dispatch callback (set by
+        AppContext.create after both services exist)."""
+        self._external_hook = hook
 
     def recent(self, limit: int = 30) -> list[dict]:
         self.sync()

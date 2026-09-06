@@ -17,6 +17,7 @@ from nano_offline.services.expense_service import ExpenseService
 from nano_offline.services.forecast_service import ForecastService
 from nano_offline.services.invoice_service import InvoiceService
 from nano_offline.services.license_service import LicenseService
+from nano_offline.services.external_notifications import ExternalNotificationService
 from nano_offline.services.notification_service import NotificationService
 from nano_offline.services.payment_service import PaymentService
 from nano_offline.services.reporting_service import ReportingService
@@ -46,6 +47,7 @@ class AppContext:
     backup: BackupService
     license: LicenseService
     notifications: NotificationService
+    external_notifications: ExternalNotificationService
     smart_assistant: SmartAssistantService
     cash_day_close: CashDayCloseService
     stocktake: StocktakeService
@@ -70,6 +72,13 @@ class AppContext:
         notifications_svc = NotificationService(
             db, settings_repo, items_repo, ReportingService(db), license_svc, dashboard_svc
         )
+        external_notifications_svc = ExternalNotificationService(db, settings_repo, notifications_svc)
+        # PHASE11.1: wire the immediate-push hook -- the moment the rules
+        # engine creates a NEW alert, fan it out through the enabled external
+        # channels right away (same rules, same quiet hours, delivery-log
+        # dedupe) instead of waiting for the next app launch. Fire-and-forget
+        # via a daemon thread inside the external service.
+        notifications_svc.set_external_hook(external_notifications_svc.background_dispatch)
         smart_assistant_svc = SmartAssistantService(
             db,
             notifications=notifications_svc,
@@ -95,6 +104,7 @@ class AppContext:
             backup=backup,
             license=license_svc,
             notifications=notifications_svc,
+            external_notifications=external_notifications_svc,
             smart_assistant=smart_assistant_svc,
             cash_day_close=CashDayCloseService(db),
             stocktake=StocktakeService(db, items_repo, stocktake_repo, auth),
