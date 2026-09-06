@@ -89,6 +89,15 @@ allprojects {
 EOF
 echo "Installed Gradle init script for core library desugaring at ${GRADLE_INIT_DIR}/nano-core-library-desugaring.init.gradle.kts" >&2
 
+# FIX_0.9.1-CI: flet copies the extension into build/flutter-packages and
+# reuses it across retries. A stale file there (e.g. the pre-0.9.1
+# NanoGlanceWidget.kt that 0.9.1 deleted from source) survives the retry
+# loop and gets compiled against 0.9.1's Glance-free build.gradle, failing
+# :flet_native_files:compileReleaseKotlin with "Unresolved reference:
+# glance/compose" on every attempt. Wipe the staging dir so every build
+# starts from a fresh copy of the source tree.
+rm -rf build/flutter-packages 2>/dev/null || true
+
 MAX_ATTEMPTS=3
 attempt=1
 while true; do
@@ -135,6 +144,10 @@ while true; do
   if [ -d build/flutter ]; then
     rm -rf build/flutter/.dart_tool build/flutter/pubspec.lock 2>/dev/null || true
   fi
+  # FIX_0.9.1-CI: also drop the stale extension staging copy (see the
+  # comment above) so a retry re-copies the current source tree instead
+  # of recompiling leftover files.
+  rm -rf build/flutter-packages 2>/dev/null || true
   attempt=$((attempt + 1))
   sleep 5
 done
