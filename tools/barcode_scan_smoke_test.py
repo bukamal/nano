@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='qeid-barcode-') as td:
 
     db = Database(old_db)
     db.initialize()
-    assert SCHEMA_VERSION == 9
+    assert SCHEMA_VERSION >= 9
     with db.connect() as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(items)")}
         assert 'barcode' in cols

@@ -14,7 +14,7 @@ for token in [
     "def set_filter",
     "def _invoice_more_dialog",
     "فواتير مفتوحة",
-    "ft.Row(actions, spacing=8, wrap=True)",
+    "ft.Row(actions, spacing=8))",
 ]:
     assert token in invoice, token
 

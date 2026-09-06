@@ -19,7 +19,7 @@ assert "FilePicker.platform.pickFiles" in dart
 # Bump the local package so stale editable/wheel metadata cannot silently win.
 assert 'version = "0.8.1"' in root_pyproject
 assert 'build_number = 14' in root_pyproject
-assert '"flet-native-files==0.1.5"' in root_pyproject
+assert '"flet-native-files==0.1.6"' in root_pyproject
 assert "--build-number 14" in workflow
 assert "--build-version 0.8.1" in workflow
 

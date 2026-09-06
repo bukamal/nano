@@ -298,6 +298,16 @@ Future<void> _pushHomeWidgetJson(String snapshotJson) async {
   }
 }
 
+// Backs the admin "تشخيص ودجت الشاشة الرئيسية" panel. Unlike the push
+// helper above, a failure here is itself the diagnostic signal, so it is
+// deliberately not swallowed -- it propagates to the 'diagnose_home_widget'
+// case below, which reports it as its own line instead of a generic push
+// failure.
+Future<String> _diagnoseHomeWidget() async {
+  final raw = await _homeWidgetChannel.invokeMethod('diagnose');
+  return (raw as String?) ?? '{}';
+}
+
 Future<void> _pushHomeWidgetSnapshot(Database db) async {
   final sales = db.select(
     "SELECT COALESCE(SUM(total),0) s FROM invoices "
@@ -657,6 +667,16 @@ class _FletNativeFilesControlState extends State<FletNativeFilesControl> {
           if (!Platform.isAndroid) return 'ok';
           await _pushHomeWidgetJson(args['snapshot_json'] ?? '{}');
           return 'ok';
+
+        case 'diagnose_home_widget':
+          // Backs the admin diagnostics panel. Non-Android and pre-PHASE10
+          // builds report that explicitly instead of a silent 'ok', same
+          // shape as diagnose_sound's bridge_error convention on the
+          // Python side.
+          if (!Platform.isAndroid) {
+            return jsonEncode({'unsupported_platform': Platform.operatingSystem});
+          }
+          return await _diagnoseHomeWidget();
 
         default:
           return null;

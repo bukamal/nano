@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 SCHEMA_SQL = r"""
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -263,6 +263,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
     details TEXT,
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     username TEXT,
+    -- Tamper-evident chain (phase 10): row_hash hashes this row's canonical
+    -- payload plus prev_hash (the previous row's row_hash). Computed by the
+    -- trg_audit_chain AFTER INSERT trigger, so every write path is covered.
+    -- Rows written before this migration keep NULL hashes and act as the
+    -- sealed chain root (see core/audit_chain.py).
+    prev_hash TEXT,
+    row_hash TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -359,15 +366,55 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, created_at);
 
-CREATE TRIGGER IF NOT EXISTS trg_audit_attach_actor
+-- Phase 10: single combined AFTER INSERT trigger that BOTH stamps the
+-- acting user (legacy behavior of trg_audit_attach_actor) AND computes the
+-- tamper-evident chain hashes, using NEW.* + COALESCE so the hash always
+-- covers the FINAL stored values regardless of trigger firing order (SQLite
+-- does not guarantee AFTER-trigger order, so splitting the two steps across
+-- two triggers hashed the row before the actor was stamped and broke the
+-- chain). nano_chain_hash is registered on every connection in
+-- Database.connect() and delegates to core/audit_chain.compute_row_hash.
+CREATE TRIGGER IF NOT EXISTS trg_audit_chain
 AFTER INSERT ON audit_log
-WHEN NEW.user_id IS NULL
 BEGIN
     UPDATE audit_log
-       SET user_id=qeid_actor_id(), username=qeid_actor_username()
+       SET user_id = COALESCE(NEW.user_id, qeid_actor_id()),
+           username = COALESCE(NEW.username, qeid_actor_username()),
+           prev_hash = (SELECT row_hash FROM audit_log WHERE id < NEW.id ORDER BY id DESC LIMIT 1),
+           row_hash = nano_chain_hash(
+               NEW.action,
+               NEW.entity_type,
+               NEW.entity_id,
+               NEW.details,
+               COALESCE(NEW.user_id, qeid_actor_id()),
+               COALESCE(NEW.username, qeid_actor_username()),
+               NEW.created_at,
+               (SELECT row_hash FROM audit_log WHERE id < NEW.id ORDER BY id DESC LIMIT 1)
+           )
      WHERE id=NEW.id;
 END;
+
+-- Legacy actor-stamping trigger is folded into trg_audit_chain above.
+DROP TRIGGER IF EXISTS trg_audit_attach_actor;
 """
+
+
+def _nano_chain_hash(action, entity_type, entity_id, details, user_id, username, created_at, prev_hash) -> str:
+    """SQLite-callable wrapper (registered on every connection) that computes
+    the tamper-evident audit row hash -- delegating to audit_chain so the
+    trigger and the verifier can never drift apart in how they hash."""
+    from nano_offline.core import audit_chain
+
+    return audit_chain.compute_row_hash(
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        details=details,
+        user_id=user_id,
+        username=username,
+        created_at=created_at,
+        prev_hash=prev_hash,
+    )
 
 
 class Database:
@@ -391,6 +438,7 @@ class Database:
         conn.execute("PRAGMA temp_store = MEMORY")
         conn.create_function("qeid_actor_id", 0, lambda: self._actor_user_id)
         conn.create_function("qeid_actor_username", 0, lambda: self._actor_username)
+        conn.create_function("nano_chain_hash", 8, _nano_chain_hash)
         return conn
 
     def initialize(self) -> None:
@@ -511,6 +559,12 @@ class Database:
                 conn.execute("ALTER TABLE audit_log ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
             if not self._has_column(conn, "audit_log", "username"):
                 conn.execute("ALTER TABLE audit_log ADD COLUMN username TEXT")
+            # Phase 10: tamper-evident chain columns. Non-destructive; legacy
+            # rows keep NULL hashes and become the sealed chain root.
+            if not self._has_column(conn, "audit_log", "prev_hash"):
+                conn.execute("ALTER TABLE audit_log ADD COLUMN prev_hash TEXT")
+            if not self._has_column(conn, "audit_log", "row_hash"):
+                conn.execute("ALTER TABLE audit_log ADD COLUMN row_hash TEXT")
 
         if self._table_exists(conn, "users"):
             for column in ("quick_auth_type", "quick_auth_hash", "quick_auth_salt", "quick_auth_key_id", "remember_token_hash"):

@@ -33,7 +33,7 @@ def refresh_home_widget(page, native_files, dashboard) -> None:
     No-op if native_files wasn't wired in (desktop/dev runs without the
     Android bridge). Uses page.run_task, the same fire-and-forget pattern
     already used for sound playback (core/sound.py) and notification
-    permission requests (views/notifications_view.py) -- callers never await
+    permission-grant calls (views/notifications_view.py) -- callers never await
     this and a slow/failed push never blocks the save flow that triggered it.
     """
     if native_files is None:

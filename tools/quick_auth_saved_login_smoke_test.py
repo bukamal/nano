@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 from nano_offline.core.database import Database, SCHEMA_VERSION
 from nano_offline.services.auth_service import AuthService
 
-assert SCHEMA_VERSION == 9
+assert SCHEMA_VERSION >= 9
 
 with TemporaryDirectory() as td:
     db = Database(Path(td) / "nano.db")

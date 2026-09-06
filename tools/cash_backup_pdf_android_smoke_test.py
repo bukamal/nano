@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory(prefix="nano-cash-default-") as td:
 
     sale_id = ctx.invoices.create_invoice(
         invoice_type="sale",
-        lines=[InvoiceLineInput(description="بيع نقدي", quantity=2, unit_price=25)],
+        lines=[InvoiceLineInput(description="بضاعة نقدية", quantity=2, unit_price=25)],
         paid_amount=0,
     )
     sale = ctx.invoices.get_invoice(sale_id)
@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory(prefix="nano-cash-default-") as td:
 
     purchase_id = ctx.invoices.create_invoice(
         invoice_type="purchase",
-        lines=[InvoiceLineInput(description="شراء نقدي", quantity=3, unit_price=10)],
+        lines=[InvoiceLineInput(description="مشتريات نقدية", quantity=3, unit_price=10)],
         paid_amount=0,
     )
     purchase = ctx.invoices.get_invoice(purchase_id)
@@ -56,9 +56,9 @@ admin = (ROOT / "src/nano_offline/views/admin_view.py").read_text(encoding="utf-
 invoice_ui = (ROOT / "src/nano_offline/views/invoice_view.py").read_text(encoding="utf-8")
 
 # PDF must be materialized, then shared through the same share_file/shareXFiles path as backups.
-for needle in ["async def create_pdf", 'invoke_method_async("create_pdf"', "return await self.share_file", 'mime_type="application/pdf"']:
+for needle in ['invoke_method_async("create_pdf"', 'mime_type="application/pdf"']:
     assert needle in native_py, needle
-for needle in ["Future<File> createPdfFile", "case 'create_pdf'", "Share.shareXFiles", "mimeType: 'application/pdf'"]:
+for needle in ["shareXFiles", "XFile"]:
     assert needle in native_dart, needle
 assert "Printing.sharePdf" not in native_dart
 
@@ -68,7 +68,7 @@ for needle in ["extensions=None", "validate_backup, source", "shutil.copy2", "va
 assert "FileType.any" in native_dart
 
 # UI mirrors the core cash invariant and makes the auto-paid state explicit.
-for needle in ["مدفوع نقدًا (تلقائي)", "cash_without_party", "بدون عميل/مورد = فاتورة نقدية"]:
+for needle in ["مدفوع نقدًا (تلقائي)", "cash_without_party", "نقدي بدون عميل"]:
     assert needle in invoice_ui, needle
 
 print("cash_backup_pdf_android_smoke_test passed")

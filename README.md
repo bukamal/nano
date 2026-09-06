@@ -85,6 +85,13 @@ python tools/verify_flet_native_files_registration.py build/flutter
 - لم يتم بناء APK فعليًا داخل بيئة الاختبار الحالية لعدم توفر Flet/Flutter Runtime كامل للبناء.
 
 
+## تحديث 0.9.0 — سلسلة تدقيق مقاومة للعبث وتشفير النسخ
+
+- **سلسلة تدقيق (Audit Chain)**: كل سجل في `audit_log` يحمل الآن `prev_hash` و`row_hash` (SHA-256 تُحسب داخل Trigger تلقائيًا لكل عملية كتابة، دون تعديل أي استدعاء). أي تعديل أو حذف أو إعادة ترتيب لسجل قديم يُكسر السلسلة ويكشفه فحص `verify_audit_chain` فورًا. سجلات ما قبل الترحيل تبقى ختمًا للجذر ولا تُعاد كتابتها.
+- **نسخ احتياطية مشفرة AES-256-GCM**: `create_backup(..., password=...)` يغلف القاعدة بمفتاح مشتق PBKDF2-SHA256 (Salt+Nonce عشوائيان) ويصف التشفير في `manifest.json`، مع بقاء فحص SHA-256 وسلامة SQLite. الاسترجاع يتطلب كلمة المرور، والنسخ القديمة غير المشفرة تبقى متوافقة (`encrypted=false`).
+- Schema Version 13 (ترحيل غير هدّام)، إصدار التطبيق 0.9.0 (build 18).
+- اختبارات جديدة في بوابة الجودة: `phase10_audit_chain_smoke_test.py` و `phase10_backup_encryption_smoke_test.py`.
+
 ## الهوية البصرية
 
 - الشعار والهوية داخل `branding/`.

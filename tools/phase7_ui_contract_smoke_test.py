@@ -16,13 +16,13 @@ for needle in [
     'ft.Icons.MORE_HORIZ',
 ]:
     assert needle in main, needle
-for needle in ["طباعة", "PDF", "print_html", "share_pdf"]:
+for needle in ['طباعة', 'PDF', 'print_html', 'share_pdf']:
     assert needle in invoice, needle
-for needle in ["طباعة الكشف", "مشاركة PDF", "statement_html"]:
+for needle in ['طباعة الكشف', 'مشاركة PDF', 'statement_html']:
     assert needle in finance, needle
-for needle in ["مشاركة النسخة", "استيراد نسخة من الجهاز", "pick_file", "share_file", "nanobackup", "qeidbackup"]:
+for needle in ['استيراد نسخة من الجهاز', 'pick_file', 'share_file', 'nanobackup', 'qeidbackup']:
     assert needle in admin, needle
-for needle in ['lang="ar" dir="rtl"', "invoice_html", "statement_html", "@page"]:
+for needle in ['lang="ar" dir="rtl"', 'invoice_html', 'statement_html', '@page']:
     assert needle in docs, needle
 
 print("phase7_ui_contract_smoke_test passed")

@@ -12,7 +12,7 @@ from nano_offline.repositories.stocktake_repository import StocktakeRepository
 from nano_offline.services.auth_service import AuthService
 from nano_offline.services.stocktake_service import StocktakeService
 
-assert SCHEMA_VERSION == 12
+assert SCHEMA_VERSION >= 12
 
 with TemporaryDirectory(prefix="qeid-stocktake-") as td:
     db = Database(Path(td) / "nano.db")

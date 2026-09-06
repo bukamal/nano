@@ -61,7 +61,7 @@ with tempfile.TemporaryDirectory(prefix='qeid-barcode-labels-') as td:
     # --- 3. Document service: branding flows into every printed shell ---
     invoices = InvoiceService(db)
     doc = DocumentService(db, invoices, StatementService(db))
-    shell_html = doc._shell('عنوان تجريبي', '<p>محتوى</p>')
+    shell_html = doc._shell('عنوان تجريبي', '<p>محتوى</p>', '')
     assert '#7C3AED' in shell_html
     assert 'متجر النجمة' in shell_html
 

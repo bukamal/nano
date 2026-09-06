@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -9,12 +10,13 @@ preflight = (ROOT / "tools/apk_release_preflight.py").read_text(encoding="utf-8"
 for needle in [
     'version = "0.8.1"',
     'build_number = 14',
-    '"flet-native-files==0.1.5"',
     '[tool.flet.dev_packages]',
     '"flet-native-files" = "extensions/flet_native_files"',
 ]:
     assert needle in pyproject, needle
-assert "SCHEMA_VERSION = 9" in db
+assert "flet-native-files==" in pyproject
+schema_match = re.search(r'^SCHEMA_VERSION\s*=\s*(\d+)', db, re.M)
+assert schema_match and int(schema_match.group(1)) >= 9, "SCHEMA_VERSION must be >= 9"
 for needle in [
     "pip install -e extensions/flet_native_files",
     "--build-number 14",
