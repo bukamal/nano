@@ -25,6 +25,7 @@ REPORT_TYPE_LABELS = {
     "inventory": "حركة وتقييم المخزون",
     "balances": "ذمم العملاء والموردين",
     "cash": "حركة الصندوق",
+    "forecast": "التوقعات الموسمية",
 }
 
 RANGE_LABELS = {

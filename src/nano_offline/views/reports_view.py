@@ -8,6 +8,7 @@ from nano_offline.components import SmartDateField, empty_state
 from nano_offline.core.theme import Colors, Radius, Shadow
 from nano_offline.core import currency
 from nano_offline.core import reporting_settings
+from nano_offline.services.forecast_service import MONTH_NAMES_AR
 
 
 # (key, label, icon) for each report tab. Labels are the exact literal
@@ -23,6 +24,7 @@ _REPORT_TABS: list[tuple[str, str, str]] = [
     ("inventory", "حركة وتقييم المخزون", ft.Icons.INVENTORY_2_OUTLINED),
     ("balances", "ذمم العملاء والموردين", ft.Icons.PEOPLE_ALT_OUTLINED),
     ("cash", "حركة الصندوق", ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED),
+    ("forecast", "التوقعات الموسمية", ft.Icons.INSIGHTS_OUTLINED),
 ]
 
 # Maps an accent color token to its matching soft-background token, resolved
@@ -397,6 +399,8 @@ class ReportsCenter:
                 controls = self._render_inventory()
             elif report == "balances":
                 controls = self._render_balances()
+            elif report == "forecast":
+                controls = self._render_forecast()
             else:
                 controls = self._render_cash()
         except Exception as exc:
@@ -440,6 +444,10 @@ class ReportsCenter:
                 customers=customers, suppliers=suppliers,
                 open_customers=open_customers, open_suppliers=open_suppliers, as_of=date_to,
             )
+        if report == "forecast":
+            sales = self.ctx.forecast.seasonal_forecast(invoice_type="sale", date_from=date_from, date_to=date_to)
+            purchases = self.ctx.forecast.seasonal_forecast(invoice_type="purchase", date_from=date_from, date_to=date_to)
+            return documents.forecast_report_html(sales=sales, purchases=purchases, date_from=date_from, date_to=date_to)
         data = self.ctx.reports.cash_movement(date_from=date_from, date_to=date_to)
         return documents.cash_report_html(data, date_from=date_from, date_to=date_to)
 
@@ -669,6 +677,83 @@ class ReportsCenter:
             self._section_title(ft.Icons.SWAP_VERT_ROUNDED, "حركات الصندوق"),
             cards,
         ]
+
+    # -- seasonal forecast (phase10 wave4, B1) -----------------------------
+    def _render_forecast(self) -> list[ft.Control]:
+        """Sales/purchase forecast built from local invoice history only.
+        Pure-DB analytics (no native extension): renders the same data the
+        printable HTML mirrors in document_service.forecast_report_html."""
+        date_from, date_to = self._dates()
+        sales = self.ctx.forecast.seasonal_forecast(invoice_type="sale", date_from=date_from, date_to=date_to)
+        purchases = self.ctx.forecast.seasonal_forecast(invoice_type="purchase", date_from=date_from, date_to=date_to)
+
+        def direction_card(title: str, icon, accent: str, data: dict) -> list[ft.Control]:
+            if data["insufficient"]:
+                return [
+                    self._section_title(icon, title),
+                    self._empty(data.get("reason") or "لا توجد بيانات كافية للتوقع الموسمي.", icon=icon),
+                ]
+            chips: list[ft.Control] = [
+                ft.Container(
+                    ft.Text(
+                        f"{MONTH_NAMES_AR.get(cal, cal)} {float(data['seasonal'].get(cal, 1.0)):.2f}",
+                        size=9.5, weight=ft.FontWeight.BOLD,
+                        color=Colors.PRIMARY if float(data["seasonal"].get(cal, 1.0)) > 1.05 else Colors.TEXT_SECONDARY,
+                    ),
+                    padding=ft.padding.symmetric(horizontal=8, vertical=5),
+                    bgcolor=Colors.PRIMARY_BG if float(data["seasonal"].get(cal, 1.0)) > 1.05 else Colors.BACKGROUND_ALT,
+                    border_radius=Radius.MD,
+                )
+                for cal in range(1, 13)
+            ]
+            entries: list[ft.Control] = []
+            for f in data["forecasts"]:
+                entries.append(
+                    self._entry(
+                        icon=icon,
+                        accent=accent,
+                        title=f"{f['month_label']} {f['month']}",
+                        subtitle=f"المؤشر الموسمي {f['seasonal_index']:.2f}",
+                        value=self.money(f["forecast"]),
+                        value_sub=f"{self.money(f['low'])} – {self.money(f['high'])}",
+                    )
+                )
+            return [
+                self._section_title(icon, title),
+                ft.ResponsiveRow(
+                    [
+                        ft.Container(self._metric("المتوسط الشهري", self.money(data["monthly_average"]), icon=ft.Icons.CALCULATE_OUTLINED, accent=accent), col={"xs": 6, "md": 3}),
+                        ft.Container(self._metric("أساس الاتجاه", self.money(data["trend_base"]), icon=ft.Icons.ROUTE_OUTLINED, accent=Colors.ORANGE), col={"xs": 6, "md": 3}),
+                        ft.Container(self._metric("دقة التوقع", data["confidence_label"], icon=ft.Icons.VERIFIED_OUTLINED, accent=Colors.SUCCESS, note=f"هامش ±{data['band_percent']}٪"), col={"xs": 6, "md": 3}),
+                        ft.Container(self._metric("أشهر البيانات", str(data["history_months"]), icon=ft.Icons.DATE_RANGE_OUTLINED, accent=Colors.PURPLE), col={"xs": 6, "md": 3}),
+                    ],
+                    spacing=10, run_spacing=10,
+                ),
+                ft.Container(
+                    ft.Column(
+                        [
+                            ft.Text("المؤشر الموسمي حسب الشهر التقويمي (أعلى من 1.05 = ذروة موسمية)", size=10.5, color=Colors.TEXT_SECONDARY),
+                            ft.Row(chips, spacing=6, wrap=True),
+                        ],
+                        spacing=8,
+                    ),
+                    padding=12,
+                    border=ft.border.all(1, Colors.BORDER_ALT),
+                    border_radius=Radius.LG,
+                    bgcolor=Colors.WHITE,
+                    shadow=Shadow.SM,
+                ),
+                *entries,
+            ]
+
+        blocks: list[ft.Control] = [
+            self._footnote(
+                "التوقع = متوسط آخر أشهر الفترة × المؤشر الموسمي للشهر القادم، مع نطاق ± يعتمد على تقلب البيانات. يُحسب من فواتير البيع/الشراء في قاعدة البيانات."
+            ),
+        ]
+        blocks += direction_card("توقعات المبيعات", ft.Icons.TRENDING_UP_ROUNDED, Colors.PRIMARY, sales)
+        blocks += direction_card("توقعات المشتريات", ft.Icons.TRENDING_DOWN_ROUNDED, Colors.ORANGE, purchases)
+        return blocks
 
 
 __all__ = ["ReportsCenter"]

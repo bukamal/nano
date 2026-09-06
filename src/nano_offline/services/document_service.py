@@ -964,3 +964,48 @@ body {{
 </table>
 """
         return self._shell("الصندوق", "حركة الصندوق", body)
+
+    def forecast_report_html(self, *, sales: dict, purchases: dict, date_from: str | None, date_to: str | None) -> str:
+        """Printable seasonal-forecast report -- mirrors ReportsCenter._render_forecast."""
+        from nano_offline.services.forecast_service import MONTH_NAMES_AR
+
+        def direction_section(title: str, data: dict) -> str:
+            if data.get("insufficient"):
+                return (
+                    f'<div class="doc-title" style="margin:8px 0">{self._e(title)}</div>'
+                    f'<table><tbody><tr><td>{self._e(data.get("reason") or "لا توجد بيانات كافية.")}</td></tr></tbody></table>'
+                )
+            rows = "".join(
+                f"<tr><td>{self._e(f['month_label'])} {self._e(f['month'])}</td>"
+                f"<td>{f['seasonal_index']:.2f}</td>"
+                f"<td class='money'>{self._money(f['forecast'])}</td>"
+                f"<td class='money'>{self._money(f['low'])}</td>"
+                f"<td class='money'>{self._money(f['high'])}</td></tr>"
+                for f in data["forecasts"]
+            )
+            index_cells = "".join(
+                f"<td>{MONTH_NAMES_AR.get(i, i)}<br/><b>{float(data['seasonal'].get(i, 1.0)):.2f}</b></td>"
+                for i in range(1, 13)
+            )
+            return f"""
+<div class="doc-title" style="margin:8px 0">{self._e(title)}</div>
+<div class="grid">
+  <div class="metric"><small>متوسط شهري</small><strong class="money">{self._money(data['monthly_average'])}</strong></div>
+  <div class="metric"><small>أساس الاتجاه</small><strong class="money">{self._money(data['trend_base'])}</strong></div>
+  <div class="metric"><small>دقة التوقع</small><strong>{self._e(data['confidence_label'])}</strong></div>
+  <div class="metric"><small>أشهر البيانات</small><strong>{int(data['history_months'])}</strong></div>
+</div>
+<table>
+<thead><tr><th>الشهر</th><th>المؤشر الموسمي</th><th>المتوقع</th><th>الحد الأدنى</th><th>الحد الأعلى</th></tr></thead>
+<tbody>{rows or '<tr><td colspan="5">لا توجد توقعات.</td></tr>'}</tbody>
+</table>
+<div class="doc-title" style="margin:16px 0 6px">المؤشر الموسمي لكل شهر تقويمي</div>
+<table><thead><tr>{''.join(f'<th>{MONTH_NAMES_AR.get(i, i)}</th>' for i in range(1, 13))}</tr></thead><tbody><tr>{index_cells}</tr></tbody></table>
+"""
+
+        body = f"""
+<div class="meta-row"><span>الفترة: <b>{self._e(self._period_label(date_from, date_to))}</b></span></div>
+{direction_section("توقعات المبيعات", sales)}
+{direction_section("توقعات المشتريات", purchases)}
+"""
+        return self._shell("التوقعات الموسمية", "التوقعات الموسمية للمبيعات والمشتريات", body)

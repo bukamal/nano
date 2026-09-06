@@ -14,6 +14,7 @@ from nano_offline.services.backup_service import BackupService
 from nano_offline.services.dashboard_service import DashboardService
 from nano_offline.services.document_service import DocumentService
 from nano_offline.services.expense_service import ExpenseService
+from nano_offline.services.forecast_service import ForecastService
 from nano_offline.services.invoice_service import InvoiceService
 from nano_offline.services.license_service import LicenseService
 from nano_offline.services.notification_service import NotificationService
@@ -37,6 +38,7 @@ class AppContext:
     expenses: ExpenseService
     statements: StatementService
     reports: ReportingService
+    forecast: ForecastService
     dashboard: DashboardService
     documents: DocumentService
     settings: SettingsRepository
@@ -85,6 +87,7 @@ class AppContext:
             expenses=expenses,
             statements=StatementService(db),
             reports=ReportingService(db),
+            forecast=ForecastService(db),
             dashboard=dashboard_svc,
             documents=DocumentService(db, invoices, StatementService(db)),
             settings=settings_repo,
