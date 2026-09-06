@@ -14,7 +14,7 @@ from nano_offline.components.buttons import hero_button, stepper_icon_button
 from nano_offline.services.invoice_service import InvoiceLineInput
 from nano_offline.core.theme import Colors, IconSize, LazyPalette, Radius, Shadow
 from nano_offline.core import currency
-from nano_offline.core.margin_guard import cart_margin_warnings
+from nano_offline.core.margin_guard import cart_margin_warnings, check_sale_margin
 from nano_offline.core import barcode_settings
 from nano_offline.core import pos_settings
 from nano_offline.core import sound as sound_engine
@@ -76,6 +76,9 @@ class POSCenter:
         # Session-only "last added" recall -- most-recent-first, deduped,
         # capped short on purpose (a quick-recall strip, not a history log).
         self.recent_item_ids: list[int] = []
+        # Phase B: floating last-scan card + success overlay state
+        self._last_scan_token: int = 0
+        self._success_visible: bool = False
 
     def money(self, value: float) -> str:
         return currency.format_amount(value, self.ctx.settings)
@@ -660,15 +663,21 @@ class POSCenter:
                     customer_id=self.customer_id,
                     paid_amount=paid,
                 )
-                self.notify(f"تم البيع بنجاح — فاتورة #{invoice_id}" + (f" · الباقي {self.money(max(0, received - total))}" if received > total else ""))
+                change_amt = max(0.0, received - total)
                 if auto_print_switch.value and self.native_files is not None:
                     self.page.run_task(self._print_receipt, invoice_id)
-                clear_cart()
-                refresh_cart()
-                refresh_today_summary()
+                # Keep cart data for the success screen; clear after user taps «بيع جديد»
                 if self.on_saved:
                     self.on_saved()
-                self.page.update()
+                self._show_sale_success(
+                    invoice_id=invoice_id,
+                    total=total,
+                    received=received,
+                    change=change_amt,
+                    clear_cart_fn=clear_cart,
+                    refresh_cart_fn=refresh_cart,
+                    refresh_today_fn=refresh_today_summary,
+                )
                 return True
             except Exception as exc:
                 self.notify(str(exc), kind="error")
@@ -1023,7 +1032,7 @@ class POSCenter:
             expand=True,
         )
 
-        self.content.content = ft.Column(
+        main_column = ft.Column(
             [
                 pos_header,
                 ft.Container(scroll_body, padding=ft.padding.only(left=18, right=18, top=14, bottom=10), expand=True),
@@ -1031,6 +1040,28 @@ class POSCenter:
                 bottom_pay_bar,
             ],
             spacing=0,
+            expand=True,
+        )
+
+        # Phase B overlays: last-scan floating card (top) + full success screen
+        last_scan_overlay = ft.Container(
+            visible=False,
+            alignment=ft.alignment.top_center,
+            padding=ft.padding.only(top=72, left=20, right=20),
+            content=ft.Container(),
+        )
+        success_overlay = ft.Container(
+            visible=False,
+            expand=True,
+            bgcolor="#CC0F172A",  # dim scrim
+            alignment=ft.alignment.center,
+            content=ft.Container(),
+        )
+        self._last_scan_overlay = last_scan_overlay
+        self._success_overlay = success_overlay
+
+        self.content.content = ft.Stack(
+            [main_column, last_scan_overlay, success_overlay],
             expand=True,
         )
         apply_pos_mode()
@@ -1043,6 +1074,10 @@ class POSCenter:
         self._barcode_field = barcode_field
         self._render_recent = render_recent
         self._refresh_today_summary = refresh_today_summary
+        self._clear_cart = clear_cart
+        self._total_amount = total_amount
+        self._received_amount = received_amount
+        self._do_checkout = do_checkout
 
     # ------------------------------------------------------------------ #
     # Small UI helpers
@@ -1140,6 +1175,41 @@ class POSCenter:
                 f"⚠️ المتوفر فعليًا: {self._qty(item.get('quantity'))} فقط",
                 size=10, color=Colors.DANGER_DARK, weight=ft.FontWeight.W_600,
             )
+
+        # Phase B: margin badge (below cost) + qty badge on cart lines
+        margin_info = check_sale_margin(
+            unit_price_usd=float(item.get("selling_price") or 0),
+            item=item,
+            settings=self.ctx.settings,
+        )
+        below_cost = bool(margin_info.get("flag") and margin_info.get("below_cost", margin_info.get("flag")))
+        badges: list = []
+        qty_val = float(row["qty"] or 0)
+        if qty_val > 1:
+            badges.append(
+                ft.Container(
+                    ft.Text(f"×{self._qty(qty_val).rstrip('0').rstrip('.')}", size=10, weight=ft.FontWeight.BOLD, color=Colors.WHITE),
+                    padding=ft.padding.symmetric(horizontal=7, vertical=2),
+                    bgcolor=Colors.PRIMARY,
+                    border_radius=8,
+                )
+            )
+        if below_cost:
+            badges.append(
+                ft.Container(
+                    ft.Text("تحت التكلفة", size=9, weight=ft.FontWeight.BOLD, color=Colors.WHITE),
+                    padding=ft.padding.symmetric(horizontal=7, vertical=2),
+                    bgcolor=Colors.DANGER,
+                    border_radius=8,
+                )
+            )
+
+        name_row_controls = [
+            ft.Text(item["name"], size=12, weight=ft.FontWeight.W_600, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, expand=True),
+        ]
+        if badges:
+            name_row_controls.append(ft.Row(badges, spacing=4, tight=True))
+
         return ft.Container(
             ft.Column(
                 [
@@ -1147,8 +1217,12 @@ class POSCenter:
                         [
                             ft.Column(
                                 [
-                                    ft.Text(item["name"], size=12, weight=ft.FontWeight.W_600, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
-                                    ft.Text(f"{self.money(item['selling_price'])} × {self._qty(row['qty'])} = {self.money(line_total)}", size=11, color=Colors.TEXT_SECONDARY),
+                                    ft.Row(name_row_controls, spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                                    ft.Text(
+                                        f"{self.money(item['selling_price'])} × {self._qty(row['qty'])} = {self.money(line_total)}",
+                                        size=11,
+                                        color=Colors.TEXT_SECONDARY,
+                                    ),
                                 ],
                                 spacing=1, expand=True,
                             ),
@@ -1164,8 +1238,8 @@ class POSCenter:
                 spacing=2,
             ),
             padding=ft.padding.symmetric(horizontal=8, vertical=4),
-            bgcolor=Colors.BACKGROUND_ALT,
-            border=ft.border.all(1, Colors.DANGER) if exceeds_stock else None,
+            bgcolor=Colors.DANGER_BG if below_cost else Colors.BACKGROUND_ALT,
+            border=ft.border.all(1, Colors.DANGER) if (exceeds_stock or below_cost) else None,
             border_radius=10,
         )
 
@@ -1178,13 +1252,175 @@ class POSCenter:
         if item is None:
             return
         row = self.cart.get(item_id)
+        is_repeat = row is not None
         if row is None:
             self.cart[item_id] = {"item": item, "qty": qty_delta}
             self.cart_order.append(item_id)
+            new_qty = qty_delta
         else:
             row["qty"] += qty_delta
+            new_qty = row["qty"]
         self._remember_recent(item_id)
         self._refresh_cart()
+        self._show_last_scan_card(item, new_qty, is_repeat=is_repeat)
+        self.page.update()
+
+    def _show_last_scan_card(self, item: dict, qty: float, is_repeat: bool = False) -> None:
+        """Phase B: floating «آخر مسح» card — appears ~1.5s then fades away."""
+        overlay = getattr(self, "_last_scan_overlay", None)
+        if overlay is None:
+            return
+        self._last_scan_token += 1
+        token = self._last_scan_token
+        name = str(item.get("name") or "")
+        price = self.money(float(item.get("selling_price") or 0))
+        qty_label = f"×{self._qty(qty).rstrip('0').rstrip('.')}" if qty != 1 else ""
+        subtitle = f"{price}  {qty_label}".strip()
+        if is_repeat and qty > 1:
+            subtitle = f"{price}  ·  الكمية {self._qty(qty)}"
+
+        overlay.content = ft.Container(
+            ft.Row(
+                [
+                    ft.Container(
+                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=Colors.WHITE, size=28),
+                        width=44, height=44, border_radius=12,
+                        bgcolor=Colors.SUCCESS, alignment=ft.alignment.center,
+                    ),
+                    ft.Column(
+                        [
+                            ft.Text(name, size=14, weight=ft.FontWeight.BOLD, color=Colors.TEXT_PRIMARY, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+                            ft.Text(subtitle, size=12, color=Colors.TEXT_SECONDARY),
+                        ],
+                        spacing=2, expand=True,
+                    ),
+                ],
+                spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.padding.symmetric(horizontal=16, vertical=12),
+            bgcolor=Colors.SUCCESS_BG,
+            border=ft.border.all(1.5, Colors.SUCCESS),
+            border_radius=16,
+            shadow=Shadow.MD,
+        )
+        overlay.visible = True
+        try:
+            overlay.update()
+        except Exception:
+            pass
+
+        async def _hide_after_delay():
+            await asyncio.sleep(1.5)
+            if self._last_scan_token != token:
+                return  # a newer scan already replaced this card
+            overlay.visible = False
+            try:
+                overlay.update()
+            except Exception:
+                pass
+
+        self.page.run_task(_hide_after_delay)
+
+    def _show_sale_success(
+        self,
+        *,
+        invoice_id: int,
+        total: float,
+        received: float,
+        change: float,
+        clear_cart_fn,
+        refresh_cart_fn,
+        refresh_today_fn,
+    ) -> None:
+        """Phase B: large success screen — amount · change · «بيع جديد»."""
+        overlay = getattr(self, "_success_overlay", None)
+        if overlay is None:
+            # Fallback if layout not ready
+            self.notify(
+                f"تم البيع بنجاح — فاتورة #{invoice_id}"
+                + (f" · الباقي {self.money(change)}" if change > 0 else "")
+            )
+            clear_cart_fn()
+            refresh_cart_fn()
+            refresh_today_fn()
+            self.page.update()
+            return
+
+        # Hide last-scan card if still visible
+        last = getattr(self, "_last_scan_overlay", None)
+        if last is not None:
+            last.visible = False
+
+        def start_new_sale(_=None):
+            clear_cart_fn()
+            refresh_cart_fn()
+            refresh_today_fn()
+            overlay.visible = False
+            self._success_visible = False
+            try:
+                overlay.update()
+            except Exception:
+                pass
+            # Refocus barcode for the next scan
+            bf = getattr(self, "_barcode_field", None)
+            if bf is not None:
+                try:
+                    bf.focus()
+                except Exception:
+                    pass
+            self.page.update()
+            sound_engine.play(self.page, "scan")
+
+        change_block = []
+        if change > 0:
+            change_block = [
+                ft.Text("الباقي للعميل", size=14, color=Colors.TEXT_SECONDARY),
+                ft.Text(self.money(change), size=36, weight=ft.FontWeight.BOLD, color=Colors.SUCCESS),
+            ]
+        elif received > 0 and abs(received - total) < 1e-6:
+            change_block = [
+                ft.Text("مبلغ مطابق", size=14, color=Colors.TEXT_SECONDARY),
+            ]
+
+        card = ft.Container(
+            ft.Column(
+                [
+                    ft.Container(
+                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=Colors.WHITE, size=56),
+                        width=88, height=88, border_radius=44,
+                        bgcolor=Colors.SUCCESS, alignment=ft.alignment.center,
+                    ),
+                    ft.Container(height=12),
+                    ft.Text("تم البيع بنجاح", size=22, weight=ft.FontWeight.BOLD, color=Colors.TEXT_PRIMARY),
+                    ft.Text(f"فاتورة #{invoice_id}", size=13, color=Colors.TEXT_SECONDARY),
+                    ft.Container(height=16),
+                    ft.Text("المبلغ", size=13, color=Colors.TEXT_SECONDARY),
+                    ft.Text(self.money(total), size=40, weight=ft.FontWeight.BOLD, color=Colors.PRIMARY_DARK),
+                    *change_block,
+                    ft.Container(height=20),
+                    hero_button("بيع جديد", icon=ft.Icons.ADD_SHOPPING_CART, on_click=start_new_sale),
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=4,
+                tight=True,
+            ),
+            padding=ft.padding.symmetric(horizontal=28, vertical=32),
+            bgcolor=Colors.WHITE,
+            border_radius=24,
+            shadow=Shadow.MD,
+            width=340,
+        )
+        overlay.content = card
+        overlay.visible = True
+        self._success_visible = True
+        try:
+            sound_engine.play(self.page, "success")
+        except Exception:
+            pass
+        try:
+            overlay.update()
+        except Exception:
+            pass
         self.page.update()
 
     def _remember_recent(self, item_id: int) -> None:
