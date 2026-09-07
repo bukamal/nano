@@ -92,7 +92,11 @@ class DocumentService:
 
     @staticmethod
     def _qty(value: float | int | None) -> str:
-        return f"{float(value or 0):,.2f}"
+        """Quantity formatting without thousands separators or forced decimals."""
+        v = float(value or 0)
+        if v == int(v):
+            return str(int(v))
+        return f"{v:.3f}".rstrip("0").rstrip(".")
 
     @staticmethod
     def _e(value) -> str:

@@ -161,7 +161,7 @@ class SmartAssistantService:
                     kind="restock",
                     severity=sev,
                     title=f"أعد طلب «{name}»",
-                    body=f"المخزون الحالي {float(p.get('quantity') or 0):g} — يكفي حوالي {days:.0f} يوم حسب سرعة البيع الأخيرة.",
+                    body=f"المخزون الحالي {float(p.get('quantity') or 0):g} — يكفي حوالي {days:.0f} يوم حسب سرعة البيع الأخيرة." if float(p.get('quantity') or 0) == int(float(p.get('quantity') or 0)) else f"المخزون الحالي {p.get('quantity')} — يكفي حوالي {days:.0f} يوم حسب سرعة البيع الأخيرة.",
                     action_label="قائمة الشراء",
                     action_target="items",
                     entity_type="item",

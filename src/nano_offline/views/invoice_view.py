@@ -64,8 +64,16 @@ class InvoiceCenter:
 
     @staticmethod
     def _qty(value) -> str:
-        """Plain (non-currency) number formatting -- quantities, unit ratios."""
-        return f"{float(value or 0):,.2f}"
+        """Plain (non-currency) number formatting -- quantities, unit ratios.
+
+        No thousands separators and no forced decimals: whole amounts render
+        as "15", fractional ones keep only the decimals that matter ("12.5"),
+        so quantities never show comma separators in invoice lines.
+        """
+        v = float(value or 0)
+        if v == int(v):
+            return str(int(v))
+        return f"{v:.3f}".rstrip("0").rstrip(".")
 
     def notify(self, text: str, kind: str | None = None, sound_kind: str | None = None) -> None:
         toast(self.page, text, kind=kind, sound_kind=sound_kind)

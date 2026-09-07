@@ -105,8 +105,13 @@ class POSCenter:
 
     @staticmethod
     def _qty(value) -> str:
-        """Plain (non-currency) number formatting -- quantities."""
-        return f"{float(value or 0):,.2f}"
+        """Plain (non-currency) number formatting -- quantities.
+
+        No thousands separators and no forced decimals, so quantities never
+        render with commas.
+        """
+        v = float(value or 0)
+        return str(int(v)) if v == int(v) else f"{v:.3f}".rstrip("0").rstrip(".")
 
     def notify(self, text: str, kind: str | None = None, sound_kind: str | None = None) -> None:
         toast(self.page, text, kind=kind, sound_kind=sound_kind)

@@ -44,7 +44,8 @@ class StocktakeCenter:
 
     @staticmethod
     def _qty(value) -> str:
-        return f"{float(value or 0):,.2f}"
+        v = float(value or 0)
+        return str(int(v)) if v == int(v) else f"{v:.3f}".rstrip("0").rstrip(".")
 
     def money(self, value) -> str:
         from nano_offline.core import currency

@@ -197,8 +197,13 @@ class ItemsCenter:
 
     @staticmethod
     def _qty(value) -> str:
-        """Plain (non-currency) number formatting -- quantities, counts."""
-        return f"{float(value or 0):,.2f}"
+        """Plain (non-currency) number formatting -- quantities, counts.
+
+        No thousands separators and no forced decimals, so quantities never
+        render with commas.
+        """
+        v = float(value or 0)
+        return str(int(v)) if v == int(v) else f"{v:.3f}".rstrip("0").rstrip(".")
 
     def notify(self, text: str, kind: str | None = None, sound_kind: str | None = None) -> None:
         toast(self.page, text, kind=kind, sound_kind=sound_kind)
@@ -2138,7 +2143,7 @@ class ItemsCenter:
                     ft.Row([
                         ft.Container(ft.Icon(ft.Icons.HANDYMAN_OUTLINED if not stock else ft.Icons.INVENTORY_2_OUTLINED, color=accent, size=20), width=44, height=44, alignment=ft.alignment.center, bgcolor=Colors.BACKGROUND_ALT, border_radius=14),
                         ft.Column([ft.Text(item["name"], weight=ft.FontWeight.BOLD, size=13), ft.Text(f"{item.get('category_name') or 'بلا تصنيف'} • {item.get('unit_name') or 'بلا وحدة'}", size=9, color=Colors.TEXT_SECONDARY)], expand=True, spacing=2),
-                        ft.Column([ft.Text("—" if not stock else f"{qty:,.2f}", size=13, weight=ft.FontWeight.BOLD), status_pill(status, status_fg, status_bg)], spacing=3, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                        ft.Column([ft.Text("—" if not stock else f"{qty:g}", size=13, weight=ft.FontWeight.BOLD), status_pill(status, status_fg, status_bg)], spacing=3, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
                         ft.Column([ft.Text(money(item.get("selling_price")), size=12, weight=ft.FontWeight.BOLD), ft.Text("سعر البيع", size=8, color=Colors.TEXT_SECONDARY)], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END),
                         ft.Icon(ft.Icons.CHEVRON_LEFT, color=Colors.TEXT_FAINT, size=18),
                     ], vertical_alignment=ft.CrossAxisAlignment.CENTER),

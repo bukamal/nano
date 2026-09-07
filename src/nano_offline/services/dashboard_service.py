@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import date, timedelta
 
 from nano_offline.core.database import Database
@@ -91,6 +92,9 @@ class DashboardService:
         sales in the window (velocity unknown) or already out of stock
         (covered by the low-stock alert instead) are excluded rather than
         guessed at.
+
+        Order quantities are rounded up to whole units, so the suggested
+        list never shows fractional amounts.
         """
         window_days = max(1, int(window_days))
         start = (date.today() - timedelta(days=window_days)).isoformat()
@@ -126,7 +130,7 @@ class DashboardService:
                         "quantity": quantity,
                         "daily_velocity": velocity,
                         "days_left": days_left,
-                        "suggested_qty": round(suggested, 2),
+                        "suggested_qty": math.ceil(suggested),  # whole units, rounded up so the order never falls short
                         "purchase_price": float(row["purchase_price"] or 0),
                         "average_cost": float(row["average_cost"] or 0),
                     }
@@ -140,7 +144,8 @@ class DashboardService:
         """Build a ready-to-order purchase list from restock predictions.
 
         Returns ``{"lines": [...], "estimated_cost_usd": float, "count": int}``.
-        Each line includes ``suggested_qty`` and cost estimates in stored USD.
+        Each line includes ``suggested_qty`` (a whole-unit count) and cost
+        estimates in stored USD.
         """
         lines = self.restock_predictions(
             window_days=window_days, horizon_days=horizon_days, limit=limit

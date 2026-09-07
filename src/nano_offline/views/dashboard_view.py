@@ -801,7 +801,7 @@ class DashboardCenter:
                                 ),
                                 ft.Column(
                                     [
-                                        ft.Text(f"اطلب {float(line.get('suggested_qty') or 0):g}", size=12, weight=ft.FontWeight.BOLD, color=Colors.PRIMARY),
+                                        ft.Text(f"اطلب {int(round(float(line.get('suggested_qty') or 0)))}", size=12, weight=ft.FontWeight.BOLD, color=Colors.PRIMARY),
                                         ft.Text(self.money(line.get("line_cost_usd")), size=10, color=Colors.TEXT_SECONDARY),
                                     ],
                                     spacing=2,
