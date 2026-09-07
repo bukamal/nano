@@ -1,37 +1,83 @@
 from __future__ import annotations
 
-"""FIX_0.9.2: home screen widget bridge -- app-open refresh path
-plus post-restore synchronization helpers.
+"""FIX_0.9.3: home widget snapshot is now built from the same services and
+settings the in-app screens use, so the widget can never drift from what the
+app shows.
 
-Only ``sales_today`` and ``cash_balance`` are pushed from the immediate
-Python path. ``overdue_count`` / ``low_stock_count`` are owned by the
-periodic WorkManager pass in extensions/flet_native_files/.../native_files.dart
-(_pushHomeWidgetSnapshot), which already implements the exact "overdue after
-N days" / "low stock threshold" rules from the user's notification config
-(see notification_service.py) -- duplicating that logic here would risk the
-two sides disagreeing about what counts as overdue.
+Root cause of "الودجت لا يأخذ بياناته جيدًا من المشروع" fixed in 0.9.3:
+  - amounts were pushed as raw stored USD, without converting through the
+    user's display-currency settings and without a currency symbol, while the
+    app displays SYP (or USD) with a symbol;
+  - the header was hard-coded to "Nano | نانو" instead of the store name;
+  - today's invoice count and overdue totals were never pushed.
 
-After a backup restore, ``refresh_home_widget`` (formerly enough) is not
-enough on its own: the widget's SharedPreferences (``nano_widget_state`` in
-the [NanoWidgetReceiver] Kotlin module) still holds a snapshot from the
-pre-restore days. ``clear_home_widget`` wipes that snapshot, and
-``force_refresh_home_widget`` re-renders every placed instance immediately
-without waiting for the next periodic tick. ``refresh_home_widget_after_restore``
-chains those two with a fresh push so the user-visible numbers come from
-the just-restored database -- which is the only thing that addresses the
-FIX_0.9.2 bug report ("الودجت فارغ رغم نجاح الاسترجاع")."""
+home_widget_snapshot() now converts with currency.get_effective_rate() /
+get_display_symbol() exactly like DashboardView.money(), reads the store name
+from settings (company_name), includes sales_count_today and overdue_total,
+and stamps updated_at in UTC ISO 8601. The alert counts use the same rules as
+the Dart periodic pass (native_files.dart _pushHomeWidgetSnapshot) so the two
+refresh paths never disagree.
+"""
+
+from datetime import datetime, timezone
+
+from nano_offline.core import currency
 
 
-def home_widget_snapshot(dashboard) -> dict:
-    """Build the small snapshot the widget needs from data DashboardService
-    already computes elsewhere (today_summary for the POS quick-sale screen,
-    summary for the main dashboard) -- no new SQL added for this."""
+def home_widget_snapshot(dashboard, settings=None) -> dict:
+    """Build the snapshot the widget needs.
+
+    Pass the SettingsRepository (``ctx.settings``) when available so the
+    widget converts to the user's display currency and shows the store name;
+    without it the snapshot falls back to defaults but stays structurally
+    identical (old call sites keep working unchanged).
+    """
     today = dashboard.today_summary()
     overall = dashboard.summary()
-    return {
-        "sales_today": today["total"],
-        "cash_balance": overall["cash"],
+    rate = (
+        currency.get_effective_rate(settings)
+        if settings is not None
+        else currency.DEFAULT_EXCHANGE_RATE
+    )
+    symbol = (
+        currency.get_display_symbol(settings)
+        if settings is not None
+        else currency.DEFAULT_DISPLAY_SYMBOL
+    )
+    store_name = ""
+    if settings is not None:
+        try:
+            store_name = (settings.get("company_name") or "").strip()
+        except Exception:
+            store_name = ""
+
+    snapshot = {
+        "sales_today": currency.to_display(today["total"], rate),
+        "sales_count_today": int(today["count"]),
+        "cash_balance": currency.to_display(overall["cash"], rate),
+        "currency_symbol": symbol,
+        "store_name": store_name,
+        "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+
+    # Alerts -- same queries as the Dart periodic pass so the status pill and
+    # the periodic refresh never disagree. Failure here must not block the
+    # KPI push, so it is intentionally swallowed.
+    try:
+        with dashboard.db.connect() as conn:
+            overdue = conn.execute(
+                "SELECT COUNT(*) AS c, COALESCE(SUM(total-paid_amount),0) AS t "
+                "FROM invoices WHERE type='sale' AND status!='cancelled' AND (total-paid_amount)>0.01"
+            ).fetchone()
+            low = conn.execute(
+                "SELECT COUNT(*) AS c FROM items WHERE item_type='مخزون' AND quantity<=5"
+            ).fetchone()
+        snapshot["overdue_count"] = int(overdue["c"])
+        snapshot["overdue_total"] = currency.to_display(float(overdue["t"]), rate)
+        snapshot["low_stock_count"] = int(low["c"])
+    except Exception:
+        pass
+    return snapshot
 
 
 def _fire(page, native_files, method: str, *args) -> None:
@@ -44,11 +90,11 @@ def _fire(page, native_files, method: str, *args) -> None:
     page.run_task(getattr(native_files, method), *args)
 
 
-def refresh_home_widget(page, native_files, dashboard) -> None:
+def refresh_home_widget(page, native_files, dashboard, settings=None) -> None:
     """Immediate, app-open refresh -- a sale or voucher just posted, and
     DashboardService has fresh numbers in memory. Fire-and-forget so a
     slow/failed push never blocks the save flow that triggered it."""
-    snapshot = home_widget_snapshot(dashboard)
+    snapshot = home_widget_snapshot(dashboard, settings)
     _fire(page, native_files, "push_home_widget", snapshot)
 
 
@@ -66,7 +112,7 @@ def force_refresh_home_widget(page, native_files) -> None:
     _fire(page, native_files, "force_refresh_home_widget")
 
 
-def refresh_home_widget_after_restore(page, native_files, dashboard) -> None:
+def refresh_home_widget_after_restore(page, native_files, dashboard, settings=None) -> None:
     """The single entry point admin_view.confirm() calls immediately after
     backup_service.restore_backup() succeeds and ctx.reload() repopulates
     the in-memory services.
@@ -86,5 +132,5 @@ def refresh_home_widget_after_restore(page, native_files, dashboard) -> None:
         return
     clear_home_widget(page, native_files)
     force_refresh_home_widget(page, native_files)
-    snapshot = home_widget_snapshot(dashboard)
+    snapshot = home_widget_snapshot(dashboard, settings)
     _fire(page, native_files, "push_home_widget", snapshot)

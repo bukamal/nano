@@ -1,11 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      PHASE10 / 0.9.2 widget picker metadata. android:description on
-      appwidget-provider must reference a @string resource (a raw literal
-      is silently ignored by aapt), which is why nano_widget_info.xml did
-      not previously declare one at all.
+      FIX_0.9.3: widget picker metadata + all strings used by the redesigned
+      layout. Descriptions and labels are Arabic-first like the rest of Nano.
     -->
-    <string name="nano_widget_description">يعرض مبيعات اليوم ورصيد الصندوق وتنبيهات الذمم والمخزون من نانو</string>
-    <string name="nano_widget_hint">افتح التطبيق للتحديث</string>
+    <string name="nano_widget_description">نبض متجرك في شاشة رئيسية واحدة: مبيعات اليوم، رصيد الصندوق، الذمم المتأخرة وتنبيهات المخزون من نانو</string>
+    <string name="nano_widget_hint">افتح التطبيق لتحديث البيانات</string>
+
+    <!-- Header / fallbacks -->
+    <string name="nano_widget_default_title">Nano | نانو</string>
+    <string name="nano_widget_sales_label">مبيعات اليوم</string>
+    <string name="nano_widget_cash_label">رصيد الصندوق</string>
+
+    <!-- Sub-labels under the KPI values (may be replaced at render time) -->
+    <string name="nano_widget_sales_sub_placeholder">—</string>
+    <string name="nano_widget_cash_sub_placeholder">—</string>
+    <string name="nano_widget_sales_sub_count">%1$d فاتورة اليوم</string>
+    <string name="nano_widget_sales_sub_none">لا فواتير بعد</string>
+    <string name="nano_widget_cash_sub_positive">نقدي</string>
+    <string name="nano_widget_cash_sub_negative">سحب من الصندوق</string>
+
+    <!-- Smart status pill strings -->
+    <string name="nano_widget_status_ok">كل شيء على ما يرام</string>
+    <string name="nano_widget_status_overdue">%1$d فاتورة متأخرة · %2$s</string>
+    <string name="nano_widget_status_lowstock">%1$d صنف يحتاج إعادة طلب</string>
+    <string name="nano_widget_status_both">%1$d ذمم متأخرة · %2$d أصناف منخفضة</string>
 </resources>

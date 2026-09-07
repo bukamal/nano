@@ -1,16 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  FIX_0.9.2: widget layout, rendered by NanoWidgetReceiver via plain
-  RemoteViews. Refreshed to match Nano's brand palette in theme.py:
-    #0F766E PRIMARY (deep teal)
-    #115E59 PRIMARY_DARK
-    #5EEAD4 accent / live dot
-    #F0FDFA / #C7E5E0 muted foreground on accent
-    #FFD9C2 alert text
-    #FFFFFF primary text
-  Only framework-supported views and a shape drawable background. Safe for
-  RemoteViews. Renders RTL automatically on Arabic locales (LinearLayout is
-  direction-aware).
+  FIX_0.9.3: full redesign of the home widget (integrated + smart + modern).
+  Same RemoteViews-safe surface as before: LinearLayouts, TextViews, one
+  ImageView and shape drawables only — no Material/Glance/Compose deps.
+  RTL-aware: LinearLayout flips children automatically on Arabic locales.
+
+  New snapshot fields consumed by NanoWidgetReceiver.buildViews():
+    sales_today, sales_count_today, cash_balance,
+    overdue_count, overdue_total, low_stock_count, updated_at, store_name
+
+  Structure:
+    header  : brand title (store name or "Nano | نانو") + live pulse dot
+    hairline: 1dp translucent divider
+    KPIs    : مبيعات اليوم (+ عدد الفواتير) | رصيد الصندوق (+ حالة)
+    status  : smart pill — "كل شيء على ما يرام" when nothing to flag,
+              otherwise the overdue/low-stock line, tinted by severity
+    footer  : freshness line (تم التحديث قبل X)
+    hint    : first-run placeholder (never a blank panel)
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/nano_widget_root"
@@ -23,7 +29,7 @@
     android:paddingTop="14dp"
     android:paddingBottom="14dp">
 
-    <!-- Header row: brand title on the start, live status dot on the end. -->
+    <!-- Header row: brand on the start, live pulse dot on the end. -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -36,8 +42,10 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:ellipsize="end"
             android:letterSpacing="0.04"
-            android:text="Nano | نانو"
+            android:maxLines="1"
+            android:text="@string/nano_widget_default_title"
             android:textColor="#FFFFFF"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -46,9 +54,17 @@
             android:id="@+id/nano_widget_live"
             android:layout_width="8dp"
             android:layout_height="8dp"
+            android:layout_marginStart="8dp"
             android:contentDescription="@null"
             android:src="@drawable/ic_nano_dot" />
     </LinearLayout>
+
+    <!-- Hairline divider that separates the header from the KPIs. -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="10dp"
+        android:background="#33FFFFFF" />
 
     <!-- KPIs row: مبيعات اليوم | رصيد الصندوق. -->
     <LinearLayout
@@ -68,19 +84,30 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:letterSpacing="0.06"
-                android:text="مبيعات اليوم"
+                android:text="@string/nano_widget_sales_label"
                 android:textColor="#C7E5E0"
                 android:textSize="11sp" />
 
             <TextView
                 android:id="@+id/nano_widget_sales_value"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:maxLines="1"
                 android:text="0"
                 android:textColor="#FFFFFF"
-                android:textSize="22sp"
+                android:textSize="21sp"
                 android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/nano_widget_sales_sub"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:text="@string/nano_widget_sales_sub_placeholder"
+                android:textColor="#8FE8DD"
+                android:textSize="9sp" />
         </LinearLayout>
 
         <LinearLayout
@@ -94,29 +121,44 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:letterSpacing="0.06"
-                android:text="رصيد الصندوق"
+                android:text="@string/nano_widget_cash_label"
                 android:textColor="#C7E5E0"
                 android:textSize="11sp" />
 
             <TextView
                 android:id="@+id/nano_widget_cash_value"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:maxLines="1"
                 android:text="0"
                 android:textColor="#FFFFFF"
-                android:textSize="22sp"
+                android:textSize="21sp"
                 android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/nano_widget_cash_sub"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:text="@string/nano_widget_cash_sub_placeholder"
+                android:textColor="#8FE8DD"
+                android:textSize="9sp" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Alert row: hidden until overdue / low-stock exist. -->
+    <!-- Smart status pill: positive state or flagged items, colored by severity
+         (text color is set at render time in NanoWidgetReceiver). -->
     <TextView
-        android:id="@+id/nano_widget_alert"
+        android:id="@+id/nano_widget_status"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="10dp"
         android:background="@drawable/nano_widget_alert_pill"
+        android:ellipsize="end"
+        android:gravity="center_vertical"
+        android:maxLines="1"
         android:paddingStart="10dp"
         android:paddingEnd="10dp"
         android:paddingTop="6dp"

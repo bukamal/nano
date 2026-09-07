@@ -7,6 +7,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.view.View
 import android.widget.RemoteViews
 import org.json.JSONObject
@@ -15,17 +16,29 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * FIX_0.9.2: rebuilt on the plain Android framework (was Jetpack Glance, dropped
- * in 0.9.1 because provideGlance() never fired) -- and now also blends into
- * Nano's theme tokens (theme.py: #0F766E / #115E59 / #5EEAD4 / #C7E5E0 /
- * #FFD9C2 / #FFFFFF) so the widget reads as part of the app rather than a
- * generic card from another vendor.
+ * FIX_0.9.3: redesigned into an integrated, smart, modern widget that mirrors
+ * the in-app snapshot exactly.
  *
- * Contract vs 0.8.x: same channel "nano/home_widget", same methods
- * "push"/"diagnose"/"clear"/"refresh_now", same JSON keys (sales_today,
- * cash_balance, overdue_count, low_stock_count, updated_at). Adding "clear"
- * and "refresh_now" is purely additive -- 0.9.x callers that don't use them
- * still work.
+ * Data contract (JSON pushed over "nano/home_widget" => "push"):
+ *   sales_today        -> Double  (already converted to the display currency)
+ *   sales_count_today  -> Int     (today's sale invoice count)
+ *   cash_balance       -> Double  (already converted to the display currency)
+ *   overdue_count      -> Int
+ *   overdue_total      -> Double  (display currency)
+ *   low_stock_count    -> Int
+ *   currency_symbol    -> String  (e.g. "ل.س" or "$")
+ *   store_name         -> String  (the store/brand name from settings)
+ *   updated_at         -> String  (ISO 8601 UTC)
+ *
+ * Amounts arrive pre-converted (Python home_widget.py and the Dart periodic
+ * pass both apply the user's display-currency and exchange-rate settings), so
+ * the widget can never drift from what the app shows -- this was the root
+ * cause of the "بيانات الودجت سيئة": raw USD floats without a symbol or
+ * conversion were pushed while the app displays SYP.
+ *
+ * The status pill is always visible once a snapshot exists: mint "كل شيء على
+ * ما يرام" when there is nothing to flag, amber/red tinted alert lines
+ * otherwise -- the widget reads as alive instead of a blank panel.
  */
 object NanoWidgetDiagnostics {
     @Volatile var lastProvideGlanceAt: Long = 0L
@@ -73,13 +86,7 @@ class NanoWidgetReceiver : AppWidgetProvider() {
             NanoWidgetDiagnostics.lastSnapshotJson = stored
         }
 
-        /**
-         * FIX_0.9.2: wipe the persisted snapshot entirely so a stale pre-restore
-         * snapshot (or a snapshot from a previous install) cannot survive a
-         * backup restore and keep showing numbers that don't belong in the
-         * freshly restored database. After clear(), the next push overwrites
-         * from scratch.
-         */
+        /** FIX_0.9.2: wipe the persisted snapshot entirely after a restore. */
         fun clearSnapshot(context: Context) {
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit().remove(KEY_SNAPSHOT).apply()
@@ -87,13 +94,7 @@ class NanoWidgetReceiver : AppWidgetProvider() {
             NanoWidgetDiagnostics.lastClearAt = System.currentTimeMillis()
         }
 
-        /**
-         * FIX_0.9.2: belt-and-braces refresh entry point called by the plugin
-         * immediately after a clear()/push(). updateAppWidget() always rebuilds
-         * the RemoteViews tree even when the underlying snapshot is identical
-         * to what was just rendered, which is exactly what's needed to force
-         * the launcher to drop the cached frame after a restore.
-         */
+        /** FIX_0.9.2: force re-render without waiting for the next tick. */
         fun refreshAllNow(context: Context) {
             val ctx = context.applicationContext
             val manager = AppWidgetManager.getInstance(ctx)
@@ -127,31 +128,75 @@ class NanoWidgetReceiver : AppWidgetProvider() {
 
         fun buildViews(context: Context, data: JSONObject): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.nano_widget)
+            val symbol = data.optString("currency_symbol", "ل.س")
 
-            // KPIs -- values formatted with thousands grouping, large bold white.
+            // Header: store name from the project settings, else the default brand.
+            val storeName = data.optString("store_name", "").trim()
+            views.setTextViewText(
+                R.id.nano_widget_title,
+                if (storeName.isNotEmpty()) storeName else context.getString(R.string.nano_widget_default_title)
+            )
+
+            // KPI values -- already in the display currency, formatted + symbol.
             views.setTextViewText(
                 R.id.nano_widget_sales_value,
-                formatMoney(data.optDouble("sales_today", 0.0)),
+                formatMoney(data.optDouble("sales_today", 0.0), symbol)
             )
             views.setTextViewText(
                 R.id.nano_widget_cash_value,
-                formatMoney(data.optDouble("cash_balance", 0.0)),
+                formatMoney(data.optDouble("cash_balance", 0.0), symbol)
             )
 
-            // Alert pill -- collapsed when there's nothing to flag.
-            val alert = alertLine(
-                data.optInt("overdue_count", 0),
-                data.optInt("low_stock_count", 0),
-            )
-            if (alert.isNotEmpty()) {
-                views.setTextViewText(R.id.nano_widget_alert, alert)
-                views.setViewVisibility(R.id.nano_widget_alert, View.VISIBLE)
+            // Sales sub-label: today's invoice count.
+            if (data.has("sales_count_today")) {
+                val count = data.optInt("sales_count_today", 0)
+                views.setTextViewText(
+                    R.id.nano_widget_sales_sub,
+                    if (count > 0) context.getString(R.string.nano_widget_sales_sub_count, count)
+                    else context.getString(R.string.nano_widget_sales_sub_none)
+                )
+                views.setViewVisibility(R.id.nano_widget_sales_sub, View.VISIBLE)
             } else {
-                views.setViewVisibility(R.id.nano_widget_alert, View.GONE)
+                views.setViewVisibility(R.id.nano_widget_sales_sub, View.GONE)
             }
 
-            // Freshness footer -- "تم التحديث قبل X" / "قبل لحظة".
-            // Driven by updated_at (ISO 8601, UTC) pushed by both Dart paths.
+            // Cash sub-label: positive/negative state hint.
+            if (data.has("cash_balance")) {
+                views.setTextViewText(
+                    R.id.nano_widget_cash_sub,
+                    if (data.optDouble("cash_balance", 0.0) < 0)
+                        context.getString(R.string.nano_widget_cash_sub_negative)
+                    else context.getString(R.string.nano_widget_cash_sub_positive)
+                )
+                views.setViewVisibility(R.id.nano_widget_cash_sub, View.VISIBLE)
+            } else {
+                views.setViewVisibility(R.id.nano_widget_cash_sub, View.GONE)
+            }
+
+            // Smart status pill -- visible once any snapshot key exists.
+            val overdue = data.optInt("overdue_count", 0)
+            val lowStock = data.optInt("low_stock_count", 0)
+            val hasFlags = data.has("overdue_count") || data.has("low_stock_count")
+            if (hasFlags) {
+                val overdueTotal = data.optDouble("overdue_total", 0.0)
+                val (text, tint) = when {
+                    overdue > 0 && lowStock > 0 ->
+                        context.getString(R.string.nano_widget_status_both, overdue, lowStock) to "#FCA5A5"
+                    overdue > 0 ->
+                        context.getString(R.string.nano_widget_status_overdue, overdue, formatMoney(overdueTotal, symbol)) to "#FCA5A5"
+                    lowStock > 0 ->
+                        context.getString(R.string.nano_widget_status_lowstock, lowStock) to "#FCD34D"
+                    else ->
+                        context.getString(R.string.nano_widget_status_ok) to "#5EEAD4"
+                }
+                views.setTextViewText(R.id.nano_widget_status, text)
+                views.setTextColor(R.id.nano_widget_status, Color.parseColor(tint))
+                views.setViewVisibility(R.id.nano_widget_status, View.VISIBLE)
+            } else {
+                views.setViewVisibility(R.id.nano_widget_status, View.GONE)
+            }
+
+            // Freshness footer -- driven by updated_at (ISO 8601, UTC).
             val footer = timeAgo(data.optString("updated_at", ""))
             if (footer.isNotEmpty()) {
                 views.setTextViewText(R.id.nano_widget_footer, footer)
@@ -160,12 +205,11 @@ class NanoWidgetReceiver : AppWidgetProvider() {
                 views.setViewVisibility(R.id.nano_widget_footer, View.GONE)
             }
 
-            // First placement before any data -- show a legible hint instead of
-            // a blank panel, never Android's "Couldn't load widget" placeholder.
+            // First placement before any data -- legible hint, never a blank panel.
             val hasData = data.has("sales_today") || data.has("cash_balance")
             views.setViewVisibility(R.id.nano_widget_hint, if (hasData) View.GONE else View.VISIBLE)
 
-            // Tap-to-open the app, reflection-guarded -- degrading beats vanishing.
+            // Tap-to-open the app, reflection-guarded.
             try {
                 val launchIntent = Intent(context, mainActivityClass(context)).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -189,22 +233,15 @@ class NanoWidgetReceiver : AppWidgetProvider() {
 internal fun mainActivityClass(context: Context): Class<out Activity> =
     Class.forName("${context.packageName}.MainActivity") as Class<out Activity>
 
-private fun formatMoney(v: Double): String {
+/** Integer amount with thousands grouping + the display-currency symbol. */
+private fun formatMoney(v: Double, symbol: String): String {
     val n = v.toLong()
     val sign = if (n < 0) "-" else ""
     val grouped = kotlin.math.abs(n).toString().reversed().chunked(3).joinToString(",")
-    return sign + grouped.reversed()
+    return sign + grouped.reversed() + " " + symbol
 }
 
-private fun alertLine(overdue: Int, lowStock: Int): String = when {
-    overdue > 0 && lowStock > 0 -> "$overdue ذمم متأخرة · $lowStock صنف منخفض"
-    overdue > 0 -> "$overdue فواتير آجلة متأخرة"
-    lowStock > 0 -> "$lowStock صنف وصل الحد الأدنى"
-    else -> ""
-}
-
-// FIX_0.9.2: minimal-allocation ISO 8601 parser that doesn't need java.time
-// (avoids the API 26 requirement and a desugaring dependency).
+// FIX_0.9.2: minimal-allocation ISO 8601 parser that doesn't need java.time.
 private val FOOTER_FORMATS = arrayOf(
     "yyyy-MM-dd'T'HH:mm:ssXXX",
     "yyyy-MM-dd'T'HH:mm:ssZ",

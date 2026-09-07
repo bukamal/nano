@@ -453,7 +453,7 @@ class AdminCenter:
                                 refresh_home_widget_after_restore,
                             )
                             refresh_home_widget_after_restore(
-                                self.page, self.native_files, self.ctx.dashboard
+                                self.page, self.native_files, self.ctx.dashboard, self.ctx.settings
                             )
                         except Exception as widget_exc:
                             # Never let a widget-side failure abort a

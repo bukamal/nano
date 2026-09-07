@@ -310,28 +310,52 @@ Future<String> _diagnoseHomeWidget() async {
 }
 
 Future<void> _pushHomeWidgetSnapshot(Database db) async {
-  final sales = db.select(
-    "SELECT COALESCE(SUM(total),0) s FROM invoices "
+  final salesRow = db.select(
+    "SELECT COALESCE(SUM(total),0) s, COUNT(*) c FROM invoices "
     "WHERE type = 'sale' AND status != 'cancelled' AND date(invoice_date) = date('now','localtime')",
-  ).first['s'] as num? ?? 0;
+  ).first;
+  final sales = ((salesRow['s'] as num?) ?? 0).toDouble();
+  final salesCount = ((salesRow['c'] as num?) ?? 0).toInt();
   // Same definition DashboardService.summary() uses on the Python side
   // (sum of debit-credit on the CASH ledger account) -- there is no
   // separate cash_transactions table in this schema.
   final cash = db.select(
     "SELECT COALESCE(SUM(debit-credit),0) c FROM ledger_entries WHERE account_code = 'CASH'",
   ).first['c'] as num? ?? 0;
-  final overdue = db.select(
-    "SELECT COUNT(*) c FROM invoices WHERE type = 'sale' AND status != 'cancelled' AND (total - paid_amount) > 0.01",
-  ).first['c'] as num? ?? 0;
+  final overdueRow = db.select(
+    "SELECT COUNT(*) c, COALESCE(SUM(total - paid_amount),0) t FROM invoices "
+    "WHERE type = 'sale' AND status != 'cancelled' AND (total - paid_amount) > 0.01",
+  ).first;
+  final overdue = ((overdueRow['c'] as num?) ?? 0).toInt();
+  final overdueTotal = ((overdueRow['t'] as num?) ?? 0).toDouble();
   final lowStock = db.select(
     "SELECT COUNT(*) c FROM items WHERE item_type = 'مخزون' AND quantity <= 5",
   ).first['c'] as num? ?? 0;
 
+  // Display currency + store name -- the same settings the app uses, so the
+  // periodic (closed-app) pass renders exactly like the in-app snapshot.
+  final company =
+      db.select("SELECT value FROM settings WHERE key = 'company_name'").first['value'] as String? ?? '';
+  final code =
+      db.select("SELECT value FROM settings WHERE key = 'display_currency_code'").first['value'] as String? ?? 'SYP';
+  final symbolRaw =
+      db.select("SELECT value FROM settings WHERE key = 'display_currency_symbol'").first['value'] as String? ?? 'ل.س';
+  final symbolUsd =
+      db.select("SELECT value FROM settings WHERE key = 'display_currency_symbol_usd'").first['value'] as String? ?? '\$';
+  final rateRaw =
+      db.select("SELECT value FROM settings WHERE key = 'exchange_rate_syp_per_usd'").first['value'] as String? ?? '13500';
+  final rate = double.tryParse(rateRaw) ?? 13500.0;
+  final symbol = code == 'USD' ? symbolUsd : symbolRaw;
+
   await _pushHomeWidgetJson(jsonEncode({
-    'sales_today': sales,
-    'cash_balance': cash,
+    'sales_today': sales * rate,
+    'sales_count_today': salesCount,
+    'cash_balance': (cash as num).toDouble() * rate,
     'overdue_count': overdue,
-    'low_stock_count': lowStock,
+    'overdue_total': overdueTotal * rate,
+    'low_stock_count': (lowStock as num).toInt(),
+    'currency_symbol': symbol,
+    'store_name': company,
     'updated_at': DateTime.now().toIso8601String(),
   }));
 }

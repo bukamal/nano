@@ -1547,7 +1547,7 @@ class InvoiceCenter:
                     # PHASE10: sales move the two numbers on the home screen
                     # widget (today's total, cash) -- refresh it right away
                     # instead of waiting for the next periodic pass.
-                    refresh_home_widget(self.page, self.native_files, self.ctx.dashboard)
+                    refresh_home_widget(self.page, self.native_files, self.ctx.dashboard, self.ctx.settings)
                 if self.on_saved:
                     self.on_saved()
             except Exception as exc:

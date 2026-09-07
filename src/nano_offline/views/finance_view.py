@@ -570,7 +570,7 @@ class FinanceCenter:
                 self._changed()
                 # PHASE10: receipt/payment vouchers move the cash balance
                 # shown on the home screen widget -- refresh it right away.
-                refresh_home_widget(self.page, self.native_files, self.ctx.dashboard)
+                refresh_home_widget(self.page, self.native_files, self.ctx.dashboard, self.ctx.settings)
             except Exception as exc:
                 self.notify(str(exc), kind="error")
 
