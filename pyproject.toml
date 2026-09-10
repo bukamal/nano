@@ -67,7 +67,7 @@ org = "com.nano"
 product = "Nano | نانو"
 company = "Nano"
 copyright = "Copyright © 2026"
-build_number = 24
+build_number = 25
 android_permissions = [
   "android.permission.INTERNET",
   "android.permission.CAMERA",

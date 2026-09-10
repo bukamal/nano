@@ -1368,16 +1368,31 @@ class POSCenter:
                             ft.Column(
                                 [
                                     ft.Row(name_row_controls, spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                                    ft.Row(
-                                        [
-                                            ft.Icon(ft.Icons.EDIT_OUTLINED, size=11, color=Colors.TEXT_SECONDARY),
-                                            ft.Text(
-                                                f"{self.money(line_unit_price)} × {self._qty(row['qty'])} = {self.money(line_total)}",
-                                                size=11,
-                                                color=Colors.TEXT_SECONDARY,
-                                            ),
-                                        ],
-                                        spacing=4, tight=True, on_click=edit_price, tooltip="اضغط لتعديل السعر",
+                                    # FIX_0.9.6 (build 25): this price line used
+                                    # ft.Row(..., on_click=edit_price) -- ft.Row
+                                    # has no on_click parameter in Flet 0.28.3,
+                                    # so building ANY cart row raised TypeError
+                                    # inside refresh_cart(), which _add_item()
+                                    # calls after every grid tap / barcode scan.
+                                    # Net effect: the quick-sale screen silently
+                                    # failed to add items to the cart (Flet
+                                    # swallows handler exceptions). Wrapped in
+                                    # a Container, which is the tappable control
+                                    # here, keeping the same tooltip + tap-to-
+                                    # edit-price behavior.
+                                    ft.Container(
+                                        ft.Row(
+                                            [
+                                                ft.Icon(ft.Icons.EDIT_OUTLINED, size=11, color=Colors.TEXT_SECONDARY),
+                                                ft.Text(
+                                                    f"{self.money(line_unit_price)} × {self._qty(row['qty'])} = {self.money(line_total)}",
+                                                    size=11,
+                                                    color=Colors.TEXT_SECONDARY,
+                                                ),
+                                            ],
+                                            spacing=4, tight=True,
+                                        ),
+                                        on_click=edit_price, tooltip="اضغط لتعديل السعر", ink=True,
                                     ),
                                 ],
                                 spacing=1, expand=True,

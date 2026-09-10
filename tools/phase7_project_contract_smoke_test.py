@@ -9,7 +9,7 @@ preflight = (ROOT / "tools/apk_release_preflight.py").read_text(encoding="utf-8"
 
 for needle in [
     'version = "0.9.6"',
-    'build_number = 24',
+    'build_number = 25',
     '[tool.flet.dev_packages]',
     '"flet-native-files" = "extensions/flet_native_files"',
 ]:
@@ -19,7 +19,7 @@ schema_match = re.search(r'^SCHEMA_VERSION\s*=\s*(\d+)', db, re.M)
 assert schema_match and int(schema_match.group(1)) >= 9, "SCHEMA_VERSION must be >= 9"
 for needle in [
     "pip install -e extensions/flet_native_files",
-    "--build-number 24",
+    "--build-number 25",
     "--build-version 0.9.6",
     "verify_flet_native_files_registration.py build/flutter",
 ]:

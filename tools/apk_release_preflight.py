@@ -10,7 +10,7 @@ paths = (ROOT / "src/nano_offline/core/paths.py").read_text(encoding="utf-8")
 
 required = {
     "pyproject version": ('version = "0.9.6"', pyproject),
-    "build number": ("build_number = 24", pyproject),
+    "build number": ("build_number = 25", pyproject),
     "internet permission": ("android.permission.INTERNET", pyproject),
     "android auto backup disabled": ('allowBackup = "false"', pyproject),
     "persistent Flet storage": ("FLET_APP_STORAGE_DATA", paths),

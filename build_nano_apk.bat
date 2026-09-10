@@ -1,6 +1,6 @@
 @echo off
 setlocal
-uv run flet build apk --product "Nano | نانو" --org com.nano --build-number 24 --build-version 0.9.6
+uv run flet build apk --product "Nano | نانو" --org com.nano --build-number 25 --build-version 0.9.6
 if errorlevel 1 exit /b %errorlevel%
 if not exist dist mkdir dist
 for /r build %%F in (*.apk) do (
