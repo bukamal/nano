@@ -115,6 +115,67 @@ class QuickCommandService:
         if any(k in lower for k in ("الغاء الطوارئ", "إلغاء الطوارئ", "اطفاء الطوارئ")):
             return CommandResult(ok=True, action="crisis_off", message="إلغاء وضع الطوارئ الاقتصادي")
 
+
+        # Create item: أنشئ مادة X / أضف مادة X بسعر 500
+        create_m = re.search(
+            r"(?:انشئ|أنشئ|انشاء|إنشاء|اضف مادة|أضف مادة|سجل مادة|سجّل مادة|مادة جديدة)\s+(.+)$",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if create_m:
+            rest = create_m.group(1).strip(" ؟?،,")
+            price = 0.0
+            pm = re.search(r"(?:بسعر|سعر)\s*([\d٠-٩]+(?:[.,]\d+)?)", rest)
+            if pm:
+                price = self._parse_qty(pm.group(1))
+                rest = (rest[:pm.start()] + rest[pm.end():]).strip(" ،,")
+            # optional qty opening
+            oq = 0.0
+            qm = re.search(r"(?:بكمية|كمية)\s*([\d٠-٩]+(?:[.,]\d+)?)", rest)
+            if qm:
+                oq = self._parse_qty(qm.group(1))
+                rest = (rest[:qm.start()] + rest[qm.end():]).strip(" ،,")
+            name = rest.strip()
+            if name:
+                return CommandResult(
+                    ok=True,
+                    action="item_create",
+                    target="items",
+                    message=f"إنشاء مادة {name}",
+                    data={"name": name, "selling_price": price, "quantity": oq},
+                )
+
+        # Set cart qty: خلي الكمية 5 / كمية السكر 3 / خلّي الأخير 2
+        setq = re.search(
+            r"(?:خلي|خلّي|اجعل|خلّ|عيّن|عين)\s+(?:الكمية\s+)?(?:(?P<name>.+?)\s+)?(?P<qty>[\d٠-٩]+(?:[.,]\d+)?)$",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if not setq:
+            setq = re.search(
+                r"كمية\s+(?P<name>.+?)\s+(?P<qty>[\d٠-٩]+(?:[.,]\d+)?)$",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+        if setq:
+            qty = self._parse_qty(setq.group("qty"))
+            name = (setq.groupdict().get("name") or "").strip()
+            if name in ("الاخير", "الأخير", "الاخير", ""):
+                name = ""
+            return CommandResult(
+                ok=True,
+                action="pos_set_qty",
+                target="pos",
+                message=f"تعيين كمية {name or 'الأخير'} إلى {qty:g}",
+                data={"name": name, "qty": qty},
+            )
+
+        if any(k in lower for k in (
+            "مبيعات اليوم", "بيع اليوم", "كم بعنا اليوم", "كم مبيعات اليوم",
+            "شو مبيعات اليوم", "حركة اليوم", "كم الفواتير اليوم",
+        )):
+            return CommandResult(ok=True, action="today_sales", message="مبيعات اليوم")
+
         # POS: أضف X / زيد X / حط X [عدد]
         # Examples: أضف سكر، أضف 3 سكر، زيد رز اثنين، حط حليب
         pos_add = re.search(
@@ -124,26 +185,70 @@ class QuickCommandService:
         )
         if pos_add:
             name = (pos_add.group("name") or "").strip(" ؟?،,")
-            qty_raw = pos_add.group("qty")
-            qty = 1.0
-            if qty_raw:
-                qty = self._parse_qty(qty_raw)
-            # strip trailing quantity words: "سكر اثنين" handled lightly
-            name2, qty2 = self._strip_trailing_qty_words(name, qty)
-            if name2:
-                return CommandResult(
-                    ok=True,
-                    action="pos_add",
-                    target="pos",
-                    message=f"إضافة إلى السلة: {name2} × {qty2:g}",
-                    data={"name": name2, "qty": qty2},
-                )
+            # Defer to multi-item parser when conjunctions present
+            if re.search(r"\s+و\s+|،|,", name):
+                pass  # fall through
+            else:
+                qty_raw = pos_add.group("qty")
+                qty = 1.0
+                if qty_raw:
+                    qty = self._parse_qty(qty_raw)
+                name2, qty2 = self._strip_trailing_qty_words(name, qty)
+                if name2:
+                    return CommandResult(
+                        ok=True,
+                        action="pos_add",
+                        target="pos",
+                        message=f"إضافة إلى السلة: {name2} × {qty2:g}",
+                        data={"name": name2, "qty": qty2},
+                    )
 
         if any(k in lower for k in ("اتمام الدفع", "إتمام الدفع", "ادفع", "ادفع الان", "ادفع الآن", "حاسب", "تحصيل", "دفع")):
             return CommandResult(ok=True, action="pos_pay", target="pos", message="فتح الدفع")
 
         if any(k in lower for k in ("افرغ السله", "أفرغ السلة", "امسح السله", "مسح السلة", "فرغ الكارت", "افرغ الكارت")):
             return CommandResult(ok=True, action="pos_clear", target="pos", message="تفريغ سلة نقطة البيع")
+
+        if any(k in lower for k in ("احذف الاخير", "احذف الأخير", "شيل الاخير", "شيل الأخير", "ارجع اخر", "تراجع", "undo")):
+            return CommandResult(ok=True, action="pos_remove_last", target="pos", message="حذف آخر مادة من السلة")
+
+        if any(k in lower for k in ("شو بالسله", "شو بالسلة", "محتوى السله", "محتوى السلة", "كم الاجمالي", "كم الإجمالي", "ملخص السله", "ملخص السلة", "عرض السله", "عرض السلة")):
+            return CommandResult(ok=True, action="pos_cart_summary", target="pos", message="ملخص السلة")
+
+        if any(k in lower for k in ("اكتم الصوت", "اكتم الرد", "صمت", "بدون صوت", "كتم النطق", "اطفي الصوت", "اطفئ الصوت")):
+            return CommandResult(ok=True, action="tts_mute", message="كتم الردود الصوتية")
+
+        if any(k in lower for k in ("شغل الصوت", "فعّل الصوت", "فعل الصوت", "رجّع الصوت", "رجع الصوت", "تفعيل النطق")):
+            return CommandResult(ok=True, action="tts_unmute", message="تفعيل الردود الصوتية")
+
+        # Multi-item: أضف سكر وحليب / أضف سكر و رز
+        multi = re.search(
+            r"(?:اضف|أضف|حط|ضيف)\s+(.+)$",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if multi and (" و" in multi.group(1) or " و " in multi.group(1) or "،" in multi.group(1)):
+            raw_list = multi.group(1)
+            parts = re.split(r"\s+و\s+|،|,", raw_list)
+            parts = [p.strip(" ؟?،,") for p in parts if p.strip(" ؟?،,")]
+            if len(parts) >= 2:
+                items = []
+                for part in parts[:6]:
+                    # optional leading qty
+                    m2 = re.match(r"^(?P<qty>[\d٠-٩]+(?:[.,]\d+)?)\s+(?P<name>.+)$", part)
+                    if m2:
+                        items.append({"name": m2.group("name").strip(), "qty": self._parse_qty(m2.group("qty"))})
+                    else:
+                        name2, qty2 = self._strip_trailing_qty_words(part, 1.0)
+                        items.append({"name": name2, "qty": qty2})
+                if items:
+                    return CommandResult(
+                        ok=True,
+                        action="pos_add_many",
+                        target="pos",
+                        message="إضافة عدة مواد",
+                        data={"items": items},
+                    )
 
         # Stock query: كم باقي X / رصيد X / كمية X
         stock_match = re.search(

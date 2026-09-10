@@ -322,6 +322,158 @@ class VoiceSessionController:
             self._schedule_relisten(0.9)
             return
 
+        if action == "pos_remove_last":
+            section = (self.get_section() or "").lower()
+            if section != "pos":
+                self._queue_and_go_pos(result)
+            else:
+                self._apply_pos(result)
+            self.memory.note(last_action="pos_remove_last")
+            self._reply("حذفت آخر مادة من السلة." if section == "pos" else "فتح نقطة البيع وحذف الأخير…", kind="info")
+            self._schedule_relisten(0.8)
+            return
+
+        if action == "pos_cart_summary":
+            section = (self.get_section() or "").lower()
+            snap = None
+            getter = getattr(self.ctx, "_pos_cart_snapshot", None)
+            if callable(getter):
+                try:
+                    snap = getter()
+                except Exception:
+                    snap = None
+            if snap is None and section != "pos":
+                self.navigate("pos")
+                self._schedule_relisten(1.0)
+                self._reply("افتح نقطة البيع ثم أعد: ملخص السلة", kind="info")
+                return
+            if not snap or not snap.get("count"):
+                self._reply("السلة فارغة حالياً.", kind="info")
+            else:
+                total = snap.get("total") or 0
+                try:
+                    from nano_offline.core import currency
+                    total_txt = currency.format_amount(total, self.ctx.settings)
+                except Exception:
+                    total_txt = f"{total:,.0f}"
+                names = "، ".join(
+                    f"{ln.get('name')}×{float(ln.get('qty') or 0):g}" for ln in (snap.get("lines") or [])[:4]
+                )
+                more = "" if snap["count"] <= 4 else f" وغيرها {snap['count']-4}"
+                self._reply(f"بالسلة {snap['count']} بند: {names}{more}. الإجمالي {total_txt}.", kind="info")
+            self._schedule_relisten(0.9)
+            return
+
+        if action == "pos_add_many":
+            data = result.data or {}
+            items = data.get("items") or []
+            # resolve each name for better matching
+            from nano_offline.core.voice_intelligence import resolve_item_name
+            resolved = []
+            for it in items:
+                nm = (it.get("name") or "").strip()
+                q = float(it.get("qty") or 1)
+                matches = resolve_item_name(self.ctx.items, nm, limit=3)
+                if matches:
+                    resolved.append({
+                        "name": matches[0].get("name"),
+                        "qty": q,
+                        "item_id": int(matches[0].get("id") or 0) or None,
+                    })
+                    self.memory.note(last_item_name=matches[0].get("name"), last_qty=q, last_action="pos_add")
+                    self.memory.cart_adds += 1
+            payload = type("R", (), {"action": "pos_add_many", "data": {"items": resolved}, "ok": True, "target": "pos", "message": ""})()
+            section = (self.get_section() or "").lower()
+            if section == "pos":
+                self._apply_pos(payload)
+            else:
+                self._queue_and_go_pos(payload)
+            if resolved:
+                names = " و ".join(f"{r['name']}×{r['qty']:g}" for r in resolved[:4])
+                self._reply(f"أضفت: {names}.", kind="success")
+            else:
+                self._reply("ما قدرت أطابق المواد المطلوبة.", kind="warning")
+            self._schedule_relisten(0.9)
+            return
+
+        if action == "tts_mute":
+            self.tts_enabled = False
+            self._reply("تمام، رح أرد كتابة فقط بدون صوت.", kind="info")
+            self._schedule_relisten(0.6)
+            return
+
+        if action == "tts_unmute":
+            self.tts_enabled = True
+            self._reply("رجّعت الرد الصوتي.", kind="success")
+            self._schedule_relisten(0.6)
+            return
+
+        if action == "item_create":
+            data = result.data or {}
+            name = (data.get("name") or "").strip()
+            price = float(data.get("selling_price") or 0)
+            qty = float(data.get("quantity") or 0)
+            if not name:
+                self._reply("حدّد اسم المادة لإنشائها.", kind="warning")
+                self._schedule_relisten(0.6)
+                return
+            # avoid duplicates
+            from nano_offline.core.voice_intelligence import resolve_item_name
+            existing = resolve_item_name(self.ctx.items, name, limit=3)
+            if existing and str(existing[0].get("name") or "").strip() == name:
+                self._reply(f"المادة «{name}» موجودة مسبقاً.", kind="warning")
+                self._schedule_relisten(0.7)
+                return
+            try:
+                item_id = self.ctx.items.create(
+                    name=name,
+                    selling_price=price,
+                    purchase_price=0,
+                    quantity=qty,
+                    item_type="مخزون",
+                )
+                self.memory.note(last_item_name=name, last_item_id=item_id, last_action="item_create")
+                price_txt = f" بسعر {price:g}" if price else ""
+                self._reply(f"أنشأت المادة «{name}»{price_txt}. تقدر تضيفها للسلة الآن.", kind="success")
+            except Exception as exc:
+                self._reply(str(exc), kind="error")
+            self._schedule_relisten(0.85)
+            return
+
+        if action == "pos_set_qty":
+            data = result.data or {}
+            section = (self.get_section() or "").lower()
+            if section != "pos":
+                self._queue_and_go_pos(result)
+                self._reply("فتح نقطة البيع لتعديل الكمية…", kind="info")
+            else:
+                self._apply_pos(result)
+                setter = getattr(self.ctx, "_pos_apply_voice", None)
+                # message from toast already; craft reply
+                name = data.get("name") or "الأخير"
+                self._reply(f"تم ضبط كمية {name} إلى {float(data.get('qty') or 0):g}.", kind="success")
+            self._schedule_relisten(0.8)
+            return
+
+        if action == "today_sales":
+            try:
+                s = self.ctx.dashboard.today_summary()
+                count = int(s.get("count") or 0)
+                total = float(s.get("total") or 0)
+                try:
+                    from nano_offline.core import currency
+                    total_txt = currency.format_amount(total, self.ctx.settings)
+                except Exception:
+                    total_txt = f"{total:,.0f}"
+                if count == 0:
+                    self._reply("اليوم ما في فواتير بيع بعد.", kind="info")
+                else:
+                    self._reply(f"اليوم {count} فاتورة بيع بإجمالي {total_txt}.", kind="info")
+            except Exception as exc:
+                self._reply(str(exc), kind="error")
+            self._schedule_relisten(0.85)
+            return
+
         if action == "navigate" and result.target:
             try:
                 self.navigate(result.target)
@@ -489,9 +641,9 @@ class VoiceSessionController:
     def _show_help(self) -> None:
         section = (self.get_section() or "dashboard").lower()
         if section == "pos":
-            msg = "في الكاشير: اسم المادة، أضف 3 سكر، كمان واحد، ادفع، أفرغ السلة، إيقاف."
+            msg = "كاشير: اسم المادة، أضف سكر وحليب، كمان واحد، كمية 5، شو بالسلة، احذف الأخير، ادفع، إيقاف."
         else:
-            msg = "بيع سريع، جرد، مواد، كم باقي الأرز، ملخص، أضف سكر، تفعيل الطوارئ، مساعدة، إيقاف."
+            msg = "بيع سريع، أنشئ مادة شاي بسعر 500، مبيعات اليوم، كم باقي الأرز، ملخص، أضف سكر، مساعدة، إيقاف."
         self._reply(reply_for("help", extra=msg, memory=self.memory, section=section), kind="info")
 
     def _is_help(self, text: str) -> bool:

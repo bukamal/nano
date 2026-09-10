@@ -1564,6 +1564,7 @@ class POSCenter:
     def _register_voice_hook(self) -> None:
         try:
             setattr(self.ctx, "_pos_apply_voice", self.apply_voice_command)
+            setattr(self.ctx, "_pos_cart_snapshot", self.voice_cart_snapshot)
         except Exception:
             pass
 
@@ -1588,6 +1589,27 @@ class POSCenter:
                 except Exception:
                     pass
             self.voice_add_by_name(name, qty)
+        elif action == "pos_add_many":
+            data = getattr(result, "data", None) or {}
+            items = data.get("items") or []
+            for it in items:
+                nm = (it.get("name") or "").strip()
+                q = float(it.get("qty") or 1)
+                iid = it.get("item_id")
+                if iid:
+                    try:
+                        iid = int(iid)
+                        if iid not in self.item_map:
+                            row = self.ctx.items.get(iid) if hasattr(self.ctx.items, "get") else None
+                            if row:
+                                self.item_map[iid] = row
+                        if iid in self.item_map:
+                            self._add_item(iid, qty_delta=q)
+                            continue
+                    except Exception:
+                        pass
+                if nm:
+                    self.voice_add_by_name(nm, q)
         elif action == "pos_clear":
             self.cart.clear()
             self.cart_order.clear()
@@ -1596,26 +1618,97 @@ class POSCenter:
             except Exception:
                 pass
             self.page.update()
+        elif action == "pos_remove_last":
+            if not self.cart_order:
+                return
+            last_id = self.cart_order[-1]
+            self.cart.pop(last_id, None)
+            self.cart_order.pop()
             try:
-                from nano_offline.core.toast import toast
-                toast(self.page, "تم تفريغ السلة", kind="info")
+                self._refresh_cart()
             except Exception:
                 pass
+            self.page.update()
+        elif action == "pos_set_qty":
+            data = getattr(result, "data", None) or {}
+            msg = self.voice_set_qty(float(data.get("qty") or 1), name=(data.get("name") or None))
+            try:
+                from nano_offline.core.toast import toast
+                toast(self.page, msg, kind="info")
+            except Exception:
+                pass
+        elif action == "pos_cart_summary":
+            # summary is computed by voice layer; refresh only
+            try:
+                self._refresh_cart()
+            except Exception:
+                pass
+            self.page.update()
         elif action == "pos_pay":
             try:
-                # Trigger the same path as the pay button if wired in _build
                 btn = getattr(self, "_checkout_btn", None)
                 if btn is not None and getattr(btn, "on_click", None):
                     btn.on_click(None)
-                else:
-                    from nano_offline.core.toast import toast
-                    toast(self.page, "اضغط دفع لإتمام البيع", kind="info")
             except Exception as exc:
                 try:
                     from nano_offline.core.toast import toast
                     toast(self.page, str(exc), kind="error")
                 except Exception:
                     pass
+
+    def voice_set_qty(self, qty: float, *, name: str | None = None) -> str:
+        """Set absolute quantity on last line or matching name. Returns status message."""
+        qty = float(qty or 0)
+        if qty <= 0:
+            return "الكمية يجب أن تكون أكبر من صفر"
+        target_id = None
+        if name:
+            from nano_offline.core.voice_intelligence import _norm
+            needle = _norm(name)
+            for iid in reversed(self.cart_order):
+                row = self.cart.get(iid)
+                if not row:
+                    continue
+                iname = _norm(str(row["item"].get("name") or ""))
+                if needle in iname or iname in needle:
+                    target_id = iid
+                    break
+            if target_id is None:
+                return f"ما لقيت «{name}» بالسلة"
+        elif self.cart_order:
+            target_id = self.cart_order[-1]
+        else:
+            return "السلة فارغة"
+        row = self.cart.get(target_id)
+        if not row:
+            return "البند غير موجود"
+        row["qty"] = qty
+        try:
+            self._refresh_cart()
+        except Exception:
+            pass
+        self.page.update()
+        return f"كمية {row['item'].get('name')} = {qty:g}"
+
+    def voice_cart_snapshot(self) -> dict:
+        """Totals for voice summary (USD stored amounts)."""
+        lines = []
+        total = 0.0
+        for item_id in self.cart_order:
+            row = self.cart.get(item_id)
+            if not row:
+                continue
+            item = row["item"]
+            qty = float(row.get("qty") or 0)
+            unit = row.get("unit_price")
+            if unit is None:
+                unit = float(item.get("selling_price") or 0)
+            else:
+                unit = float(unit)
+            line_total = unit * qty
+            total += line_total
+            lines.append({"name": item.get("name"), "qty": qty, "line_total": line_total})
+        return {"count": len(lines), "total": total, "lines": lines}
 
     def voice_add_by_name(self, name: str, qty: float = 1.0) -> bool:
         """Resolve item by Arabic name and add to cart. Returns True on success."""
