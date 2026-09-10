@@ -83,7 +83,10 @@ def cart_margin_warnings(cart_rows: list[dict], settings=None) -> list[dict]:
     warnings: list[dict] = []
     for row in cart_rows:
         item = row.get("item") or {}
-        price = float(item.get("selling_price") or 0)
+        # v0.9.6: honor a per-line price override (POS in-cart price edit,
+        # or a sub-unit barcode scan that priced the line by its unit), so
+        # the checkout warning follows the price actually charged.
+        price = float(row.get("unit_price") or item.get("selling_price") or 0)
         result = check_sale_margin(unit_price_usd=price, item=item, settings=settings)
         if result["flag"]:
             result = dict(result)

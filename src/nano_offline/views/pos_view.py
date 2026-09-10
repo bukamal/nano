@@ -1281,6 +1281,40 @@ class POSCenter:
 
         line_unit_price = float(row.get("unit_price") or item["selling_price"])
         line_total = line_unit_price * float(row["qty"])
+
+        def edit_price(_=None) -> None:
+            # v0.9.6: tap the price line of a cart row to override that
+            # line's unit price. Recalculates the line total, cart total,
+            # the «آخر مسح»-independent margin badge and the checkout
+            # margin warning, because refresh_cart() re-runs _cart_row +
+            # total_amount() and checkout uses row["unit_price"].
+            price_field = SelectAllTextField(
+                label="سعر البيع",
+                value=str(line_unit_price),
+                keyboard_type=ft.KeyboardType.NUMBER,
+                autofocus=True,
+            )
+
+            def apply(_=None) -> None:
+                try:
+                    new_price = max(0.0, float(price_field.value or 0))
+                except Exception:
+                    return
+                row["unit_price"] = new_price
+                self.page.close(dialog)
+                on_change()
+
+            dialog = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("تعديل سعر البند"),
+                content=ft.Column([price_field], tight=True, width=300),
+                actions=[
+                    ft.TextButton("إلغاء", on_click=lambda _: self.page.close(dialog)),
+                    ft.TextButton("حفظ", on_click=apply),
+                ],
+            )
+            self.page.open(dialog)
+
         # Informational only (see item tile note above) -- InvoiceService
         # itself has no stock guard, so this never blocks checkout; it just
         # lets the cashier catch it before printing the receipt.
@@ -1334,10 +1368,16 @@ class POSCenter:
                             ft.Column(
                                 [
                                     ft.Row(name_row_controls, spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                                    ft.Text(
-                                        f"{self.money(line_unit_price)} × {self._qty(row['qty'])} = {self.money(line_total)}",
-                                        size=11,
-                                        color=Colors.TEXT_SECONDARY,
+                                    ft.Row(
+                                        [
+                                            ft.Icon(ft.Icons.EDIT_OUTLINED, size=11, color=Colors.TEXT_SECONDARY),
+                                            ft.Text(
+                                                f"{self.money(line_unit_price)} × {self._qty(row['qty'])} = {self.money(line_total)}",
+                                                size=11,
+                                                color=Colors.TEXT_SECONDARY,
+                                            ),
+                                        ],
+                                        spacing=4, tight=True, on_click=edit_price, tooltip="اضغط لتعديل السعر",
                                     ),
                                 ],
                                 spacing=1, expand=True,

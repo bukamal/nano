@@ -1195,7 +1195,7 @@ class InvoiceCenter:
                 update_line_units(state)
                 _uid0 = int(state["unit"].value) if state["unit"].value else None
                 _urow0 = state.get("units", {}).get(_uid0) if _uid0 else None
-                _sp0 = (_urow0 or {}).get("selling_price")
+                _sp0 = (_urow0 or {}).get("purchase_price" if type_dd.value == "purchase" else "selling_price")
                 if _sp0 not in (None, ""):
                     state["price"].value = currency.format_plain(currency.to_display(float(_sp0), currency.get_effective_rate(self.ctx.settings)))
                 else:
@@ -1208,7 +1208,7 @@ class InvoiceCenter:
                 unit_row = state.get("units", {}).get(uid)
                 state["factor"] = float(unit_row["conversion_factor"]) if unit_row else 1.0
                 if state.get("base_price") is not None:
-                    _sp1 = (unit_row or {}).get("selling_price")
+                    _sp1 = (unit_row or {}).get("purchase_price" if type_dd.value == "purchase" else "selling_price")
                     if _sp1 not in (None, ""):
                         state["price"].value = currency.format_plain(currency.to_display(float(_sp1), currency.get_effective_rate(self.ctx.settings)))
                     else:
@@ -1393,7 +1393,7 @@ class InvoiceCenter:
                 if not initial.get("unit_price") and state.get("base_price") is not None:
                     _uid2 = int(state["unit"].value) if state["unit"].value else None
                     _urow2 = state.get("units", {}).get(_uid2) if _uid2 else None
-                    _sp2 = (_urow2 or {}).get("selling_price")
+                    _sp2 = (_urow2 or {}).get("purchase_price" if type_dd.value == "purchase" else "selling_price")
                     if _sp2 not in (None, ""):
                         price.value = currency.format_plain(currency.to_display(float(_sp2), currency.get_effective_rate(self.ctx.settings)))
                     else:
@@ -1483,7 +1483,7 @@ class InvoiceCenter:
                     state["base_price"] = currency.to_display(base_price_usd, currency.get_effective_rate(self.ctx.settings))
                     _uid3 = int(state["unit"].value) if state["unit"].value else None
                     _urow3 = state.get("units", {}).get(_uid3) if _uid3 else None
-                    _sp3 = (_urow3 or {}).get("selling_price")
+                    _sp3 = (_urow3 or {}).get("purchase_price" if type_dd.value == "purchase" else "selling_price")
                     if _sp3 not in (None, ""):
                         state["price"].value = currency.format_plain(currency.to_display(float(_sp3), currency.get_effective_rate(self.ctx.settings)))
                     else:

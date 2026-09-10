@@ -103,6 +103,9 @@ CREATE TABLE IF NOT EXISTS item_units (
     -- Optional per-unit selling price override (USD, same unit as items.selling_price).
     -- When NULL, the unit prices as base selling_price x conversion_factor.
     selling_price REAL,
+    -- Optional per-unit purchase price override (USD, same unit as items.purchase_price).
+    -- When NULL, purchase invoices price the unit as base purchase_price x conversion_factor.
+    purchase_price REAL,
     UNIQUE(item_id, unit_id)
 );
 
@@ -654,6 +657,9 @@ class Database:
         # Optional per-unit selling price override (added in v0.9.5).
         if self._table_exists(conn, "item_units") and not self._has_column(conn, "item_units", "selling_price"):
             conn.execute("ALTER TABLE item_units ADD COLUMN selling_price REAL")
+        # Optional per-unit purchase price override (added in v0.9.6).
+        if self._table_exists(conn, "item_units") and not self._has_column(conn, "item_units", "purchase_price"):
+            conn.execute("ALTER TABLE item_units ADD COLUMN purchase_price REAL")
 
         # Phase-2 invoice-linked payment rows were derived and can be safely
         # regenerated from invoices.initial_paid_amount by AccountingRebuilder.
