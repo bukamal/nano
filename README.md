@@ -56,7 +56,7 @@ PYTHONPATH=src python tools/quality_gate.py
 محليًا:
 
 ```bash
-flet build apk --build-version 0.9.2 --build-number 23
+flet build apk --build-version 0.9.6 --build-number 24
 python tools/verify_flet_native_files_registration.py build/flutter
 ```
 

@@ -24,7 +24,7 @@ from nano_offline.components import (
 
 from nano_offline.services.invoice_service import InvoiceLineInput
 from nano_offline.components.buttons import stepper_icon_button
-from nano_offline.core.theme import Colors, Shadow
+from nano_offline.core.theme import Colors, Radius, Shadow
 from nano_offline.core import currency
 from nano_offline.core.margin_guard import check_sale_margin
 from nano_offline.core.price_fingerprint import check_purchase_price
@@ -1168,23 +1168,28 @@ class InvoiceCenter:
             self.page.update()
 
         def update_line_units(state: dict, selected_unit_id: int | None = None) -> None:
-            state["unit"].set_choices([])
-            state["unit"].value = None
+            unit_select = state["unit"]
+            unit_select.options = []
+            unit_select.value = None
             state["factor"] = 1.0
             if not state["item"].value:
+                _safe_update(unit_select)
                 return
             item_id_value = int(state["item"].value)
             units = self.ctx.items.units(item_id_value)
             state["units"] = {int(u["id"]): u for u in units}
-            state["unit"].set_choices([
-                (str(u["id"]), f"{u['name']} × {self._qty(u['conversion_factor'])}") for u in units
-            ])
+            # قائمة منسدلة حقيقية (Dropdown) بدل الحقل البحثي: خيار واحد لكل وحدة.
+            unit_select.options = [
+                ft.dropdown.Option(key=str(u["id"]), text=f"{u['name']} × {self._qty(u['conversion_factor'])}")
+                for u in units
+            ]
             chosen = selected_unit_id if selected_unit_id in state["units"] else None
             if chosen is None and units:
                 chosen = int(units[0]["id"])
             if chosen is not None:
-                state["unit"].value = str(chosen)
+                unit_select.value = str(chosen)
                 state["factor"] = float(state["units"][chosen]["conversion_factor"])
+            _safe_update(unit_select)
 
         def item_changed(state: dict) -> None:
             if state["item"].value:
@@ -1308,7 +1313,17 @@ class InvoiceCenter:
                 value=str(initial["item_id"]) if initial.get("item_id") else None,
             )
             description = SelectAllTextField(label="البيان", value=initial.get("description") or "")
-            unit_dd = SearchSelect(label="الوحدة")
+            # قائمة منسدلة حقيقية بدل الحقل البحثي -- نقرة واحدة تُظهر كل الوحدات،
+            # بنفس نمط القوائم المنسدلة في شاشات الأصناف والتقارير.
+            unit_dd = ft.Dropdown(
+                label="الوحدة",
+                hint_text="اختر الوحدة",
+                options=[],
+                filled=True,
+                bgcolor=Colors.BACKGROUND_ALT,
+                border_radius=Radius.MD,
+                border_color=Colors.BORDER,
+            )
             qty = SelectAllTextField(label="الكمية", value=str(initial.get("quantity") or 1), keyboard_type=ft.KeyboardType.NUMBER)
             price = SmartAmountField(
                 label=currency.amount_field_label("السعر", self.ctx.settings),

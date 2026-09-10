@@ -93,7 +93,7 @@ MAX_ATTEMPTS=3
 attempt=1
 while true; do
   set +e
-  uv run flet build apk --product "Nano | نانو" --org com.nano --build-number 22 --build-version 0.9.1
+  uv run flet build apk --product "Nano | نانو" --org com.nano --build-number 24 --build-version 0.9.6
   status=$?
   set -e
 

@@ -36,7 +36,6 @@ from __future__ import annotations
 - نفس آليات toast المراكز الأخرى (``core.toast.toast``)، و patterns الـ Center
   (build/shell/header) دون كسر توقيع الصف.
 """
-from __future__ import annotations as _a
 
 from dataclasses import dataclass, field
 from enum import Enum

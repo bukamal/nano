@@ -90,7 +90,7 @@ EOF
 echo "Installed Gradle init script for core library desugaring at ${GRADLE_INIT_DIR}/nano-core-library-desugaring.init.gradle.kts" >&2
 
 # FIX_0.9.1-CI (definitive): the pre-0.9.1 Glance widget file
-# NanoGlanceWidget.kt must NEVER be compiled against 0.9.1's Glance-free
+# NanoGlanceWidget.kt must NEVER be compiled against the old Glance-based
 # build.gradle. If it still exists anywhere in the checkout -- in the
 # repo branch being built (the FIX_0.9.1 `git rm` must be committed AND
 # pushed for the source tree to be clean; CI run 92259598255 proved it
@@ -107,7 +107,7 @@ MAX_ATTEMPTS=3
 attempt=1
 while true; do
   set +e
-  uv run flet build apk --product "Nano | نانو" --org com.nano --build-number 23 --build-version 0.9.2
+  uv run flet build apk --product "Nano | نانو" --org com.nano --build-number 24 --build-version 0.9.6
   status=$?
   set -e
 
