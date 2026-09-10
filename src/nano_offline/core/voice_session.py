@@ -119,6 +119,7 @@ class VoiceSessionController:
             tooltip="مكالمة أوامر ذكية",
             on_click=self.toggle,
             visible=True,
+            mini=True,
         )
 
     def toggle(self, _e=None) -> None:
@@ -230,14 +231,20 @@ class VoiceSessionController:
             on_error(str(exc))
 
     def _schedule_relisten(self, delay: float) -> None:
+        """Restart mic after `delay`, extended while TTS may still be speaking."""
         if not self.active:
             return
+        extra = 0.0
+        if self.tts_enabled and self._last_spoken:
+            # Give the engine time to finish the last reply before opening the mic.
+            extra = min(12.0, max(1.4, len(self._last_spoken) * 0.095))
+            self._last_spoken = ""  # consume once
 
         def _go():
             if self.active and not self.listening:
                 self._listen()
 
-        threading.Timer(max(0.25, delay), _go).start()
+        threading.Timer(max(0.25, delay + extra), _go).start()
 
     def _execute(self, text: str) -> None:
         section = (self.get_section() or "dashboard").lower()
@@ -636,6 +643,8 @@ class VoiceSessionController:
             self.notify(text, kind=kind)
         except Exception:
             pass
+        if self.tts_enabled:
+            self._last_spoken = text or ""
         self._speak(text)
 
     def _show_help(self) -> None:
@@ -703,10 +712,10 @@ class VoiceSessionController:
     def _speak(self, text: str) -> None:
         if not self.tts_enabled or not self.native_files or not text:
             return
-        # Keep spoken replies short
         spoken = (text or "").strip()
         if len(spoken) > 120:
             spoken = spoken[:117] + "…"
+        self._last_spoken = spoken
 
         async def _go():
             try:
@@ -717,12 +726,16 @@ class VoiceSessionController:
                 await self.native_files.speech_speak(spoken, language="ar")
             except Exception:
                 pass
+            finally:
+                # Speak finished (or failed) — don't add a second full delay
+                self._last_spoken = ""
 
         try:
             if hasattr(self.page, "run_task"):
                 self.page.run_task(_go)
         except Exception:
             pass
+
 
     def _safe_update(self) -> None:
         try:

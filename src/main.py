@@ -778,8 +778,10 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
                 alignment=ft.alignment.top_center,
             )
         )
+        # Keep the call FAB off the "المزيد" corner (left in RTL bottom bar).
+        voice_session.fab.mini = True
         page.floating_action_button = voice_session.fab
-        page.floating_action_button_location = ft.FloatingActionButtonLocation.END_FLOAT
+        page.floating_action_button_location = ft.FloatingActionButtonLocation.START_FLOAT
         # Keep a handle for POS / dashboard if needed later
         ctx._voice_session = voice_session  # type: ignore[attr-defined]
         page.update()

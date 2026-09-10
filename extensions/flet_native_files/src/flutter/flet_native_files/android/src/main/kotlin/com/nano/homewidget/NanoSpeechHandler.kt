@@ -92,10 +92,33 @@ class NanoSpeechHandler(
                         Locale("ar")
                     }
                     engine.language = loc
-                    // QUEUE_FLUSH so each reply replaces the previous
-                    @Suppress("DEPRECATION")
-                    engine.speak(cleaned, TextToSpeech.QUEUE_FLUSH, null, "nano-tts")
-                    result.success("ok")
+                    val utteranceId = "nano-tts-${System.currentTimeMillis()}"
+                    var answered = false
+                    fun finishOk() {
+                        if (answered) return
+                        answered = true
+                        result.success("ok")
+                    }
+                    engine.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                        override fun onStart(utteranceId: String?) {}
+                        override fun onDone(utteranceId: String?) {
+                            mainHandler.post { finishOk() }
+                        }
+                        @Deprecated("Deprecated in Java")
+                        override fun onError(utteranceId: String?) {
+                            mainHandler.post { finishOk() }
+                        }
+                        override fun onError(utteranceId: String?, errorCode: Int) {
+                            mainHandler.post { finishOk() }
+                        }
+                    })
+                    // Fallback if OEM never fires utterance callbacks
+                    val approxMs = (cleaned.length * 90L).coerceIn(1500L, 12000L)
+                    mainHandler.postDelayed({ finishOk() }, approxMs)
+                    val ok = engine.speak(cleaned, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+                    if (ok == TextToSpeech.ERROR) {
+                        finishOk()
+                    }
                 } catch (e: Exception) {
                     result.error("tts_error", e.message ?: "تعذر النطق", null)
                 }

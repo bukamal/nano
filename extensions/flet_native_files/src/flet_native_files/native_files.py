@@ -450,13 +450,15 @@ class NativeFiles(Control):
 
 
     async def speech_speak(self, text: str, *, language: str = "ar") -> None:
-        """Speak Arabic (or locale) text via Android TextToSpeech. Best-effort."""
+        """Speak Arabic text via Android TTS and wait until utterance finishes."""
         try:
+            # ~90ms/char estimate + margin; capped so a hang cannot block forever
+            approx = max(3.0, min(14.0, (len(text or "") * 0.09) + 1.5))
             raw = await self.invoke_method_async(
                 "speech_speak",
                 {"text": text or "", "language": language or "ar"},
                 wait_for_result=True,
-                wait_timeout=_QUICK_TIMEOUT,
+                wait_timeout=approx,
             )
             if raw and str(raw).startswith("error:"):
                 raise RuntimeError(str(raw)[6:])

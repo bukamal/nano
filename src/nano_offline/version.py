@@ -1,4 +1,4 @@
-APP_VERSION = "0.14.2"
-BUILD_NUMBER = 37  # FEATURE_0.14.2: voice create item, set qty, today sales
+APP_VERSION = "0.14.3"
+BUILD_NUMBER = 38  # FIX_0.14.3: FAB away from more tab; wait for TTS before re-listen
 
 __all__ = ["APP_VERSION", "BUILD_NUMBER"]
