@@ -198,8 +198,96 @@ __all__ = [
     "VoiceEngine",
     "StubVoiceEngine",
     "WebSpeechVoiceEngine",
+    "AndroidNativeVoiceEngine",
     "set_engine",
     "get_engine",
     "listen_once",
     "cancel",
 ]
+
+
+@dataclass
+class AndroidNativeVoiceEngine:
+    """Uses NativeFiles.speech_listen (Android SpeechRecognizer channel).
+
+    ``native_files`` must be the live Flet control already added to the page.
+    listen_once schedules an asyncio task so the UI stays responsive.
+    """
+
+    native_files: object  # NativeFiles
+    page: object | None = None  # ft.Page for page.run_task if available
+
+    def is_available(self) -> bool:
+        return self.native_files is not None
+
+    def listen_once(
+        self,
+        *,
+        language: str = "ar-SY",
+        on_partial: Callable[[str], None] | None = None,
+        on_final: Callable[[str], None] | None = None,
+        on_error: Callable[[str], None] | None = None,
+        timeout_sec: float = 8.0,
+    ) -> None:
+        import asyncio
+
+        async def _run():
+            try:
+                # Optional availability probe
+                try:
+                    ok = await self.native_files.speech_is_available()
+                    if not ok:
+                        if on_error:
+                            on_error("التعرّف على الكلام غير متاح على هذا الجهاز")
+                        return
+                except Exception:
+                    pass
+                text = await self.native_files.speech_listen(
+                    language=language or "ar-SY",
+                    timeout_ms=int(max(3.0, timeout_sec) * 1000),
+                )
+                if text:
+                    if on_final:
+                        on_final(text)
+                else:
+                    if on_error:
+                        on_error("لم يُلتقط كلام")
+            except Exception as exc:
+                if on_error:
+                    on_error(str(exc))
+
+        page = self.page
+        if page is not None and hasattr(page, "run_task"):
+            page.run_task(_run)
+        else:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(_run())
+                else:
+                    loop.run_until_complete(_run())
+            except Exception as exc:
+                if on_error:
+                    on_error(str(exc))
+
+    def cancel(self) -> None:
+        import asyncio
+
+        async def _cancel():
+            try:
+                await self.native_files.speech_cancel()
+            except Exception:
+                pass
+
+        page = self.page
+        if page is not None and hasattr(page, "run_task"):
+            page.run_task(_cancel)
+        else:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(_cancel())
+            except Exception:
+                pass
+
+

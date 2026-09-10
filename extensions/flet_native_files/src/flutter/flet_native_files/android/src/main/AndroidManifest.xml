@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.nano.homewidget">
 
+    <!-- Voice commands: on-device SpeechRecognizer -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <!--
       PHASE10: home screen widget (Glance). This is a *plugin library*
       manifest; Gradle's manifest merger folds the <receiver> below into

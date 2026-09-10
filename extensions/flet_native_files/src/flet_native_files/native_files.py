@@ -400,3 +400,50 @@ class NativeFiles(Control):
             )
         except Exception:
             pass
+
+
+    async def speech_is_available(self) -> bool:
+        """True when Android on-device SpeechRecognizer is available."""
+        try:
+            raw = await self.invoke_method_async(
+                "speech_is_available",
+                {},
+                wait_for_result=True,
+                wait_timeout=_QUICK_TIMEOUT,
+            )
+            return str(raw).strip() == "1"
+        except Exception:
+            return False
+
+    async def speech_listen(
+        self,
+        *,
+        language: str = "ar-SY",
+        timeout_ms: int = 8000,
+    ) -> str:
+        """Capture one utterance. Returns transcript or raises RuntimeError."""
+        raw = await self.invoke_method_async(
+            "speech_listen",
+            {
+                "language": language or "ar-SY",
+                "timeout_ms": str(int(timeout_ms)),
+            },
+            wait_for_result=True,
+            wait_timeout=max(_QUICK_TIMEOUT, (timeout_ms / 1000.0) + 5.0),
+        )
+        text = "" if raw is None else str(raw)
+        if text.startswith("error:"):
+            raise RuntimeError(text[6:].strip() or "تعذّر التعرّف على الكلام")
+        return text.strip()
+
+    async def speech_cancel(self) -> None:
+        """Abort an in-flight speech_listen, if any."""
+        try:
+            await self.invoke_method_async(
+                "speech_cancel",
+                {},
+                wait_for_result=True,
+                wait_timeout=_QUICK_TIMEOUT,
+            )
+        except Exception:
+            pass

@@ -1,4 +1,4 @@
-APP_VERSION = "0.11.1"
-BUILD_NUMBER = 28  # FEATURE_0.11.1: Voice mic UI + pluggable STT hook on quick commands
+APP_VERSION = "0.12.0"
+BUILD_NUMBER = 29  # FEATURE_0.12.0: Android native SpeechRecognizer channel + mic wired to quick commands
 
 __all__ = ["APP_VERSION", "BUILD_NUMBER"]

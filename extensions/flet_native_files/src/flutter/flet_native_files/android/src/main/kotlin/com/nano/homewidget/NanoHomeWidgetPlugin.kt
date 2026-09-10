@@ -4,6 +4,8 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.CoroutineScope
@@ -13,29 +15,47 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * FIX_0.9.2: extends the PHASE10 / 0.9.1 bridge with two new methods
- * specifically to make backup-restore stop leaving a stale snapshot in the
- * widget SharedPreferences:
- *
- *   - "clear": wipe the widget's stored snapshot so a previous install's
- *     or pre-restore data can never be shown against the restored DB.
- *   - "refresh_now": force-update every placed widget instance right now,
- *     independently of the next periodic pass.
- *
- * "push" is unchanged. "diagnose" still returns the same JSON shape (just
- * with two extra fields, last_clear_at / last_refresh_now_at).
- *
- * No Python or Dart surface area moved; admin_view.py reaches these via
- * native_files.clear_home_widget / native_files.force_refresh_home_widget.
+ * Registers two channels:
+ *   - nano/home_widget  (existing widget push/clear/refresh/diagnose)
+ *   - nano/speech       (on-device SpeechRecognizer for Arabic commands)
  */
-class NanoHomeWidgetPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
+class NanoHomeWidgetPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware {
     private lateinit var channel: MethodChannel
+    private lateinit var speechChannel: MethodChannel
     private lateinit var context: Context
+    private var speechHandler: NanoSpeechHandler? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
         channel = MethodChannel(binding.binaryMessenger, "nano/home_widget")
         channel.setMethodCallHandler(this)
+
+        speechHandler = NanoSpeechHandler(context)
+        speechChannel = MethodChannel(binding.binaryMessenger, NanoSpeechHandler.CHANNEL)
+        speechChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "is_available" -> {
+                    result.success(if (speechHandler?.isAvailable() == true) "1" else "0")
+                }
+                "listen" -> {
+                    val args = call.arguments as? Map<*, *>
+                    val language = (args?.get("language") as? String)?.ifBlank { null } ?: "ar-SY"
+                    val timeoutMs = when (val t = args?.get("timeout_ms")) {
+                        is Int -> t
+                        is Number -> t.toInt()
+                        is String -> t.toIntOrNull() ?: 8000
+                        else -> 8000
+                    }
+                    speechHandler?.listen(language, timeoutMs, result)
+                        ?: result.error("unavailable", "محرك الكلام غير مهيأ", null)
+                }
+                "cancel" -> {
+                    speechHandler?.cancel()
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -110,10 +130,35 @@ class NanoHomeWidgetPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 put("last_push_error", NanoWidgetDiagnostics.lastPushError)
                 put("last_clear_at", NanoWidgetDiagnostics.lastClearAt)
                 put("last_refresh_now_at", NanoWidgetDiagnostics.lastRefreshNowAt)
+                put("speech_available", speechHandler?.isAvailable() == true)
             }
             withContext(Dispatchers.Main) { result.success(json.toString()) }
         }
     }
 
-    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {}
+    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        speechHandler?.dispose()
+        speechHandler = null
+        try {
+            channel.setMethodCallHandler(null)
+            speechChannel.setMethodCallHandler(null)
+        } catch (_: Exception) {
+        }
+    }
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        speechHandler?.attachActivity(binding.activity)
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        speechHandler?.attachActivity(null)
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        speechHandler?.attachActivity(binding.activity)
+    }
+
+    override fun onDetachedFromActivity() {
+        speechHandler?.attachActivity(null)
+    }
 }

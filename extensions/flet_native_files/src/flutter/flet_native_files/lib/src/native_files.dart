@@ -287,6 +287,7 @@ List<_NativeAlert> _checkLicense(Database db, Map<String, dynamic> config) {
 // Both funnel into the same native channel; NanoHomeWidgetPlugin.kt is the
 // single place that actually touches the Glance widget state.
 const MethodChannel _homeWidgetChannel = MethodChannel('nano/home_widget');
+const MethodChannel _speechChannel = MethodChannel('nano/speech');
 
 Future<void> _pushHomeWidgetJson(String snapshotJson) async {
   try {
@@ -751,6 +752,46 @@ class _FletNativeFilesControlState extends State<FletNativeFilesControl> {
             await _homeWidgetChannel.invokeMethod('refresh_now');
           } catch (error) {
             debugPrint('nano home widget refresh_now failed: $error');
+          }
+          return 'ok';
+
+        case 'speech_is_available':
+          if (!Platform.isAndroid) return '0';
+          try {
+            final raw = await _speechChannel.invokeMethod<String>('is_available');
+            return raw ?? '0';
+          } catch (error) {
+            debugPrint('nano speech is_available failed: $error');
+            return '0';
+          }
+
+        case 'speech_listen':
+          // On-device Android SpeechRecognizer. Blocks until final result,
+          // error, cancel, or timeout (native side).
+          if (!Platform.isAndroid) return 'error:التعرّف الصوتي متاح على أندرويد فقط';
+          try {
+            final language = args['language'] ?? 'ar-SY';
+            final timeoutMs = int.tryParse(args['timeout_ms'] ?? '') ?? 8000;
+            final text = await _speechChannel.invokeMethod<String>(
+              'listen',
+              <String, dynamic>{
+                'language': language,
+                'timeout_ms': timeoutMs,
+              },
+            );
+            return text ?? '';
+          } catch (error) {
+            final msg = error.toString();
+            // Flutter PlatformException: PlatformException(code, message, details)
+            return 'error:$msg';
+          }
+
+        case 'speech_cancel':
+          if (!Platform.isAndroid) return 'ok';
+          try {
+            await _speechChannel.invokeMethod('cancel');
+          } catch (error) {
+            debugPrint('nano speech cancel failed: $error');
           }
           return 'ok';
 

@@ -775,6 +775,15 @@ def main(page: ft.Page):
     ctx = AppContext.create(APP_DB)
     native_files = NativeFiles()
     page.overlay.append(native_files)
+
+    # Voice: prefer Android on-device SpeechRecognizer when available.
+    try:
+        from nano_offline.core import voice_command as _voice
+        plat = str(getattr(page, "platform", "") or "").lower()
+        if plat in ("android", "android_phone", "android_tablet") or "android" in plat:
+            _voice.set_engine(_voice.AndroidNativeVoiceEngine(native_files, page=page))
+    except Exception:
+        pass
     # Lets core/sound.py's play() -- invoked from inside toast(), which only
     # ever receives `page` -- read sound settings and reach the native
     # AudioPool bridge (native_files.play_sound) without threading them
