@@ -795,6 +795,30 @@ class _FletNativeFilesControlState extends State<FletNativeFilesControl> {
           }
           return 'ok';
 
+        case 'speech_speak':
+          if (!Platform.isAndroid) return 'ok';
+          try {
+            await _speechChannel.invokeMethod(
+              'speak',
+              <String, dynamic>{
+                'text': args['text'] ?? '',
+                'language': args['language'] ?? 'ar',
+              },
+            );
+            return 'ok';
+          } catch (error) {
+            return 'error:$error';
+          }
+
+        case 'speech_stop_speak':
+          if (!Platform.isAndroid) return 'ok';
+          try {
+            await _speechChannel.invokeMethod('stop_speak');
+          } catch (error) {
+            debugPrint('nano speech stop_speak failed: $error');
+          }
+          return 'ok';
+
         default:
           return null;
       }

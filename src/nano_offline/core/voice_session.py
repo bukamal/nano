@@ -38,17 +38,22 @@ class VoiceSessionController:
         navigate: Callable[[str], None],
         notify: Callable[..., None] | None = None,
         get_section: Callable[[], str] | None = None,
+        native_files=None,
+        tts_enabled: bool = True,
     ) -> None:
         self.page = page
         self.ctx = ctx
         self.navigate = navigate
         self.notify = notify or (lambda text, **kw: toast(page, text, **kw))
         self.get_section = get_section or (lambda: "dashboard")
+        self.native_files = native_files
+        self.tts_enabled = tts_enabled
 
         self.active = False
         self.listening = False
         self.turns: list[Turn] = []
         self._pending_followup: dict[str, Any] | None = None
+        self._pending_confirm: dict[str, Any] | None = None
         self._last_command: str = ""
 
         self._status = ft.Text("مكالمة ذكية", size=13, weight=ft.FontWeight.BOLD, color=Colors.WHITE)
@@ -159,6 +164,18 @@ class VoiceSessionController:
         self._set_listening_visual(True)
         self._hint.value = "يستمع…"
         self._safe_update()
+        # Stop any TTS so the mic does not hear Nano talking
+        if self.native_files is not None:
+            async def _hush():
+                try:
+                    await self.native_files.speech_stop_speak()
+                except Exception:
+                    pass
+            try:
+                if hasattr(self.page, "run_task"):
+                    self.page.run_task(_hush)
+            except Exception:
+                pass
 
         def on_final(text: str):
             self.listening = False
@@ -218,6 +235,23 @@ class VoiceSessionController:
     def _execute(self, text: str) -> None:
         section = (self.get_section() or "dashboard").lower()
 
+        # Pending confirmation (clear cart / crisis)
+        if self._pending_confirm:
+            if self._is_yes(text):
+                pending = self._pending_confirm
+                self._pending_confirm = None
+                self._run_confirmed(pending)
+                self._schedule_relisten(0.8)
+                return
+            if self._is_no(text):
+                self._pending_confirm = None
+                self._reply("تم الإلغاء", kind="info")
+                self._schedule_relisten(0.6)
+                return
+            self._reply("قل نعم أو لا", kind="warning")
+            self._schedule_relisten(0.6)
+            return
+
         if self._pending_followup and self._pending_followup.get("kind") == "qty":
             qty = self._parse_qty_utterance(text)
             if qty is not None:
@@ -269,11 +303,10 @@ class VoiceSessionController:
                     pass
                 self._do_pos_add(name, qty)
             elif action == "pos_clear":
-                if section != "pos":
-                    self._queue_and_go_pos(result)
-                else:
-                    self._apply_pos(result)
-                self._reply("تم تفريغ السلة" if section == "pos" else "جارٍ تفريغ السلة…", kind="info")
+                self._pending_confirm = {"kind": "pos_clear", "result": result, "section": section}
+                self._reply("تأكيد تفريغ السلة؟ قل نعم أو لا", kind="warning")
+                self._schedule_relisten(0.7)
+                return
             else:
                 self._queue_and_go_pos(result)
                 self._reply("فتح الدفع", kind="success")
@@ -290,11 +323,8 @@ class VoiceSessionController:
             return
 
         if action == "crisis_on":
-            try:
-                self.ctx.crisis_mode.activate(freeze_current_rate=True)
-                self._reply("وضع الطوارئ مفعّل — سعر الصرف مجمّد", kind="warning")
-            except Exception as exc:
-                self._reply(str(exc), kind="error")
+            self._pending_confirm = {"kind": "crisis_on"}
+            self._reply("تأكيد تفعيل وضع الطوارئ؟ قل نعم أو لا", kind="warning")
             self._schedule_relisten(0.7)
             return
 
@@ -429,6 +459,7 @@ class VoiceSessionController:
             self.notify(text, kind=kind)
         except Exception:
             pass
+        self._speak(text)
 
     def _show_help(self) -> None:
         section = (self.get_section() or "dashboard").lower()
@@ -467,6 +498,58 @@ class VoiceSessionController:
             return float(word_qty[key])
         _, qty = QuickCommandService._strip_trailing_qty_words(f"x {t}", 1.0)
         return float(qty) if qty != 1.0 else None
+
+
+    def _run_confirmed(self, pending: dict) -> None:
+        kind = pending.get("kind")
+        if kind == "pos_clear":
+            result = pending.get("result")
+            section = pending.get("section") or ""
+            if section != "pos":
+                self._queue_and_go_pos(result)
+            else:
+                self._apply_pos(result)
+            self._reply("تم تفريغ السلة", kind="info")
+        elif kind == "crisis_on":
+            try:
+                self.ctx.crisis_mode.activate(freeze_current_rate=True)
+                self._reply("وضع الطوارئ مفعّل", kind="warning")
+            except Exception as exc:
+                self._reply(str(exc), kind="error")
+
+    @staticmethod
+    def _is_yes(text: str) -> bool:
+        t = (text or "").strip().replace("أ", "ا").replace("إ", "ا")
+        return t in ("نعم", "اي", "أي", "ايه", "موافق", "تمام", "أكد", "اكد", "yes", "y") or t.startswith("نعم")
+
+    @staticmethod
+    def _is_no(text: str) -> bool:
+        t = (text or "").strip().replace("أ", "ا").replace("إ", "ا")
+        return t in ("لا", "لاء", "الغاء", "إلغاء", "كانسل", "no", "n") or t.startswith("لا")
+
+    def _speak(self, text: str) -> None:
+        if not self.tts_enabled or not self.native_files or not text:
+            return
+        # Keep spoken replies short
+        spoken = (text or "").strip()
+        if len(spoken) > 120:
+            spoken = spoken[:117] + "…"
+
+        async def _go():
+            try:
+                await self.native_files.speech_stop_speak()
+            except Exception:
+                pass
+            try:
+                await self.native_files.speech_speak(spoken, language="ar")
+            except Exception:
+                pass
+
+        try:
+            if hasattr(self.page, "run_task"):
+                self.page.run_task(_go)
+        except Exception:
+            pass
 
     def _safe_update(self) -> None:
         try:

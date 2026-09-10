@@ -767,6 +767,8 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
             navigate=navigate,
             notify=lambda t, **kw: toast(page, t, **kw),
             get_section=lambda: selected_key.get("value") or "dashboard",
+            native_files=native_files,
+            tts_enabled=True,
         )
         # Top call strip
         page.overlay.append(

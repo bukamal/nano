@@ -53,6 +53,17 @@ class NanoHomeWidgetPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Act
                     speechHandler?.cancel()
                     result.success(null)
                 }
+                "speak" -> {
+                    val args = call.arguments as? Map<*, *>
+                    val textArg = (args?.get("text") as? String).orEmpty()
+                    val language = (args?.get("language") as? String)?.ifBlank { null } ?: "ar"
+                    speechHandler?.speak(textArg, language, result)
+                        ?: result.error("unavailable", "محرك النطق غير مهيأ", null)
+                }
+                "stop_speak" -> {
+                    speechHandler?.stopSpeak()
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }

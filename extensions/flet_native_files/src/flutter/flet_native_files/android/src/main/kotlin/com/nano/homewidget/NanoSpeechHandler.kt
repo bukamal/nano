@@ -11,20 +11,22 @@ import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.plugin.common.MethodChannel
+import java.util.Locale
 
 /**
- * On-device Arabic speech recognition via Android SpeechRecognizer.
+ * On-device Arabic speech recognition + TTS via Android APIs.
  *
  * Channel: nano/speech
  * Methods:
  *   - is_available -> "1" | "0"
- *   - listen { language?: String, timeout_ms?: Int } -> final transcript or error:*
+ *   - listen { language?, timeout_ms? } -> transcript
  *   - cancel -> null
- *
- * Permission RECORD_AUDIO is requested at listen-time when an Activity is bound.
+ *   - speak { text, language? } -> "ok" | error
+ *   - stop_speak -> null
  */
 class NanoSpeechHandler(
     private val appContext: Context,
@@ -34,6 +36,8 @@ class NanoSpeechHandler(
     private var pendingResult: MethodChannel.Result? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var timeoutRunnable: Runnable? = null
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
 
     fun attachActivity(activity: Activity?) {
         this.activity = activity
@@ -41,6 +45,71 @@ class NanoSpeechHandler(
 
     fun isAvailable(): Boolean {
         return SpeechRecognizer.isRecognitionAvailable(appContext)
+    }
+
+    private fun ensureTts(onReady: (() -> Unit)? = null) {
+        if (tts != null && ttsReady) {
+            onReady?.invoke()
+            return
+        }
+        if (tts != null) {
+            onReady?.invoke()
+            return
+        }
+        tts = TextToSpeech(appContext) { status ->
+            ttsReady = status == TextToSpeech.SUCCESS
+            if (ttsReady) {
+                try {
+                    val ar = Locale.forLanguageTag("ar")
+                    val res = tts?.setLanguage(ar)
+                    if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        tts?.language = Locale("ar")
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            onReady?.invoke()
+        }
+    }
+
+    fun speak(text: String, language: String, result: MethodChannel.Result) {
+        mainHandler.post {
+            val cleaned = text.trim()
+            if (cleaned.isEmpty()) {
+                result.success("ok")
+                return@post
+            }
+            ensureTts {
+                val engine = tts
+                if (engine == null || !ttsReady) {
+                    result.error("tts_unavailable", "محرك النطق غير متاح", null)
+                    return@ensureTts
+                }
+                try {
+                    val loc = try {
+                        Locale.forLanguageTag(language.ifBlank { "ar" })
+                    } catch (_: Exception) {
+                        Locale("ar")
+                    }
+                    engine.language = loc
+                    // QUEUE_FLUSH so each reply replaces the previous
+                    @Suppress("DEPRECATION")
+                    engine.speak(cleaned, TextToSpeech.QUEUE_FLUSH, null, "nano-tts")
+                    result.success("ok")
+                } catch (e: Exception) {
+                    result.error("tts_error", e.message ?: "تعذر النطق", null)
+                }
+            }
+        }
+    }
+
+    fun stopSpeak() {
+        mainHandler.post {
+            try {
+                tts?.stop()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     fun listen(language: String, timeoutMs: Int, result: MethodChannel.Result) {
@@ -63,9 +132,14 @@ class NanoSpeechHandler(
                     arrayOf(Manifest.permission.RECORD_AUDIO),
                     REQ_RECORD_AUDIO,
                 )
-                // Caller should retry after granting; we fail fast with a clear message.
                 result.error("permission", "يلزم السماح باستخدام الميكروفون ثم إعادة المحاولة", null)
                 return@post
+            }
+
+            // Pause TTS so it does not feed into the mic
+            try {
+                tts?.stop()
+            } catch (_: Exception) {
             }
 
             pendingResult = result
@@ -80,10 +154,7 @@ class NanoSpeechHandler(
                     override fun onBufferReceived(buffer: ByteArray?) {}
                     override fun onEndOfSpeech() {}
                     override fun onEvent(eventType: Int, params: Bundle?) {}
-
-                    override fun onPartialResults(partialResults: Bundle?) {
-                        // Final result is enough for command parsing; partials optional later.
-                    }
+                    override fun onPartialResults(partialResults: Bundle?) {}
 
                     override fun onResults(results: Bundle?) {
                         clearTimeout()
@@ -114,7 +185,6 @@ class NanoSpeechHandler(
                         recognizer?.stopListening()
                     } catch (_: Exception) {
                     }
-                    // If still pending after stop, surface timeout
                     mainHandler.postDelayed({
                         if (pendingResult != null) {
                             finishError("انتهى وقت الاستماع دون نتيجة واضحة")
@@ -138,12 +208,19 @@ class NanoSpeechHandler(
             destroyRecognizer()
             val r = pendingResult
             pendingResult = null
-            r?.success("") // empty = cancelled
+            r?.success("")
         }
     }
 
     fun dispose() {
         cancel()
+        stopSpeak()
+        try {
+            tts?.shutdown()
+        } catch (_: Exception) {
+        }
+        tts = null
+        ttsReady = false
         activity = null
     }
 

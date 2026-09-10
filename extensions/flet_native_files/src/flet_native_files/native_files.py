@@ -447,3 +447,30 @@ class NativeFiles(Control):
             )
         except Exception:
             pass
+
+
+    async def speech_speak(self, text: str, *, language: str = "ar") -> None:
+        """Speak Arabic (or locale) text via Android TextToSpeech. Best-effort."""
+        try:
+            raw = await self.invoke_method_async(
+                "speech_speak",
+                {"text": text or "", "language": language or "ar"},
+                wait_for_result=True,
+                wait_timeout=_QUICK_TIMEOUT,
+            )
+            if raw and str(raw).startswith("error:"):
+                raise RuntimeError(str(raw)[6:])
+        except Exception:
+            # TTS is enhancement only — never break the command flow.
+            pass
+
+    async def speech_stop_speak(self) -> None:
+        try:
+            await self.invoke_method_async(
+                "speech_stop_speak",
+                {},
+                wait_for_result=True,
+                wait_timeout=_QUICK_TIMEOUT,
+            )
+        except Exception:
+            pass
