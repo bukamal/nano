@@ -10,6 +10,7 @@ import flet as ft
 from nano_offline.core.toast import toast
 
 from nano_offline.components import SearchSelect, SelectAllTextField, empty_state
+from nano_offline.components.form_sheet import render_form_sheet
 from nano_offline.components.buttons import hero_button, stepper_icon_button
 from nano_offline.services.invoice_service import InvoiceLineInput
 from nano_offline.core.theme import Colors, IconSize, LazyPalette, Radius, Shadow
@@ -1288,32 +1289,51 @@ class POSCenter:
             # the «آخر مسح»-independent margin badge and the checkout
             # margin warning, because refresh_cart() re-runs _cart_row +
             # total_amount() and checkout uses row["unit_price"].
+            #
+            # The field reads/writes in the *display* currency (SYP or USD,
+            # whatever the admin has selected), not the stored USD figure,
+            # so the cashier sees the same units as the cart line above and
+            # never has to mentally divide by the exchange rate. On save
+            # the typed value is converted back to USD via
+            # currency.parse_display_input() and stored in
+            # row["unit_price"] (which is always USD); on display the
+            # cart line goes through self.money() which converts USD →
+            # display, so the round-trip is lossless.
             price_field = SelectAllTextField(
-                label="سعر البيع",
-                value=str(line_unit_price),
+                label=currency.amount_field_label("سعر البيع", self.ctx.settings),
+                value=currency.to_input_text(line_unit_price, self.ctx.settings),
                 keyboard_type=ft.KeyboardType.NUMBER,
                 autofocus=True,
             )
 
             def apply(_=None) -> None:
                 try:
-                    new_price = max(0.0, float(price_field.value or 0))
+                    new_price_usd = currency.parse_display_input(
+                        price_field.value, self.ctx.settings
+                    )
                 except Exception:
+                    self.notify("قيمة غير صالحة", kind="error")
                     return
-                row["unit_price"] = new_price
-                self.page.close(dialog)
+                new_price_usd = max(0.0, new_price_usd)
+                row["unit_price"] = new_price_usd
+                self.page.close(price_sheet)
                 on_change()
 
-            dialog = ft.AlertDialog(
-                modal=True,
-                title=ft.Text("تعديل سعر البند"),
-                content=ft.Column([price_field], tight=True, width=300),
-                actions=[
-                    ft.TextButton("إلغاء", on_click=lambda _: self.page.close(dialog)),
-                    ft.TextButton("حفظ", on_click=apply),
-                ],
+            price_sheet = ft.BottomSheet(
+                content=ft.Container(),
+                is_scroll_controlled=True,
+                enable_drag=True,
+                maintain_bottom_view_insets_padding=True,
             )
-            self.page.open(dialog)
+            render_form_sheet(
+                self.page,
+                price_sheet,
+                title="تعديل سعر البند",
+                fields=[price_field],
+                on_close=lambda _: self.page.close(price_sheet),
+                on_save=apply,
+            )
+            self.page.open(price_sheet)
 
         # Informational only (see item tile note above) -- InvoiceService
         # itself has no stock guard, so this never blocks checkout; it just
