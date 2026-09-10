@@ -1,4 +1,4 @@
-APP_VERSION = "0.13.2"
-BUILD_NUMBER = 34  # FEATURE_0.13.2: Voice TTS replies + confirm destructive commands
+APP_VERSION = "0.14.0"
+BUILD_NUMBER = 35  # FEATURE_0.14.0: Smarter voice memory, ranked item match, natural replies, again-refs
 
 __all__ = ["APP_VERSION", "BUILD_NUMBER"]

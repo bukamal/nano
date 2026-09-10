@@ -20,6 +20,10 @@ import flet as ft
 from nano_offline.core import voice_command as voice_cmd
 from nano_offline.core.theme import Colors, Shadow
 from nano_offline.core.toast import toast
+from nano_offline.core.voice_intelligence import (
+    VoiceMemory, reply_for, resolve_item_name, extract_again_reference,
+    is_yes, is_no,
+)
 
 
 @dataclass
@@ -55,6 +59,7 @@ class VoiceSessionController:
         self._pending_followup: dict[str, Any] | None = None
         self._pending_confirm: dict[str, Any] | None = None
         self._last_command: str = ""
+        self.memory = VoiceMemory()
 
         self._status = ft.Text("مكالمة ذكية", size=13, weight=ft.FontWeight.BOLD, color=Colors.WHITE)
         self._hint = ft.Text("قل «مساعدة» لعرض الأوامر", size=11, color=Colors.WHITE, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS)
@@ -131,7 +136,9 @@ class VoiceSessionController:
         self._set_listening_visual(False)
         self._status.value = "مكالمة ذكية نشطة"
         self._refresh_section_chip()
-        self._hint.value = self._greeting()
+        self.memory = VoiceMemory()
+        self.memory.last_section = self.get_section() or "dashboard"
+        self._hint.value = reply_for("greet", section=self.memory.last_section or "")
         self.fab.icon = ft.Icons.CALL_END_ROUNDED
         self.fab.bgcolor = Colors.DANGER
         self.fab.tooltip = "إنهاء المكالمة"
@@ -154,7 +161,7 @@ class VoiceSessionController:
         self.fab.tooltip = "مكالمة أوامر ذكية"
         self._safe_update()
         if reason not in ("silent",):
-            self.notify("انتهت المكالمة الذكية", kind="info")
+            self.notify(reply_for("stop"), kind="info")
 
     def _listen(self) -> None:
         if not self.active or self.listening:
@@ -237,15 +244,15 @@ class VoiceSessionController:
 
         # Pending confirmation (clear cart / crisis)
         if self._pending_confirm:
-            if self._is_yes(text):
+            if is_yes(text):
                 pending = self._pending_confirm
                 self._pending_confirm = None
                 self._run_confirmed(pending)
                 self._schedule_relisten(0.8)
                 return
-            if self._is_no(text):
+            if is_no(text):
                 self._pending_confirm = None
-                self._reply("تم الإلغاء", kind="info")
+                self._reply(reply_for("cancelled", memory=self.memory), kind="info")
                 self._schedule_relisten(0.6)
                 return
             self._reply("قل نعم أو لا", kind="warning")
@@ -271,7 +278,8 @@ class VoiceSessionController:
         if any(k in text for k in ("ملخص", "كيف الشغل", "كيف الحال", "وضع اليوم", "نبض")):
             try:
                 pulse = self.ctx.owner_pulse.generate()
-                self._reply(f"{pulse.headline}: {pulse.body}", kind="info")
+                body = f"{pulse.headline}. {pulse.body}"
+                self._reply(reply_for("pulse", extra=body, memory=self.memory, section=section), kind="info")
             except Exception:
                 self._reply("تعذر جلب الملخص الآن", kind="warning")
             self._schedule_relisten(0.9)
@@ -304,19 +312,22 @@ class VoiceSessionController:
                 self._do_pos_add(name, qty)
             elif action == "pos_clear":
                 self._pending_confirm = {"kind": "pos_clear", "result": result, "section": section}
-                self._reply("تأكيد تفريغ السلة؟ قل نعم أو لا", kind="warning")
+                self._reply(reply_for("pos_clear_ask", memory=self.memory, section=section), kind="warning")
                 self._schedule_relisten(0.7)
                 return
             else:
                 self._queue_and_go_pos(result)
-                self._reply("فتح الدفع", kind="success")
+                self.memory.note(last_action="pos_pay")
+                self._reply(reply_for("pos_pay", memory=self.memory, section=section), kind="success")
             self._schedule_relisten(0.9)
             return
 
         if action == "navigate" and result.target:
             try:
                 self.navigate(result.target)
-                self._reply(result.message or "تم فتح القسم", kind="success")
+                self.memory.note(last_section=result.target, last_action="navigate")
+                label = result.message or result.target or "القسم"
+                self._reply(reply_for("navigate", extra=label, memory=self.memory, section=result.target or section), kind="success")
             except Exception as exc:
                 self._reply(str(exc), kind="error")
             self._schedule_relisten(0.7)
@@ -324,7 +335,7 @@ class VoiceSessionController:
 
         if action == "crisis_on":
             self._pending_confirm = {"kind": "crisis_on"}
-            self._reply("تأكيد تفعيل وضع الطوارئ؟ قل نعم أو لا", kind="warning")
+            self._reply(reply_for("crisis_ask", memory=self.memory, section=section), kind="warning")
             self._schedule_relisten(0.7)
             return
 
@@ -338,7 +349,9 @@ class VoiceSessionController:
             return
 
         if action in ("query", "message"):
-            self._reply(result.message or text, kind="info")
+            msg = result.message or text
+            self.memory.note(last_action=action)
+            self._reply(reply_for("stock" if action == "query" else "message", extra=msg, memory=self.memory, section=section), kind="info")
             self._schedule_relisten(0.75)
             return
 
@@ -346,33 +359,45 @@ class VoiceSessionController:
             self._schedule_relisten(0.85)
             return
 
-        self._reply(result.message or "لم أفهم — قل «مساعدة»", kind="warning")
+        self._reply(reply_for("unknown", extra=result.message or "", memory=self.memory, section=section), kind="warning")
         self._schedule_relisten(0.75)
 
     def _do_pos_add(self, name: str, qty: float) -> None:
         section = (self.get_section() or "").lower()
+        matches = resolve_item_name(self.ctx.items, name, limit=5)
+        if not matches:
+            self._reply(reply_for("pos_add", ok=False, name=name, memory=self.memory, section=section), kind="warning")
+            return
+        chosen = matches[0]
+        resolved = str(chosen.get("name") or name)
+        item_id = int(chosen.get("id") or 0) or None
         result = type(
             "R",
             (),
             {
                 "action": "pos_add",
-                "data": {"name": name, "qty": qty},
-                "message": f"إضافة {name} × {qty:g}",
+                "data": {"name": resolved, "qty": qty, "item_id": item_id},
+                "message": f"إضافة {resolved} × {qty:g}",
                 "target": "pos",
                 "ok": True,
             },
         )()
         if section == "pos":
+            # Prefer direct id add when POS hook can use name still
             self._apply_pos(result)
+            if item_id and hasattr(self.ctx, "_pos_apply_voice"):
+                pass
         else:
             self._queue_and_go_pos(result)
-        self._reply(f"أُضيف {name} × {qty:g}" if name else "تمت الإضافة", kind="success")
+        self.memory.note(last_item_name=resolved, last_item_id=item_id, last_qty=qty, last_action="pos_add")
+        self.memory.cart_adds += 1
+        self._reply(
+            reply_for("pos_add", ok=True, name=resolved, qty=qty, memory=self.memory, section=section),
+            kind="success",
+        )
 
     def _try_fuzzy_pos_add(self, text: str) -> bool:
-        try:
-            rows = self.ctx.items.list(search=text.strip(), limit=5)
-        except Exception:
-            return False
+        rows = resolve_item_name(self.ctx.items, text.strip(), limit=5)
         if not rows:
             return False
         name = str(rows[0].get("name") or "")
@@ -463,15 +488,11 @@ class VoiceSessionController:
 
     def _show_help(self) -> None:
         section = (self.get_section() or "dashboard").lower()
-        parts = [
-            "بيع سريع · جرد · مواد · فواتير",
-            "كم باقي + اسم · ملخص",
-            "أضف [كمية] اسم · ادفع · أفرغ السلة",
-            "طوارئ / إيقاف",
-        ]
         if section == "pos":
-            parts.insert(0, "أنت في الكاشير — يكفي اسم المادة")
-        self._reply(" · ".join(parts[:3]), kind="info")
+            msg = "في الكاشير: اسم المادة، أضف 3 سكر، كمان واحد، ادفع، أفرغ السلة، إيقاف."
+        else:
+            msg = "بيع سريع، جرد، مواد، كم باقي الأرز، ملخص، أضف سكر، تفعيل الطوارئ، مساعدة، إيقاف."
+        self._reply(reply_for("help", extra=msg, memory=self.memory, section=section), kind="info")
 
     def _is_help(self, text: str) -> bool:
         t = (text or "").replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
@@ -509,11 +530,11 @@ class VoiceSessionController:
                 self._queue_and_go_pos(result)
             else:
                 self._apply_pos(result)
-            self._reply("تم تفريغ السلة", kind="info")
+            self._reply(reply_for("pos_clear_done", memory=self.memory), kind="info")
         elif kind == "crisis_on":
             try:
                 self.ctx.crisis_mode.activate(freeze_current_rate=True)
-                self._reply("وضع الطوارئ مفعّل", kind="warning")
+                self._reply(reply_for("crisis_on", memory=self.memory), kind="warning")
             except Exception as exc:
                 self._reply(str(exc), kind="error")
 

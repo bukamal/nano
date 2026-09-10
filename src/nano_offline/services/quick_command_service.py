@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from nano_offline.core.voice_intelligence import resolve_item_name
+
 if TYPE_CHECKING:
     from nano_offline.core.database import Database
     from nano_offline.repositories.item_repository import ItemRepository
@@ -219,43 +221,38 @@ class QuickCommandService:
         name_query = name_query.strip()
         if not name_query:
             return CommandResult(ok=False, action="unknown", message="حدد اسم المادة")
-        try:
-            with self.db.connect() as conn:
-                rows = conn.execute(
-                    """SELECT id, name, quantity, selling_price
-                       FROM items
-                       WHERE item_type='مخزون' AND name LIKE ?
-                       ORDER BY name LIMIT 5""",
-                    (f"%{name_query}%",),
-                ).fetchall()
-        except Exception as exc:
-            return CommandResult(ok=False, action="message", message=str(exc))
-
+        rows = resolve_item_name(self.db if self.items is None else self.items, name_query, limit=5)
         if not rows:
-            return CommandResult(
-                ok=True,
-                action="message",
-                message=f"لا توجد مادة تطابق «{name_query}»",
-            )
-
+            # fallback raw SQL via db
+            try:
+                with self.db.connect() as conn:
+                    raw = conn.execute(
+                        """SELECT id, name, quantity, selling_price FROM items
+                           WHERE item_type='مخزون' AND name LIKE ? ORDER BY name LIMIT 5""",
+                        (f"%{name_query}%",),
+                    ).fetchall()
+                    rows = [dict(r) for r in raw]
+            except Exception as exc:
+                return CommandResult(ok=False, action="message", message=str(exc))
+        if not rows:
+            return CommandResult(ok=True, action="message", message=f"ما في مادة تطابق «{name_query}»")
         if len(rows) == 1:
-            d = dict(rows[0])
-            qty = float(d["quantity"] or 0)
+            d = rows[0]
+            qty = float(d.get("quantity") or 0)
             return CommandResult(
                 ok=True,
                 action="query",
                 target="items",
-                message=f"«{d['name']}»: الكمية المتبقية {qty:g}",
-                data={"item_id": int(d["id"]), "quantity": qty, "name": d["name"]},
+                message=f"«{d.get('name')}» باقي منه {qty:g}",
+                data={"item_id": int(d["id"]), "quantity": qty, "name": d.get("name")},
             )
-
-        lines = [f"• {dict(r)['name']}: {float(dict(r)['quantity'] or 0):g}" for r in rows]
+        lines = [f"• {r.get('name')}: {float(r.get('quantity') or 0):g}" for r in rows]
         return CommandResult(
             ok=True,
             action="query",
             target="items",
-            message="نتائج متعددة:\n" + "\n".join(lines),
-            data={"matches": [dict(r) for r in rows]},
+            message="أكثر من نتيجة:\n" + "\n".join(lines),
+            data={"matches": rows},
         )
 
 

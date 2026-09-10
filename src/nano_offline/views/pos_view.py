@@ -1574,6 +1574,19 @@ class POSCenter:
             data = getattr(result, "data", None) or {}
             name = (data.get("name") or "").strip()
             qty = float(data.get("qty") or 1)
+            item_id = data.get("item_id")
+            if item_id:
+                try:
+                    iid = int(item_id)
+                    if iid not in self.item_map:
+                        row = self.ctx.items.get(iid) if hasattr(self.ctx.items, "get") else None
+                        if row:
+                            self.item_map[iid] = row
+                    if iid in self.item_map:
+                        self._add_item(iid, qty_delta=qty)
+                        return
+                except Exception:
+                    pass
             self.voice_add_by_name(name, qty)
         elif action == "pos_clear":
             self.cart.clear()
