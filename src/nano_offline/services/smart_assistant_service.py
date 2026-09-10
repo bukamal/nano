@@ -48,11 +48,13 @@ class SmartAssistantService:
         notifications: "NotificationService",
         dashboard: "DashboardService",
         settings: "SettingsRepository",
+        business_memory=None,
     ) -> None:
         self.db = db
         self.notifications = notifications
         self.dashboard = dashboard
         self.settings = settings
+        self.business_memory = business_memory
 
     # -- public API ----------------------------------------------------------
 
@@ -64,6 +66,8 @@ class SmartAssistantService:
         items.extend(self._from_cash())
         items.extend(self._from_fx())
         items.extend(self._from_zero_price_items())
+        items.extend(self._from_crisis())
+        items.extend(self._from_memory())
         items.sort(key=lambda d: (_SEVERITY_RANK.get(d.severity, 0), d.score), reverse=True)
         # Dedupe by key keeping highest rank
         seen: set[str] = set()
@@ -254,6 +258,59 @@ class SmartAssistantService:
                 score=40 + min(count, 20),
             )
         ]
+
+    def _from_crisis(self) -> list[Decision]:
+        """Surface crisis-mode state and reprice urgency."""
+        enabled = (self.settings.get("crisis_mode_enabled") or "").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
+        if not enabled:
+            return []
+        frozen = (self.settings.get("crisis_frozen_rate") or "").strip()
+        body = "سعر الصرف مجمّد لحماية هوامش الربح. راجع اقتراحات إعادة التسعير."
+        if frozen:
+            body = f"سعر الصرف مجمّد عند {frozen} ل.س/$ — راجع المواد التي تحتاج رفع سعر."
+        return [
+            Decision(
+                key="crisis:active",
+                kind="fx",
+                severity="urgent",
+                title="وضع الطوارئ الاقتصادي مفعّل",
+                body=body,
+                action_label="إدارة الطوارئ",
+                action_target="admin",
+                score=95,
+            )
+        ]
+
+    def _from_memory(self) -> list[Decision]:
+        """Promote top Business Memory insights into actionable decisions."""
+        if self.business_memory is None:
+            return []
+        out: list[Decision] = []
+        try:
+            memories = self.business_memory.insights(limit=4)
+        except Exception:
+            return []
+        for m in memories:
+            sev = m.severity if m.severity in _SEVERITY_RANK else "info"
+            if m.severity == "good":
+                sev = "info"
+            out.append(
+                Decision(
+                    key=f"memory:{m.key}",
+                    kind="insight",
+                    severity=sev,
+                    title=m.title,
+                    body=m.body,
+                    action_label=m.action_label,
+                    action_target=m.action_target,
+                    entity_type=m.entity_type,
+                    entity_id=m.entity_id,
+                    score=float(m.score),
+                )
+            )
+        return out
 
 
 __all__ = ["SmartAssistantService", "Decision"]

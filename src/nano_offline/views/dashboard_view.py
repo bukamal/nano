@@ -1101,6 +1101,10 @@ class DashboardCenter:
             decisions = []
             decision_today = None
         try:
+            owner_pulse = self.ctx.owner_pulse.generate()
+        except Exception:
+            owner_pulse = None
+        try:
             weekly = self.ctx.dashboard.weekly_owner_summary()
         except Exception:
             weekly = None
@@ -1216,9 +1220,183 @@ class DashboardCenter:
             padding=ft.padding.only(bottom=14),
         )
 
+        # Owner Pulse (priority #1) — richer narrative card; falls back to
+        # the classic "decision of the day" if pulse generation fails.
+        pulse_card = ft.Container()
+        if owner_pulse is not None:
+            from nano_offline.components.owner_pulse_card import build_owner_pulse_card
+            def _on_pulse_action(decision):
+                kind = getattr(decision, "kind", None)
+                target = getattr(decision, "action_target", None)
+                if kind == "restock":
+                    self._open_purchase_list()
+                elif kind == "cash":
+                    self._open_day_close()
+                elif kind == "collect" and self.on_open_receipt:
+                    self.on_open_receipt(customer_id=getattr(decision, "entity_id", None), amount=None)
+                elif target and self.on_navigate:
+                    self.on_navigate(target)
+                elif self.on_open_notifications:
+                    self.on_open_notifications()
+            def _on_crisis():
+                if self.on_navigate:
+                    self.on_navigate("admin")
+            pulse_card = build_owner_pulse_card(
+                owner_pulse,
+                money_fmt=self.money,
+                on_action=_on_pulse_action,
+                on_crisis_tap=_on_crisis,
+            )
+        elif decision_today is not None:
+            pulse_card = self._decision_of_day_card(decision_today)
+
+
+        # Quick command bar + voice mic (hook in core.voice_command)
+        from nano_offline.core import voice_command as voice_cmd
+
+        cmd_field = ft.TextField(
+            hint_text="أمر سريع أو اضغط الميكروفون: بيع سريع، جرد، كم باقي السكر…",
+            dense=True,
+            text_size=13,
+            border_radius=14,
+            filled=True,
+            expand=True,
+            on_submit=lambda e: None,
+        )
+        cmd_feedback = ft.Text("", size=11, color=Colors.TEXT_SECONDARY)
+        mic_icon = ft.Icon(ft.Icons.MIC_NONE_ROUNDED, size=20, color=Colors.WHITE)
+        mic_btn = ft.Container(
+            mic_icon,
+            width=42, height=42, alignment=ft.alignment.center,
+            bgcolor=Colors.PRIMARY, border_radius=12, ink=True,
+        )
+        listening = {"on": False}
+
+        def run_command(_e=None, raw_override: str | None = None):
+            raw = (raw_override if raw_override is not None else (cmd_field.value or "")).strip()
+            if not raw:
+                return
+            try:
+                result = self.ctx.quick_commands.parse(raw)
+            except Exception as exc:
+                cmd_feedback.value = str(exc)
+                cmd_feedback.color = Colors.DANGER
+                self.page.update()
+                return
+            cmd_feedback.value = result.message or ""
+            cmd_feedback.color = Colors.SUCCESS if result.ok else Colors.WARNING
+            if result.action == "navigate" and result.target and self.on_navigate:
+                self.on_navigate(result.target)
+            elif result.action == "crisis_on":
+                self.ctx.crisis_mode.activate(freeze_current_rate=True)
+                self._notify("تم تفعيل وضع الطوارئ", kind="warning", sound_kind="warning")
+                self.show_center()
+                return
+            elif result.action == "crisis_off":
+                self.ctx.crisis_mode.deactivate()
+                self._notify("تم إلغاء وضع الطوارئ", kind="success")
+                self.show_center()
+                return
+            elif result.action == "query":
+                self._notify(result.message or "", kind="info")
+            cmd_field.value = ""
+            self.page.update()
+
+        def _set_listening(active: bool):
+            listening["on"] = active
+            if active:
+                mic_icon.name = ft.Icons.MIC_ROUNDED
+                mic_btn.bgcolor = Colors.DANGER
+                cmd_feedback.value = "يستمع… تحدّث الآن"
+                cmd_feedback.color = Colors.DANGER
+            else:
+                mic_icon.name = ft.Icons.MIC_NONE_ROUNDED
+                mic_btn.bgcolor = Colors.PRIMARY
+            self.page.update()
+
+        def on_voice_final(text: str):
+            _set_listening(False)
+            text = (text or "").strip()
+            if not text:
+                cmd_feedback.value = "لم يُلتقط كلام واضح"
+                cmd_feedback.color = Colors.WARNING
+                self.page.update()
+                return
+            cmd_field.value = text
+            cmd_feedback.value = f"صوت: {text}"
+            cmd_feedback.color = Colors.PRIMARY
+            self.page.update()
+            run_command(raw_override=text)
+
+        def on_voice_error(msg: str):
+            _set_listening(False)
+            cmd_feedback.value = msg
+            cmd_feedback.color = Colors.WARNING
+            self.page.update()
+
+        def on_voice_partial(text: str):
+            if text:
+                cmd_field.value = text
+                cmd_feedback.value = "يستمع…"
+                self.page.update()
+
+        def toggle_voice(_e=None):
+            if listening["on"]:
+                voice_cmd.cancel()
+                _set_listening(False)
+                cmd_feedback.value = "تم إيقاف الاستماع"
+                cmd_feedback.color = Colors.TEXT_SECONDARY
+                self.page.update()
+                return
+            _set_listening(True)
+            try:
+                # Prefer web speech when running in a browser; otherwise stub/engine.
+                eng = voice_cmd.get_engine()
+                if getattr(self.page, "web", False) or str(getattr(self.page, "platform", "")).lower() == "web":
+                    try:
+                        voice_cmd.set_engine(voice_cmd.WebSpeechVoiceEngine(self.page))
+                    except Exception:
+                        pass
+                voice_cmd.listen_once(
+                    language="ar-SY",
+                    on_partial=on_voice_partial,
+                    on_final=on_voice_final,
+                    on_error=on_voice_error,
+                    timeout_sec=8.0,
+                )
+            except Exception as exc:
+                on_voice_error(str(exc))
+
+        mic_btn.on_click = toggle_voice
+        cmd_field.on_submit = run_command
+        command_bar = ft.Container(
+            ft.Column(
+                [
+                    ft.Row(
+                        [
+                            cmd_field,
+                            mic_btn,
+                            ft.Container(
+                                ft.Icon(ft.Icons.SEND_ROUNDED, size=20, color=Colors.WHITE),
+                                width=42, height=42, alignment=ft.alignment.center,
+                                bgcolor=Colors.PRIMARY, border_radius=12,
+                                on_click=run_command, ink=True,
+                            ),
+                        ],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    cmd_feedback,
+                ],
+                spacing=4,
+            ),
+            padding=ft.padding.only(bottom=8),
+        )
+
         scrollable_body = ft.Column(
             [
-                self._decision_of_day_card(decision_today) if decision_today is not None else ft.Container(),
+                pulse_card,
+                command_bar,
                 ft.Column(self._decisions_list(decisions), spacing=6) if decisions and len(decisions) > 1 else ft.Container(),
                 self._weekly_owner_card(weekly) if weekly else ft.Container(),
                 self._smart_insight(alerts=smart_alerts, best_sellers=best_sellers, profit_change=profit_change, net_profit=current_stmt["net_profit"]),

@@ -162,6 +162,15 @@ class PartyCenter:
                 return
             grade_color = getattr(Colors, rel["color_token"], Colors.PRIMARY)
             grade_bg = getattr(Colors, rel["bg_token"], Colors.PRIMARY_BG)
+            # Numeric trust score (0–100) — richer offline signal
+            trust = None
+            try:
+                trust = self.ctx.party_trust.score(
+                    int(party["id"]),
+                    party_type="customer" if is_customer else "supplier",
+                )
+            except Exception:
+                trust = None
             recent = []
             for inv in data.get("recent_invoices") or []:
                 remaining = float(inv.get("remaining_amount") or 0)
@@ -295,6 +304,7 @@ class PartyCenter:
                                             ft.Container(small_metric("عدد الفواتير", str(int(data.get("invoice_count") or 0)), ft.Icons.RECEIPT_LONG_OUTLINED, Colors.PURPLE), col={"xs": 6, "md": 3}),
                                             ft.Container(small_metric("إجمالي الفواتير", money(data.get("invoice_total")), ft.Icons.PAID_OUTLINED, Colors.SUCCESS), col={"xs": 6, "md": 3}),
                                             ft.Container(small_metric("انتظام السداد", rel["label"] + (f" · {rel['max_age_days']}ي" if rel["max_age_days"] else ""), ft.Icons.VERIFIED_USER_OUTLINED, grade_color), col={"xs": 6, "md": 3}),
+                                            ft.Container(small_metric("درجة الثقة", f"{trust.score}/100 · {trust.label}" if trust else "—", ft.Icons.SHIELD_OUTLINED, getattr(Colors, {"success":"SUCCESS","info":"PRIMARY","warning":"WARNING","danger":"DANGER","muted":"TEXT_MUTED"}.get(trust.color_key if trust else "muted", "PRIMARY"), Colors.PRIMARY)), col={"xs": 6, "md": 3}),
                                         ], spacing=7, run_spacing=7,
                                     ),
                                     ft.Text(f"العنوان: {data.get('address') or '—'}", size=11, color=Colors.TEXT_MUTED),

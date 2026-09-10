@@ -1571,6 +1571,75 @@ class AdminCenter:
             self._notify("تم حفظ إعدادات المظهر", kind="success")
             self.on_theme_changed()
 
+
+        # ---- Crisis / Economic Emergency Mode (priority #2) ---------------
+        crisis_status_text = ft.Text("", size=13, weight=ft.FontWeight.W_600)
+        crisis_suggestions_list = ft.Column(spacing=6)
+        crisis_toggle_btn = ft.FilledButton("تفعيل وضع الطوارئ", icon=ft.Icons.WARNING_AMBER_ROUNDED)
+
+        def _refresh_crisis_ui():
+            st = self.ctx.crisis_mode.status()
+            if st["active"]:
+                rate = st.get("frozen_rate") or st.get("current_rate") or 0
+                crisis_status_text.value = f"⚠ مفعّل — سعر الصرف مجمّد عند {rate:,.0f} ل.س/$"
+                crisis_status_text.color = Colors.DANGER
+                crisis_toggle_btn.text = "إلغاء وضع الطوارئ"
+                crisis_toggle_btn.icon = ft.Icons.CHECK_CIRCLE_OUTLINE
+                crisis_toggle_btn.bgcolor = Colors.SUCCESS
+            else:
+                crisis_status_text.value = "وضع الطوارئ غير مفعّل — الأسعار تتحرك مع سعر الصرف الحالي."
+                crisis_status_text.color = Colors.TEXT_SECONDARY
+                crisis_toggle_btn.text = "تفعيل وضع الطوارئ"
+                crisis_toggle_btn.icon = ft.Icons.WARNING_AMBER_ROUNDED
+                crisis_toggle_btn.bgcolor = Colors.DANGER
+
+        def toggle_crisis(_e=None):
+            if self.ctx.crisis_mode.is_active():
+                self.ctx.crisis_mode.deactivate()
+                self._notify("تم إلغاء وضع الطوارئ الاقتصادي", kind="success")
+            else:
+                self.ctx.crisis_mode.activate(freeze_current_rate=True)
+                self._notify("تم تفعيل وضع الطوارئ وتجميد سعر الصرف", kind="warning", sound_kind="warning")
+            _refresh_crisis_ui()
+            refresh_crisis_suggestions()
+            self.page.update()
+
+        crisis_toggle_btn.on_click = toggle_crisis
+
+        def refresh_crisis_suggestions(_e=None):
+            crisis_suggestions_list.controls.clear()
+            try:
+                suggestions = self.ctx.crisis_mode.reprice_suggestions(assumed_rate_increase_pct=15.0, limit=8)
+            except Exception:
+                suggestions = []
+            if not suggestions:
+                crisis_suggestions_list.controls.append(
+                    ft.Text("لا توجد اقتراحات حالياً (أضف مواد بمخزون وأسعار).", size=12, color=Colors.TEXT_MUTED)
+                )
+            else:
+                for s in suggestions:
+                    crisis_suggestions_list.controls.append(
+                        ft.Container(
+                            ft.Column(
+                                [
+                                    ft.Text(s.name, size=13, weight=ft.FontWeight.W_600),
+                                    ft.Text(
+                                        f"الحالي: {currency.format_display_value(s.current_selling, self.ctx.settings)}  →  المقترح: {currency.format_display_value(s.suggested_selling, self.ctx.settings)}  |  {s.reason}",
+                                        size=11, color=Colors.TEXT_SECONDARY,
+                                    ),
+                                ],
+                                spacing=2,
+                            ),
+                            padding=10,
+                            bgcolor=Colors.BACKGROUND_ALT,
+                            border_radius=10,
+                        )
+                    )
+            self.page.update()
+
+        _refresh_crisis_ui()
+        refresh_crisis_suggestions()
+
         section_panels: dict[str, ft.Container] = {
             "appearance": self._section(
                 "المظهر والوضع الليلي",
@@ -1861,6 +1930,24 @@ class AdminCenter:
                     ft.FilledButton("حفظ إعدادات التقارير", icon=ft.Icons.SAVE_OUTLINED, on_click=save_reporting_settings),
                 ],
             ),
+
+            "crisis": self._section(
+                "وضع الطوارئ الاقتصادي",
+                [
+                    ft.Text(
+                        "عند تقلب سعر الصرف أو عدم استقرار السوق، فعّل وضع الطوارئ لتجميد سعر الصرف الحالي "
+                        "والحصول على اقتراحات لإعادة تسعير المواد التي سيتأثر هامشها.",
+                        size=12, color=Colors.TEXT_SECONDARY,
+                    ),
+                    crisis_status_text,
+                    crisis_toggle_btn,
+                    ft.Divider(height=1, color=Colors.BACKGROUND_ALT),
+                    ft.Text("اقتراحات إعادة التسعير (افتراض ارتفاع الدولار 15%)", size=12, weight=ft.FontWeight.W_600),
+                    crisis_suggestions_list,
+                    ft.OutlinedButton("تحديث الاقتراحات", icon=ft.Icons.REFRESH, on_click=refresh_crisis_suggestions),
+                ],
+            ),
+
         }
 
         TABS = [
@@ -1869,6 +1956,7 @@ class AdminCenter:
             ("backup", "النسخ الاحتياطي", ft.Icons.BACKUP_OUTLINED),
             ("license", "الترخيص", ft.Icons.VERIFIED_USER_OUTLINED),
             ("branding", "الهوية والعملة", ft.Icons.PALETTE_OUTLINED),
+            ("crisis", "الطوارئ الاقتصادي", ft.Icons.WARNING_AMBER_ROUNDED),
             ("barcode", "الباركود", ft.Icons.QR_CODE_2_OUTLINED),
             ("invoice", "الفواتير", ft.Icons.RECEIPT_LONG_OUTLINED),
             ("pos", "نقطة البيع", ft.Icons.POINT_OF_SALE_OUTLINED),

@@ -25,6 +25,11 @@ from nano_offline.services.statement_service import StatementService
 from nano_offline.services.stocktake_service import StocktakeService
 from nano_offline.services.smart_assistant_service import SmartAssistantService
 from nano_offline.services.cash_day_close_service import CashDayCloseService
+from nano_offline.services.owner_pulse_service import OwnerPulseService
+from nano_offline.services.crisis_mode_service import CrisisModeService
+from nano_offline.services.party_trust_service import PartyTrustService
+from nano_offline.services.business_memory_service import BusinessMemoryService
+from nano_offline.services.quick_command_service import QuickCommandService
 
 
 @dataclass(slots=True)
@@ -51,6 +56,11 @@ class AppContext:
     smart_assistant: SmartAssistantService
     cash_day_close: CashDayCloseService
     stocktake: StocktakeService
+    owner_pulse: OwnerPulseService
+    crisis_mode: CrisisModeService
+    party_trust: PartyTrustService
+    business_memory: BusinessMemoryService
+    quick_commands: QuickCommandService
 
     @classmethod
     def create(cls, db_path: str | Path) -> "AppContext":
@@ -79,11 +89,27 @@ class AppContext:
         # dedupe) instead of waiting for the next app launch. Fire-and-forget
         # via a daemon thread inside the external service.
         notifications_svc.set_external_hook(external_notifications_svc.background_dispatch)
+        business_memory_svc = BusinessMemoryService(db, settings=settings_repo)
         smart_assistant_svc = SmartAssistantService(
             db,
             notifications=notifications_svc,
             dashboard=dashboard_svc,
             settings=settings_repo,
+            business_memory=business_memory_svc,
+        )
+        crisis_mode_svc = CrisisModeService(
+            db,
+            settings=settings_repo,
+            items=items_repo,
+        )
+        party_trust_svc = PartyTrustService(db)
+        quick_commands_svc = QuickCommandService(db, items=items_repo)
+        owner_pulse_svc = OwnerPulseService(
+            db,
+            dashboard=dashboard_svc,
+            smart_assistant=smart_assistant_svc,
+            settings=settings_repo,
+            business_memory=business_memory_svc,
         )
         return cls(
             db=db,
@@ -108,6 +134,11 @@ class AppContext:
             smart_assistant=smart_assistant_svc,
             cash_day_close=CashDayCloseService(db),
             stocktake=StocktakeService(db, items_repo, stocktake_repo, auth),
+            owner_pulse=owner_pulse_svc,
+            crisis_mode=crisis_mode_svc,
+            party_trust=party_trust_svc,
+            business_memory=business_memory_svc,
+            quick_commands=quick_commands_svc,
         )
 
     def reload(self, db_path: str | Path) -> None:

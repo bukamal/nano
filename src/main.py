@@ -767,6 +767,10 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
 
 
 def main(page: ft.Page):
+    # Voice command hook: default is StubVoiceEngine (UI works, no STT yet).
+    # To plug a real on-device Arabic model or platform STT:
+    #   from nano_offline.core.voice_command import set_engine, YourEngine
+    #   set_engine(YourEngine(...))
     migrate_legacy_database(LEGACY_APP_DB, APP_DB)
     ctx = AppContext.create(APP_DB)
     native_files = NativeFiles()
