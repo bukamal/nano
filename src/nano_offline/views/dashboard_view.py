@@ -1270,7 +1270,7 @@ class DashboardCenter:
             width=42, height=42, alignment=ft.alignment.center,
             bgcolor=Colors.PRIMARY, border_radius=12, ink=True,
         )
-        listening = {"on": False}
+        listening = {"on": False, "session": False}
 
         def run_command(_e=None, raw_override: str | None = None):
             raw = (raw_override if raw_override is not None else (cmd_field.value or "")).strip()
@@ -1285,7 +1285,23 @@ class DashboardCenter:
                 return
             cmd_feedback.value = result.message or ""
             cmd_feedback.color = Colors.SUCCESS if result.ok else Colors.WARNING
-            if result.action == "navigate" and result.target and self.on_navigate:
+            if result.action == "voice_stop":
+                listening["session"] = False
+                listening["on"] = False
+                voice_cmd.cancel()
+                _set_listening(False)
+                cmd_feedback.value = "انتهت الجلسة الصوتية"
+                cmd_feedback.color = Colors.TEXT_SECONDARY
+                self.page.update()
+                return
+            if result.action in ("pos_add", "pos_pay", "pos_clear"):
+                try:
+                    setattr(self.ctx, "_pending_voice_command", result)
+                except Exception:
+                    pass
+                if self.on_navigate:
+                    self.on_navigate("pos")
+            elif result.action == "navigate" and result.target and self.on_navigate:
                 self.on_navigate(result.target)
             elif result.action == "crisis_on":
                 self.ctx.crisis_mode.activate(freeze_current_rate=True)
@@ -1327,12 +1343,29 @@ class DashboardCenter:
             cmd_feedback.color = Colors.PRIMARY
             self.page.update()
             run_command(raw_override=text)
+            # Continuous session: keep listening for the next command
+            if listening.get("session") and not listening.get("on"):
+                def _continue(_=None):
+                    if listening.get("session"):
+                        toggle_voice_listen_only()
+                try:
+                    self.page.run_task  # existence check
+                except Exception:
+                    pass
+                # brief pause so TTS/UI settles
+                import threading
+                threading.Timer(0.6, _continue).start()
 
         def on_voice_error(msg: str):
             _set_listening(False)
             cmd_feedback.value = msg
             cmd_feedback.color = Colors.WARNING
             self.page.update()
+            # In session mode, retry listen after a soft error (no match / timeout)
+            soft = any(x in (msg or "") for x in ("لم يُلتقط", "لم يُفهم", "انتهى وقت", "NO_MATCH", "SPEECH_TIMEOUT", "timeout"))
+            if listening.get("session") and soft:
+                import threading
+                threading.Timer(0.8, toggle_voice_listen_only).start()
 
         def on_voice_partial(text: str):
             if text:
@@ -1340,18 +1373,9 @@ class DashboardCenter:
                 cmd_feedback.value = "يستمع…"
                 self.page.update()
 
-        def toggle_voice(_e=None):
-            if listening["on"]:
-                voice_cmd.cancel()
-                _set_listening(False)
-                cmd_feedback.value = "تم إيقاف الاستماع"
-                cmd_feedback.color = Colors.TEXT_SECONDARY
-                self.page.update()
-                return
+        def _start_listen():
             _set_listening(True)
             try:
-                # Prefer web speech when running in a browser; otherwise stub/engine.
-                eng = voice_cmd.get_engine()
                 if getattr(self.page, "web", False) or str(getattr(self.page, "platform", "")).lower() == "web":
                     try:
                         voice_cmd.set_engine(voice_cmd.WebSpeechVoiceEngine(self.page))
@@ -1366,6 +1390,27 @@ class DashboardCenter:
                 )
             except Exception as exc:
                 on_voice_error(str(exc))
+
+        def toggle_voice_listen_only():
+            if listening["on"]:
+                return
+            _start_listen()
+
+        def toggle_voice(_e=None):
+            # Long-press style session: first tap starts a continuous voice
+            # "call"; second tap (while listening or in session) ends it.
+            if listening["on"] or listening.get("session"):
+                listening["session"] = False
+                voice_cmd.cancel()
+                _set_listening(False)
+                cmd_feedback.value = "انتهت الجلسة الصوتية — قل «إيقاف» أو اضغط الميكروفون"
+                cmd_feedback.color = Colors.TEXT_SECONDARY
+                self.page.update()
+                return
+            listening["session"] = True
+            cmd_feedback.value = "جلسة صوتية نشطة — أعطِ أوامرك. قل «إيقاف» للإنهاء"
+            cmd_feedback.color = Colors.PRIMARY
+            _start_listen()
 
         mic_btn.on_click = toggle_voice
         cmd_field.on_submit = run_command

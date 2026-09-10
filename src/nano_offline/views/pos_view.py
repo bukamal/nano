@@ -128,6 +128,7 @@ class POSCenter:
             self.on_fullscreen_enter()
         try:
             self._build()
+            self._consume_pending_voice()
         except Exception as exc:
             self._show_center_error(exc)
 
@@ -917,6 +918,7 @@ class POSCenter:
             self.page.open(payment_sheet)
 
         checkout_btn.on_click = open_payment_sheet
+        self._checkout_btn = checkout_btn
 
         def customer_changed(_=None):
             self.customer_id = int(customer_dd.value) if customer_dd.value else None
@@ -1024,6 +1026,83 @@ class POSCenter:
 
         mode_btn.on_click = toggle_pos_mode
 
+
+        # ---- Voice commands (add by name / pay / clear) -----------------
+        from nano_offline.core import voice_command as voice_cmd
+        pos_mic_icon = ft.Icon(ft.Icons.MIC_NONE_ROUNDED, size=20, color=Colors.WHITE)
+        pos_mic = ft.Container(
+            pos_mic_icon, width=40, height=40, alignment=ft.alignment.center,
+            bgcolor=Colors.PRIMARY, border_radius=12, ink=True,
+            tooltip="أمر صوتي: أضف سكر، أضف 3 رز، ادفع، أفرغ السلة",
+        )
+        pos_listening = {"on": False}
+
+        def _pos_set_listening(active: bool):
+            pos_listening["on"] = active
+            pos_mic_icon.name = ft.Icons.MIC_ROUNDED if active else ft.Icons.MIC_NONE_ROUNDED
+            pos_mic.bgcolor = Colors.DANGER if active else Colors.PRIMARY
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+        def _pos_on_final(text: str):
+            _pos_set_listening(False)
+            text = (text or "").strip()
+            if not text:
+                return
+            try:
+                result = self.ctx.quick_commands.parse(text)
+            except Exception as exc:
+                try:
+                    from nano_offline.core.toast import toast
+                    toast(self.page, str(exc), kind="error")
+                except Exception:
+                    pass
+                return
+            if result.action in ("pos_add", "pos_pay", "pos_clear"):
+                self.apply_voice_command(result)
+            elif result.action == "navigate" and result.target and result.target != "pos":
+                # Leave POS for other sections if shell exit is wired
+                if self.on_fullscreen_exit:
+                    self.on_fullscreen_exit()
+                # Shell may still need navigate — best-effort via page data
+                nav = getattr(self, "_shell_navigate", None)
+                if callable(nav):
+                    nav(result.target)
+            else:
+                try:
+                    from nano_offline.core.toast import toast
+                    toast(self.page, result.message or text, kind="info")
+                except Exception:
+                    pass
+
+        def _pos_on_error(msg: str):
+            _pos_set_listening(False)
+            try:
+                from nano_offline.core.toast import toast
+                toast(self.page, msg, kind="warning")
+            except Exception:
+                pass
+
+        def _pos_toggle_mic(_=None):
+            if pos_listening["on"]:
+                voice_cmd.cancel()
+                _pos_set_listening(False)
+                return
+            _pos_set_listening(True)
+            try:
+                voice_cmd.listen_once(
+                    language="ar-SY",
+                    on_final=_pos_on_final,
+                    on_error=_pos_on_error,
+                    timeout_sec=8.0,
+                )
+            except Exception as exc:
+                _pos_on_error(str(exc))
+
+        pos_mic.on_click = _pos_toggle_mic
+
         pos_header = ft.Container(
             ft.Row(
                 [
@@ -1032,6 +1111,7 @@ class POSCenter:
                         [ft.Text("نقطة البيع", size=15, weight=ft.FontWeight.BOLD), today_summary_text],
                         spacing=0, expand=True,
                     ),
+                    pos_mic,
                     mode_btn,
                 ],
                 vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=6,
@@ -1467,6 +1547,95 @@ class POSCenter:
         self._refresh_cart()
         self._show_last_scan_card(item, new_qty, unit_price=unit_price, is_repeat=is_repeat)
         self.page.update()
+
+    def _consume_pending_voice(self) -> None:
+        """Apply a voice command queued before POS opened (from dashboard mic)."""
+        pending = getattr(self.ctx, "_pending_voice_command", None)
+        if not pending:
+            return
+        try:
+            setattr(self.ctx, "_pending_voice_command", None)
+        except Exception:
+            pass
+        self.apply_voice_command(pending)
+
+    def apply_voice_command(self, result) -> None:
+        """Execute a QuickCommandService result while POS is open."""
+        action = getattr(result, "action", None)
+        if action == "pos_add":
+            data = getattr(result, "data", None) or {}
+            name = (data.get("name") or "").strip()
+            qty = float(data.get("qty") or 1)
+            self.voice_add_by_name(name, qty)
+        elif action == "pos_clear":
+            self.cart.clear()
+            self.cart_order.clear()
+            try:
+                self._refresh_cart()
+            except Exception:
+                pass
+            self.page.update()
+            try:
+                from nano_offline.core.toast import toast
+                toast(self.page, "تم تفريغ السلة", kind="info")
+            except Exception:
+                pass
+        elif action == "pos_pay":
+            try:
+                # Trigger the same path as the pay button if wired in _build
+                btn = getattr(self, "_checkout_btn", None)
+                if btn is not None and getattr(btn, "on_click", None):
+                    btn.on_click(None)
+                else:
+                    from nano_offline.core.toast import toast
+                    toast(self.page, "اضغط دفع لإتمام البيع", kind="info")
+            except Exception as exc:
+                try:
+                    from nano_offline.core.toast import toast
+                    toast(self.page, str(exc), kind="error")
+                except Exception:
+                    pass
+
+    def voice_add_by_name(self, name: str, qty: float = 1.0) -> bool:
+        """Resolve item by Arabic name and add to cart. Returns True on success."""
+        name = (name or "").strip()
+        if not name:
+            return False
+        qty = float(qty or 1) or 1.0
+        # Prefer in-memory catalog; fall back to DB search
+        matches = []
+        needle = name.casefold()
+        for item in self.item_map.values():
+            iname = str(item.get("name") or "")
+            if needle in iname.casefold() or iname.casefold() in needle:
+                matches.append(item)
+        if not matches:
+            try:
+                rows = self.ctx.items.list(search=name) if hasattr(self.ctx.items, "list") else []
+                for r in rows or []:
+                    matches.append(r)
+                    self.item_map[int(r["id"])] = r
+            except Exception:
+                pass
+        if not matches:
+            try:
+                from nano_offline.core.toast import toast
+                toast(self.page, f"لا توجد مادة تطابق «{name}»", kind="warning")
+            except Exception:
+                pass
+            return False
+        # Prefer exact-ish match
+        exact = [m for m in matches if str(m.get("name") or "").strip() == name]
+        item = exact[0] if exact else matches[0]
+        item_id = int(item["id"])
+        self.item_map[item_id] = item
+        self._add_item(item_id, qty_delta=qty)
+        try:
+            from nano_offline.core.toast import toast
+            toast(self.page, f"أُضيف: {item.get('name')} × {qty:g}", kind="success", sound_kind="scan")
+        except Exception:
+            pass
+        return True
 
     def _show_last_scan_card(self, item: dict, qty: float, unit_price: float | None = None, is_repeat: bool = False) -> None:
         """Phase B: floating «آخر مسح» card — appears ~1.5s then fades away."""

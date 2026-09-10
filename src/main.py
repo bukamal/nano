@@ -324,7 +324,38 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
             label.weight = ft.FontWeight.BOLD if active else ft.FontWeight.W_500
             box.bgcolor = Colors.PRIMARY_BG if active else None
 
+    def open_stocktake(_=None) -> None:
+        if not session.can("items"):
+            notify("لا تملك صلاحية المواد/الجرد")
+            return
+        selected_key["value"] = "stocktake"
+        set_header("الجرد", "جرد بالمسح المستمر")
+        refresh_navigation_state()
+        content.opacity = 0
+        stocktake_center.show_center()
+        content.opacity = 1
+        content.update()
+
     def navigate(key: str) -> None:
+        # Special screens not in page_meta/actions (opened by dedicated handlers).
+        if key in ("pos", "نقطة البيع", "بيع سريع"):
+            open_pos()
+            return
+        if key in ("stocktake", "جرد"):
+            open_stocktake()
+            return
+        if key in ("sale", "فاتورة بيع"):
+            open_sale()
+            return
+        if key in ("purchase", "فاتورة شراء"):
+            open_purchase()
+            return
+        if key in ("notifications", "إشعارات", "تنبيهات"):
+            try:
+                notification_center.show_center()
+            except Exception as exc:
+                notify(str(exc), kind="error")
+            return
         action = actions.get(key)
         if action is None or key not in allowed_keys:
             return
@@ -726,6 +757,29 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
     root = ft.Column([main_row, mobile_bar], expand=True, spacing=0)
     page.add(ft.SafeArea(root, expand=True))
 
+    # In-app voice «call» session — survives section switches, not a true
+    # OS background service. Floating banner + FAB hang over the shell.
+    try:
+        from nano_offline.core.voice_session import VoiceSessionController
+        voice_session = VoiceSessionController(
+            page, ctx, navigate=navigate, notify=lambda t, **kw: toast(page, t, **kw),
+        )
+        # Top call strip
+        page.overlay.append(
+            ft.Container(
+                voice_session.banner,
+                top=8, left=12, right=12,
+                alignment=ft.alignment.top_center,
+            )
+        )
+        page.floating_action_button = voice_session.fab
+        page.floating_action_button_location = ft.FloatingActionButtonLocation.END_FLOAT
+        # Keep a handle for POS / dashboard if needed later
+        ctx._voice_session = voice_session  # type: ignore[attr-defined]
+        page.update()
+    except Exception:
+        voice_session = None
+
     _pos_fullscreen = {"value": False}
 
     def adapt_navigation(_=None):
@@ -752,11 +806,22 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         sidebar.visible = False
         mobile_bar.visible = False
         content.padding = ft.padding.all(0)
+        # Keep call banner; hide FAB so it does not cover POS pay bar
+        try:
+            if voice_session is not None:
+                voice_session.fab.visible = False
+        except Exception:
+            pass
         page.update()
 
     def pos_fullscreen_exit():
         _pos_fullscreen["value"] = False
         top_bar.visible = True
+        try:
+            if voice_session is not None:
+                voice_session.fab.visible = True
+        except Exception:
+            pass
         adapt_navigation()
         navigate("dashboard")
 
