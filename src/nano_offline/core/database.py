@@ -100,6 +100,9 @@ CREATE TABLE IF NOT EXISTS item_units (
     item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
     unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE RESTRICT,
     conversion_factor REAL NOT NULL DEFAULT 1 CHECK(conversion_factor > 0),
+    -- Optional per-unit selling price override (USD, same unit as items.selling_price).
+    -- When NULL, the unit prices as base selling_price x conversion_factor.
+    selling_price REAL,
     UNIQUE(item_id, unit_id)
 );
 
@@ -647,6 +650,10 @@ class Database:
                     "UPDATE items SET opening_quantity=?,opening_unit_cost=? WHERE id=?",
                     (qty, unit_cost, item["id"]),
                 )
+
+        # Optional per-unit selling price override (added in v0.9.5).
+        if self._table_exists(conn, "item_units") and not self._has_column(conn, "item_units", "selling_price"):
+            conn.execute("ALTER TABLE item_units ADD COLUMN selling_price REAL")
 
         # Phase-2 invoice-linked payment rows were derived and can be safely
         # regenerated from invoices.initial_paid_amount by AccountingRebuilder.

@@ -869,9 +869,13 @@ class ItemsCenter:
                     alt_rows_column.controls.remove(state["card"])
                     alt_rows_column.update()
 
-            def _add_alt_row(unit_id=None, factor=1.0, barcode="") -> dict:
+            def _add_alt_row(unit_id=None, factor=1.0, barcode="", selling_price=None) -> dict:
                 unit_sel = SearchSelect(label="الوحدة الفرعية", choices=[(str(u["id"]), u["name"]) for u in units], value=str(unit_id) if unit_id else None)
                 factor_f = SelectAllTextField(label="معامل التحويل", value=str(factor), keyboard_type=ft.KeyboardType.NUMBER)
+                price_f = SmartAmountField(
+                    label=currency.amount_field_label("سعر البيع (اختياري)", self.ctx.settings),
+                    value=currency.to_input_text(float(selling_price), self.ctx.settings) if selling_price not in (None, "") else "",
+                )
                 bc_field = SelectAllTextField(label="الباركود (اختياري)", value=barcode or "", expand=True)
                 cs_text = ft.Text("", size=10, color=Colors.WARNING_DARK)
 
@@ -916,20 +920,21 @@ class ItemsCenter:
                         alt_status.color = Colors.DANGER
                         alt_status.update()
 
-                state: dict = {"unit": unit_sel, "factor": factor_f, "barcode": bc_field, "checksum": cs_text}
+                state: dict = {"unit": unit_sel, "factor": factor_f, "price": price_f, "barcode": bc_field, "checksum": cs_text}
                 card = ft.Container(
                     content=ft.Column(
                         [
                             ft.Row(
                                 [
                                     ft.Container(unit_sel, expand=True),
-                                    ft.Container(factor_f, width=130),
+                                    ft.Container(factor_f, width=110),
                                     inline_icon_button(ft.Icons.DELETE_OUTLINE, lambda _, s=state: _remove_alt_row(s), color=Colors.DANGER),
                                 ],
                                 spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER,
                             ),
                             ft.Row(
                                 [
+                                    ft.Container(price_f, width=150),
                                     ft.Container(bc_field, expand=True),
                                     ft.IconButton(icon=ft.Icons.QR_CODE_SCANNER, tooltip="مسح الباركود بالكاميرا", on_click=_scan_bc),
                                     ft.IconButton(icon=ft.Icons.CASINO_OUTLINED, tooltip="توليد باركود عشوائي", on_click=_gen_bc),
@@ -957,7 +962,7 @@ class ItemsCenter:
                     continue
                 _bid = int(_cu["id"])
                 _brow = barcode_by_unit.get(_bid)
-                _add_alt_row(unit_id=_bid, factor=float(_cu.get("conversion_factor") or 1), barcode=(_brow or {}).get("barcode") or "")
+                _add_alt_row(unit_id=_bid, factor=float(_cu.get("conversion_factor") or 1), barcode=(_brow or {}).get("barcode") or "", selling_price=_cu.get("selling_price"))
 
             def _add_alt_row_btn(_=None) -> None:
                 _add_alt_row()
@@ -984,7 +989,9 @@ class ItemsCenter:
                         _uid = _row["unit"].value
                         if not _uid:
                             continue
-                        alternate_units.append({"unit_id": int(_uid), "conversion_factor": float(_row["factor"].value or 1)})
+                        _sp_raw = (_row["price"].value or "").strip()
+                        _sp_val = currency.parse_display_input(_sp_raw, self.ctx.settings) if _sp_raw else None
+                        alternate_units.append({"unit_id": int(_uid), "conversion_factor": float(_row["factor"].value or 1), "selling_price": _sp_val})
                         _code = (_row["barcode"].value or "").strip()
                         if _code:
                             pending_barcodes.append({"code": _code, "unit_id": int(_uid)})
@@ -1115,7 +1122,7 @@ class ItemsCenter:
 
                 body = ft.Column(
                     [
-                        ft.Text("الوحدة الأساسية ثم الوحدات الفرعية — لكل وحدة معامل تحويل وباركود مستقل", size=11, weight=ft.FontWeight.W_600, color=Colors.TEXT_SECONDARY),
+                        ft.Text("الوحدة الأساسية ثم الوحدات الفرعية — لكل وحدة معامل تحويل وباركود وسعر بيع اختياري", size=11, weight=ft.FontWeight.W_600, color=Colors.TEXT_SECONDARY),
                         ft.Container(base_unit, width=220),
                         alt_rows_column,
                         ft.Row(
@@ -1783,7 +1790,7 @@ class ItemsCenter:
                 return
             current_units = ctx.items.units(item_id)
             alternate_units = [
-                {"unit_id": int(u["id"]), "conversion_factor": float(u.get("conversion_factor") or 1)}
+                {"unit_id": int(u["id"]), "conversion_factor": float(u.get("conversion_factor") or 1), "selling_price": u.get("selling_price")}
                 for u in current_units if not u.get("is_base")
             ]
             kwargs = dict(

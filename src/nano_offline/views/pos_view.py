@@ -381,7 +381,7 @@ class POSCenter:
         checkout_btn = hero_button("دفع", icon=ft.Icons.PAYMENTS_OUTLINED)
 
         def total_amount() -> float:
-            return sum(float(row["item"]["selling_price"]) * float(row["qty"]) for row in self.cart.values())
+            return sum(float(row.get("unit_price") or row["item"]["selling_price"]) * float(row["qty"]) for row in self.cart.values())
 
         def received_amount() -> float:
             # The cashier types the cash handed over in the currently displayed
@@ -692,7 +692,7 @@ class POSCenter:
                         description=str(row["item"]["name"]),
                         item_id=int(row["item"]["id"]),
                         quantity=float(row["qty"]),
-                        unit_price=float(row["item"]["selling_price"]),
+                        unit_price=float(row.get("unit_price") or row["item"]["selling_price"]),
                     )
                     for row in rows_list
                 ]
@@ -1279,7 +1279,8 @@ class POSCenter:
                 self.cart_order.remove(item_id)
             on_change()
 
-        line_total = float(item["selling_price"]) * float(row["qty"])
+        line_unit_price = float(row.get("unit_price") or item["selling_price"])
+        line_total = line_unit_price * float(row["qty"])
         # Informational only (see item tile note above) -- InvoiceService
         # itself has no stock guard, so this never blocks checkout; it just
         # lets the cashier catch it before printing the receipt.
@@ -1293,7 +1294,7 @@ class POSCenter:
 
         # Phase B: margin badge (below cost) + qty badge on cart lines
         margin_info = check_sale_margin(
-            unit_price_usd=float(item.get("selling_price") or 0),
+            unit_price_usd=line_unit_price,
             item=item,
             settings=self.ctx.settings,
         )
@@ -1334,7 +1335,7 @@ class POSCenter:
                                 [
                                     ft.Row(name_row_controls, spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                                     ft.Text(
-                                        f"{self.money(item['selling_price'])} × {self._qty(row['qty'])} = {self.money(line_total)}",
+                                        f"{self.money(line_unit_price)} × {self._qty(row['qty'])} = {self.money(line_total)}",
                                         size=11,
                                         color=Colors.TEXT_SECONDARY,
                                     ),
@@ -1372,25 +1373,27 @@ class POSCenter:
     # Cart mutation
     # ------------------------------------------------------------------ #
 
-    def _add_item(self, item_id: int, qty_delta: float = 1.0) -> None:
+    def _add_item(self, item_id: int, qty_delta: float = 1.0, unit_price: float | None = None) -> None:
         item = self.item_map.get(item_id)
         if item is None:
             return
         row = self.cart.get(item_id)
         is_repeat = row is not None
         if row is None:
-            self.cart[item_id] = {"item": item, "qty": qty_delta}
+            self.cart[item_id] = {"item": item, "qty": qty_delta, "unit_price": unit_price}
             self.cart_order.append(item_id)
             new_qty = qty_delta
         else:
             row["qty"] += qty_delta
+            if unit_price is not None:
+                row["unit_price"] = unit_price
             new_qty = row["qty"]
         self._remember_recent(item_id)
         self._refresh_cart()
-        self._show_last_scan_card(item, new_qty, is_repeat=is_repeat)
+        self._show_last_scan_card(item, new_qty, unit_price=unit_price, is_repeat=is_repeat)
         self.page.update()
 
-    def _show_last_scan_card(self, item: dict, qty: float, is_repeat: bool = False) -> None:
+    def _show_last_scan_card(self, item: dict, qty: float, unit_price: float | None = None, is_repeat: bool = False) -> None:
         """Phase B: floating «آخر مسح» card — appears ~1.5s then fades away."""
         overlay = getattr(self, "_last_scan_overlay", None)
         if overlay is None:
@@ -1398,7 +1401,7 @@ class POSCenter:
         self._last_scan_token += 1
         token = self._last_scan_token
         name = str(item.get("name") or "")
-        price = self.money(float(item.get("selling_price") or 0))
+        price = self.money(float(unit_price) if unit_price is not None else float(item.get("selling_price") or 0))
         qty_label = f"×{self._qty(qty).rstrip('0').rstrip('.')}" if qty != 1 else ""
         subtitle = f"{price}  {qty_label}".strip()
         if is_repeat and qty > 1:
@@ -1616,6 +1619,7 @@ class POSCenter:
         # scan, not just 1 base unit -- see item_barcodes.unit_id /
         # ItemRepository.find_by_barcode.
         qty_delta = 1.0
+        unit_price = None
         matched_unit_id = found.get("matched_unit_id")
         if matched_unit_id:
             unit_row = next(
@@ -1623,6 +1627,9 @@ class POSCenter:
             )
             if unit_row:
                 qty_delta = float(unit_row.get("conversion_factor") or 1)
+                _spu = unit_row.get("selling_price")
+                if _spu not in (None, ""):
+                    unit_price = float(_spu)
         # Real haptic feedback on scan would still need a native platform
         # channel added to the flet_native_files extension (Dart/Kotlin/
         # Swift) -- out of reach here with no Flutter toolchain or device to
@@ -1644,7 +1651,7 @@ class POSCenter:
         else:
             qty_note = f" × {self._qty(qty_delta)}" if qty_delta != 1 else ""
             self.notify(f"✔ أُضيف: {found['name']}{qty_note}", sound_kind="scan")
-        self._add_item(item_id, qty_delta)
+        self._add_item(item_id, qty_delta, unit_price)
 
     def _offer_create_item(self, code: str) -> None:
         # A scan that matched nothing gets its own dedicated tone

@@ -1193,7 +1193,13 @@ class InvoiceCenter:
                 base_price_usd = float(item_row["selling_price"] if type_dd.value == "sale" else item_row["purchase_price"])
                 state["base_price"] = currency.to_display(base_price_usd, currency.get_effective_rate(self.ctx.settings))
                 update_line_units(state)
-                state["price"].value = currency.format_plain(state["base_price"] * float(state.get("factor") or 1))
+                _uid0 = int(state["unit"].value) if state["unit"].value else None
+                _urow0 = state.get("units", {}).get(_uid0) if _uid0 else None
+                _sp0 = (_urow0 or {}).get("selling_price")
+                if _sp0 not in (None, ""):
+                    state["price"].value = currency.format_plain(currency.to_display(float(_sp0), currency.get_effective_rate(self.ctx.settings)))
+                else:
+                    state["price"].value = currency.format_plain(state["base_price"] * float(state.get("factor") or 1))
             recalc()
 
         def unit_changed(state: dict) -> None:
@@ -1202,7 +1208,11 @@ class InvoiceCenter:
                 unit_row = state.get("units", {}).get(uid)
                 state["factor"] = float(unit_row["conversion_factor"]) if unit_row else 1.0
                 if state.get("base_price") is not None:
-                    state["price"].value = currency.format_plain(float(state["base_price"]) * state["factor"])
+                    _sp1 = (unit_row or {}).get("selling_price")
+                    if _sp1 not in (None, ""):
+                        state["price"].value = currency.format_plain(currency.to_display(float(_sp1), currency.get_effective_rate(self.ctx.settings)))
+                    else:
+                        state["price"].value = currency.format_plain(float(state["base_price"]) * state["factor"])
             recalc()
 
         def remove_line(state: dict) -> None:
@@ -1381,7 +1391,13 @@ class InvoiceCenter:
                 # don't have -- compute it the same way item_changed() would,
                 # so a scanned line shows a real price and not "0.00".
                 if not initial.get("unit_price") and state.get("base_price") is not None:
-                    price.value = currency.format_plain(float(state["base_price"]) * float(state.get("factor") or 1))
+                    _uid2 = int(state["unit"].value) if state["unit"].value else None
+                    _urow2 = state.get("units", {}).get(_uid2) if _uid2 else None
+                    _sp2 = (_urow2 or {}).get("selling_price")
+                    if _sp2 not in (None, ""):
+                        price.value = currency.format_plain(currency.to_display(float(_sp2), currency.get_effective_rate(self.ctx.settings)))
+                    else:
+                        price.value = currency.format_plain(float(state["base_price"]) * float(state.get("factor") or 1))
             refresh_stock_badge(state)
             refresh_price_badge(state)
             recalc()
@@ -1465,7 +1481,13 @@ class InvoiceCenter:
                     item_row = item_map[int(state["item"].value)]
                     base_price_usd = float(item_row["selling_price"] if type_dd.value == "sale" else item_row["purchase_price"])
                     state["base_price"] = currency.to_display(base_price_usd, currency.get_effective_rate(self.ctx.settings))
-                    state["price"].value = currency.format_plain(state["base_price"] * float(state.get("factor") or 1))
+                    _uid3 = int(state["unit"].value) if state["unit"].value else None
+                    _urow3 = state.get("units", {}).get(_uid3) if _uid3 else None
+                    _sp3 = (_urow3 or {}).get("selling_price")
+                    if _sp3 not in (None, ""):
+                        state["price"].value = currency.format_plain(currency.to_display(float(_sp3), currency.get_effective_rate(self.ctx.settings)))
+                    else:
+                        state["price"].value = currency.format_plain(state["base_price"] * float(state.get("factor") or 1))
                 refresh_stock_badge(state)
                 refresh_price_badge(state)
             update_party_insight()

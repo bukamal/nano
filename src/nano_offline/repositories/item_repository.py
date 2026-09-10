@@ -271,7 +271,7 @@ class ItemRepository:
                     d["is_base"] = True
                     result.append(d)
             rows = conn.execute(
-                """SELECT u.*, iu.conversion_factor
+                """SELECT u.*, iu.conversion_factor, iu.selling_price
                    FROM item_units iu JOIN units u ON u.id=iu.unit_id
                    WHERE iu.item_id=? ORDER BY u.name""",
                 (item_id,),
@@ -461,7 +461,11 @@ class ItemRepository:
             if unit_id in seen:
                 continue
             seen.add(unit_id)
+            sp_raw = raw.get("selling_price")
+            sp_val = float(sp_raw) if sp_raw not in (None, "") else None
+            if sp_val is not None and sp_val < 0:
+                raise ValueError("سعر بيع الوحدة الفرعية لا يمكن أن يكون سالبًا")
             conn.execute(
-                "INSERT INTO item_units(item_id,unit_id,conversion_factor) VALUES(?,?,?)",
-                (item_id, unit_id, factor),
+                "INSERT INTO item_units(item_id,unit_id,conversion_factor,selling_price) VALUES(?,?,?,?)",
+                (item_id, unit_id, factor, sp_val),
             )
