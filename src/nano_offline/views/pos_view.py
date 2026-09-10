@@ -128,6 +128,7 @@ class POSCenter:
             self.on_fullscreen_enter()
         try:
             self._build()
+            self._register_voice_hook()
             self._consume_pending_voice()
         except Exception as exc:
             self._show_center_error(exc)
@@ -1558,6 +1559,13 @@ class POSCenter:
         except Exception:
             pass
         self.apply_voice_command(pending)
+
+
+    def _register_voice_hook(self) -> None:
+        try:
+            setattr(self.ctx, "_pos_apply_voice", self.apply_voice_command)
+        except Exception:
+            pass
 
     def apply_voice_command(self, result) -> None:
         """Execute a QuickCommandService result while POS is open."""

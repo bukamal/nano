@@ -42,6 +42,15 @@ _NAV_PATTERNS: list[tuple[list[str], str, str]] = [
     (["افتح", "البيع"], "navigate", "pos"),
     (["فتح", "البيع"], "navigate", "pos"),
     (["pos"], "navigate", "pos"),
+
+    (["افتح", "نقطة"], "navigate", "pos"),
+    (["روح", "البيع"], "navigate", "pos"),
+    (["وديني", "البيع"], "navigate", "pos"),
+    (["شاشة", "البيع"], "navigate", "pos"),
+    (["افتح", "جرد"], "navigate", "stocktake"),
+    (["روح", "الجرد"], "navigate", "stocktake"),
+    (["عرض", "العملاء"], "navigate", "customers"),
+    (["شوف", "التقارير"], "navigate", "reports"),
     (["كاشير"], "navigate", "pos"),
     # Stocktake
     (["جرد"], "navigate", "stocktake"),

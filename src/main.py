@@ -762,7 +762,11 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
     try:
         from nano_offline.core.voice_session import VoiceSessionController
         voice_session = VoiceSessionController(
-            page, ctx, navigate=navigate, notify=lambda t, **kw: toast(page, t, **kw),
+            page,
+            ctx,
+            navigate=navigate,
+            notify=lambda t, **kw: toast(page, t, **kw),
+            get_section=lambda: selected_key.get("value") or "dashboard",
         )
         # Top call strip
         page.overlay.append(
