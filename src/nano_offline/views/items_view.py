@@ -847,9 +847,121 @@ class ItemsCenter:
             default_unit_id = str(item.get("base_unit_id")) if item and item.get("base_unit_id") else (None if item else ensure_default_unit_id())
             base_unit = SearchSelect(label="الوحدة الأساسية", choices=[(str(u["id"]), u["name"]) for u in units], value=default_unit_id)
             current_units = ctx.items.units(int(item["id"])) if item else []
-            alt_current = next((u for u in current_units if not u.get("is_base")), None)
-            alt_unit = SearchSelect(label="وحدة إضافية", choices=[(str(u["id"]), u["name"]) for u in units], value=str(alt_current.get("id")) if alt_current else None)
-            alt_factor = SelectAllTextField(label="معامل التحويل", value=str(alt_current.get("conversion_factor", 1) if alt_current else 1), keyboard_type=ft.KeyboardType.NUMBER)
+            existing_barcodes = ctx.items.list_barcodes(int(item["id"])) if item else []
+            barcode_by_unit: dict[int, dict] = {}
+            for _b in existing_barcodes:
+                if _b.get("unit_id") is not None:
+                    barcode_by_unit[int(_b["unit_id"])] = _b
+
+            # Sub-units: the old form capped this at ONE alternate unit (a
+            # single alt_unit/alt_factor pair) even though the DB
+            # (item_units) always supported many. Now it's a repeatable list
+            # of rows -- each row is a unit + conversion factor + its own
+            # barcode (typed, scanned, or auto-generated), with add/remove.
+            alt_rows_state: list[dict] = []
+            alt_rows_column = ft.Column(spacing=6, tight=True)
+            alt_status = ft.Text("", size=11, color=Colors.TEXT_SECONDARY)
+            _alt_checksum_enabled = barcode_settings.checksum_warning_enabled(ctx.settings)
+
+            def _remove_alt_row(state: dict) -> None:
+                if state in alt_rows_state:
+                    alt_rows_state.remove(state)
+                    alt_rows_column.controls.remove(state["card"])
+                    alt_rows_column.update()
+
+            def _add_alt_row(unit_id=None, factor=1.0, barcode="") -> dict:
+                unit_sel = SearchSelect(label="الوحدة الفرعية", choices=[(str(u["id"]), u["name"]) for u in units], value=str(unit_id) if unit_id else None)
+                factor_f = SelectAllTextField(label="معامل التحويل", value=str(factor), keyboard_type=ft.KeyboardType.NUMBER)
+                bc_field = SelectAllTextField(label="الباركود (اختياري)", value=barcode or "", expand=True)
+                cs_text = ft.Text("", size=10, color=Colors.WARNING_DARK)
+
+                def _on_bc_change(_=None) -> None:
+                    cs_text.value = (barcode_quality.checksum_warning(bc_field.value or "") or "") if _alt_checksum_enabled else ""
+                    cs_text.update()
+                bc_field.on_change = _on_bc_change
+                cs_text.value = (barcode_quality.checksum_warning(bc_field.value or "") or "") if _alt_checksum_enabled else ""
+
+                def _gen_bc(_=None) -> None:
+                    kind = barcode_type.value or barcode_settings.default_kind(ctx.settings)
+                    prefix = barcode_settings.internal_prefix(ctx.settings) if kind == "EAN13" else None
+                    bc_field.value = barcode_quality.generate_barcode_value(kind, prefix=prefix)
+                    _on_bc_change()
+                    bc_field.update()
+
+                async def _scan_bc(_=None) -> None:
+                    if self.native_files is None:
+                        alt_status.value = "مسح الباركود غير مهيأ في هذا البناء"
+                        alt_status.color = Colors.DANGER
+                        alt_status.update()
+                        return
+                    alt_status.value = "جارٍ فتح الكاميرا..."
+                    alt_status.color = Colors.TEXT_SECONDARY
+                    alt_status.update()
+                    try:
+                        code = await self.native_files.scan_barcode()
+                    except Exception as exc:
+                        alt_status.value = str(exc)
+                        alt_status.color = Colors.DANGER
+                        alt_status.update()
+                        return
+                    if code:
+                        bc_field.value = code
+                        _on_bc_change()
+                        bc_field.update()
+                        alt_status.value = f"تم قراءة الباركود: {code}"
+                        alt_status.color = Colors.SUCCESS
+                        alt_status.update()
+                    else:
+                        alt_status.value = "لم تتم قراءة أي باركود (تم الإلغاء أو رفض إذن الكاميرا)"
+                        alt_status.color = Colors.DANGER
+                        alt_status.update()
+
+                state: dict = {"unit": unit_sel, "factor": factor_f, "barcode": bc_field, "checksum": cs_text}
+                card = ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.Container(unit_sel, expand=True),
+                                    ft.Container(factor_f, width=130),
+                                    inline_icon_button(ft.Icons.DELETE_OUTLINE, lambda _, s=state: _remove_alt_row(s), color=Colors.DANGER),
+                                ],
+                                spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            ft.Row(
+                                [
+                                    ft.Container(bc_field, expand=True),
+                                    ft.IconButton(icon=ft.Icons.QR_CODE_SCANNER, tooltip="مسح الباركود بالكاميرا", on_click=_scan_bc),
+                                    ft.IconButton(icon=ft.Icons.CASINO_OUTLINED, tooltip="توليد باركود عشوائي", on_click=_gen_bc),
+                                ],
+                                spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            cs_text,
+                        ],
+                        spacing=5, tight=True,
+                    ),
+                    padding=ft.padding.all(8),
+                    border=ft.border.all(1, Colors.BORDER_ALT),
+                    border_radius=Radius.MD,
+                    bgcolor=Colors.WHITE,
+                )
+                state["card"] = card
+                alt_rows_state.append(state)
+                alt_rows_column.controls.append(card)
+                return state
+
+            # Prefill existing sub-units (and any per-unit barcode already
+            # registered for them) so editing round-trips cleanly.
+            for _cu in current_units:
+                if _cu.get("is_base"):
+                    continue
+                _bid = int(_cu["id"])
+                _brow = barcode_by_unit.get(_bid)
+                _add_alt_row(unit_id=_bid, factor=float(_cu.get("conversion_factor") or 1), barcode=(_brow or {}).get("barcode") or "")
+
+            def _add_alt_row_btn(_=None) -> None:
+                _add_alt_row()
+                alt_rows_column.update()
 
             # Paged bottom sheet -- one focused step per screen (basic
             # info / barcode / price & stock / units) with a dot
@@ -867,8 +979,15 @@ class ItemsCenter:
             def perform_save() -> None:
                 try:
                     alternate_units = []
-                    if alt_unit.value:
-                        alternate_units.append({"unit_id": int(alt_unit.value), "conversion_factor": float(alt_factor.value or 1)})
+                    pending_barcodes: list[dict] = []
+                    for _row in alt_rows_state:
+                        _uid = _row["unit"].value
+                        if not _uid:
+                            continue
+                        alternate_units.append({"unit_id": int(_uid), "conversion_factor": float(_row["factor"].value or 1)})
+                        _code = (_row["barcode"].value or "").strip()
+                        if _code:
+                            pending_barcodes.append({"code": _code, "unit_id": int(_uid)})
                     kwargs = dict(
                         name=name.value or "", item_type=kind.value or "مخزون",
                         category_id=int(category.value) if category.value else None,
@@ -879,11 +998,31 @@ class ItemsCenter:
                     )
                     if item:
                         ctx.items.update(int(item["id"]), **kwargs)
+                        item_id = int(item["id"])
                         msg = "تم تحديث المادة"
                     else:
-                        ctx.items.create(quantity=float(qty.value or 0), **kwargs)
+                        item_id = ctx.items.create(quantity=float(qty.value or 0), **kwargs)
                         msg = "تمت إضافة المادة"
-                    nav_ref["nav"].close(); notify(msg); refresh()
+                    # Persist each sub-unit's barcode (idempotent -- skip any
+                    # code the item already owns; surface conflicts with other
+                    # items without aborting the whole save).
+                    _owned = {(kwargs.get("barcode") or "").strip()}
+                    _owned |= {(_b.get("barcode") or "").strip() for _b in ctx.items.list_barcodes(item_id)}
+                    _warnings: list[str] = []
+                    for _pb in pending_barcodes:
+                        if _pb["code"] in _owned:
+                            continue
+                        try:
+                            ctx.items.add_barcode(item_id, _pb["code"], unit_id=_pb["unit_id"])
+                            _owned.add(_pb["code"])
+                        except Exception as _exc:
+                            _warnings.append(str(_exc))
+                    nav_ref["nav"].close()
+                    if _warnings:
+                        notify(msg + " — " + "؛ ".join(dict.fromkeys(_warnings)))
+                    else:
+                        notify(msg)
+                    refresh()
                 except Exception as exc:
                     # notify() -> SnackBar is invisible here: this sheet is
                     # still open when save() fails, same root cause as the
@@ -921,7 +1060,7 @@ class ItemsCenter:
                         return
                 _check_barcode_then_save()
 
-            _STEP_TITLES = ["البيانات الأساسية", "الباركود", "السعر والمخزون", "الوحدات"]
+            _STEP_TITLES = ["البيانات الأساسية", "الباركود", "السعر والمخزون", "الوحدات الفرعية"]
             _STEP_COUNT = len(_STEP_TITLES)
 
             def render_page(idx: int, nav):
@@ -976,11 +1115,16 @@ class ItemsCenter:
 
                 body = ft.Column(
                     [
-                        ft.ResponsiveRow([
-                            ft.Container(base_unit, col={"xs": 12, "md": 4}),
-                            ft.Container(alt_unit, col={"xs": 6, "md": 4}),
-                            ft.Container(alt_factor, col={"xs": 6, "md": 4}),
-                        ], spacing=7, run_spacing=7),
+                        ft.Text("الوحدة الأساسية ثم الوحدات الفرعية — لكل وحدة معامل تحويل وباركود مستقل", size=11, weight=ft.FontWeight.W_600, color=Colors.TEXT_SECONDARY),
+                        ft.Container(base_unit, width=220),
+                        alt_rows_column,
+                        ft.Row(
+                            [
+                                ft.OutlinedButton("إضافة وحدة فرعية", icon=ft.Icons.ADD_CIRCLE_OUTLINE, on_click=_add_alt_row_btn),
+                            ],
+                            spacing=6,
+                        ),
+                        alt_status,
                     ],
                     spacing=9, tight=True,
                 )
@@ -1638,11 +1782,10 @@ class ItemsCenter:
             if not data:
                 return
             current_units = ctx.items.units(item_id)
-            alt = next((u for u in current_units if not u.get("is_base")), None)
-            alternate_units = (
-                [{"unit_id": int(alt["id"]), "conversion_factor": float(alt.get("conversion_factor") or 1)}]
-                if alt else []
-            )
+            alternate_units = [
+                {"unit_id": int(u["id"]), "conversion_factor": float(u.get("conversion_factor") or 1)}
+                for u in current_units if not u.get("is_base")
+            ]
             kwargs = dict(
                 name=data["name"], item_type=data["item_type"],
                 category_id=data.get("category_id"),
