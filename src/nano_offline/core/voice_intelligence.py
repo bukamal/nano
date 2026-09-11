@@ -16,6 +16,25 @@ from datetime import datetime
 from typing import Any
 
 
+# Arabic display labels for every shell section key — the TTS must never
+# pronounce the internal English keys («pos», «items», «finance» …).
+SECTION_AR: dict[str, str] = {
+    "pos": "نقطة البيع", "items": "المواد", "stocktake": "الجرد",
+    "finance": "المالية", "customers": "العملاء", "suppliers": "الموردين",
+    "invoices": "الفواتير", "reports": "التقارير", "dashboard": "الرئيسية",
+    "admin": "الإدارة", "notifications": "الإشعارات", "security": "الأمان",
+    "sale": "فاتورة البيع", "purchase": "فاتورة الشراء",
+}
+
+
+def ar_section_label(key: str | None) -> str | None:
+    """English shell key → Arabic spoken label; unknown text passes through."""
+    if not key:
+        return None
+    k = str(key).strip().lower()
+    return SECTION_AR.get(k) or key
+
+
 @dataclass
 class VoiceMemory:
     last_item_name: str | None = None
@@ -112,9 +131,10 @@ def reply_for(
             "تم الإلغاء. المكالمة ما زالت مستمرة إذا احتجت أمراً آخر.",
         ]
     elif intent == "navigate":
+        label = ar_section_label(extra) or "القسم"
         pool = [
-            f"تم. فتحت قسم {extra or 'المطلوب'} من أجلك. يمكنك متابعة الأوامر الصوتية مباشرة.",
-            f"روّحت على {extra or 'القسم'}. قل لي ماذا تريد أن نفعل هنا.",
+            f"تم. فتحت {label} من أجلك. يمكنك متابعة الأوامر الصوتية مباشرة.",
+            f"روّحت إلى {label}. قل لي ماذا تريد أن نفعل هنا.",
         ]
     elif intent == "stock":
         pool = [extra or "هذا ملخص رصيد المادة من المخزون."]
@@ -288,6 +308,7 @@ __all__ = [
     "is_yes",
     "is_no",
     "hour_greeting",
+    "ar_section_label",
 ]
 
 

@@ -77,20 +77,74 @@ def char_ngrams(text: str, *, lo: int = 2, hi: int = 3) -> Counter:
 # ---------------------------------------------------------------------------
 
 WORD_NUMBERS: dict[str, float] = {
-    "واحد": 1, "واحده": 1, "واحده": 1, "وحده": 1,
+    "واحد": 1, "واحده": 1, "وحده": 1,
     "اثنين": 2, "اثنان": 2, "ثنين": 2, "تنين": 2, "زوج": 2,
-    "ثلاثه": 3, "ثلاث": 3, "تلابه": 3,
+    "ثلاثه": 3, "ثلاث": 3, "تلابه": 3, "تلاته": 3, "تلته": 3,
     "اربعه": 4, "اربع": 4,
     "خمسه": 5, "خمس": 5,
     "سته": 6, "ست": 6,
     "سبعه": 7, "سبع": 7,
-    "ثمانيه": 8, "ثمانيه": 8, "ميتين": 2,
+    "ثمانيه": 8, "ثمانيا": 8,
     "تسعه": 9, "تسع": 9,
     "عشره": 10, "عشر": 10,
     "عشرين": 20, "ثلاثين": 30, "اربعين": 40, "خمسين": 50,
+    "ستين": 60, "سبعين": 70, "ثمانين": 80, "تسعين": 90,
+    "مية": 100, "ميه": 100, "مئه": 100, "ماية": 100,
+    "ميتين": 200,
+    "خمسميه": 500, "خمسمية": 500, "خمسماية": 500, "خمسمايه": 500,
+    "الف": 1000, "الفين": 2000,
 }
 
 _NUM_TOKEN = re.compile(r"\d+(?:[.,]\d+)?")
+
+# ---------------------------------------------------------------------------
+# Written-out amounts (Syrian dialect) — «بسعر خمسمئة» == 500
+# ---------------------------------------------------------------------------
+
+_AMOUNT_WORDS: dict[str, float] = {
+    "ميه": 100, "مية": 100, "مئة": 100, "مئه": 100,
+    "ميتين": 200, "مئتين": 200,
+    "ثلاثميه": 300, "ثلاثمئة": 300, "ثلاثمئه": 300,
+    "اربعميه": 400, "اربعمئة": 400, "اربعمئه": 400,
+    "خمسميه": 500, "خمسمئة": 500, "خمسمئه": 500, "خمسمية": 500,
+    "ستميه": 600, "ستمئة": 600,
+    "سبعميه": 700, "سبعمئة": 700,
+    "ثمانميه": 800, "ثمانمئة": 800,
+    "تسعميه": 900, "تسعمئة": 900,
+    "الف": 1000, "ألف": 1000, "الفين": 2000, "ألفين": 2000,
+}
+_TENS_MULT: dict[str, float] = {
+    "واحد": 1, "اثنين": 2, "تنين": 2, "ثلاث": 3, "ثلاثه": 3,
+    "اربع": 4, "اربعه": 4, "خمس": 5, "خمسه": 5, "ست": 6, "سته": 6,
+    "سبع": 7, "سبعه": 7, "ثمان": 8, "ثمانيه": 8, "تسع": 9, "تسعه": 9,
+    "عشر": 10, "عشره": 10,
+}
+_AMOUNT_RE = re.compile(r"(?:بسعر|سعر)\s*(\d+(?:[.,]\d+)?)")
+_WRITTEN_AMOUNT_RE = re.compile(r"(?:بسعر|سعر)\s+([^\s]+)(?:\s+([^\s]+))?")
+
+def match_amount(text: str) -> tuple[float, int, int] | None:
+    """Find a price span «بسعر/سعر <amount>» → (value, start, end) | None.
+
+    Accepts digits (incl. Arabic-Indic: ٨٠٠) and written Syrian amounts:
+    «بسعر خمسمئة» → 500, «بسعر خمس مئة» → 500, «بسعر ألف» → 1000.
+    """
+    t = text or ""
+    m = _AMOUNT_RE.search(t)
+    if m:
+        try:
+            val = float(m.group(1).translate(_ARABIC_DIGITS).replace(",", "."))
+        except ValueError:
+            val = 0.0
+        return (val, m.start(), m.end()) if val > 0 else None
+    m2 = _WRITTEN_AMOUNT_RE.search(t)
+    if m2:
+        toks = [g for g in (m2.group(1), m2.group(2)) if g]
+        if len(toks) == 2 and toks[1] in _AMOUNT_WORDS and toks[0] in _TENS_MULT:
+            return (_TENS_MULT[toks[0]] * _AMOUNT_WORDS[toks[1]], m2.start(), m2.end())
+        if toks and toks[0] in _AMOUNT_WORDS:
+            return (_AMOUNT_WORDS[toks[0]], m2.start(), m2.end())
+    return None
+
 
 
 def parse_qty(raw: str) -> float | None:
@@ -166,7 +220,8 @@ SEED_PHRASES: dict[str, list[str]] = {
     ],
     "item_create": [
         "انشئ مادة", "أنشئ مادة", "اضف مادة جديدة", "سجل مادة",
-        "مادة جديدة", "انشاء مادة",
+        "مادة جديدة", "انشاء مادة", "سجل ماده", "سجل مادة جديده",
+        "انشاء ماده جديده", "انشئ ماده عسل بسعر", "سجل ماده عسل",
     ],
     "crisis_on": [
         "تفعيل الطوارئ", "وضع الطوارئ", "ازمه", "أزمة", "شغل الطوارئ",
@@ -212,7 +267,7 @@ SEED_PHRASES: dict[str, list[str]] = {
     "navigate_reports": ["تقارير", "تقرير", "شوف التقارير", "ارقام"],
     "navigate_dashboard": ["لوحة", "رئيسية", "الرئيسية", "المنزل", "ارجع للرئيسية"],
     "navigate_admin": ["ادارة", "اعدادات", "الاعدادات", "نسخ احتياطي", "نسخه احتياطيه"],
-    "navigate_finance": ["مالية", "صندوق", "سندات", "مصروفات", "مصاريف", "خزنه", "الخزنه", "سجل مصروف"],
+    "navigate_finance": ["مالية", "صندوق", "سندات", "مصروفات", "مصاريف", "خزنه", "الخزنه", "الماليه", "سجل مصروف"],
     "navigate_notifications": ["اشعارات", "تنبيهات", "الاشعارات"],
     "navigate_security": ["امان", "أمان", "دخول", "الحمايه"],
 }
@@ -318,6 +373,16 @@ def _split_conjuncts(text: str) -> list[str]:
     return [p.strip(" ؟?.,") for p in parts if p and p.strip(" ؟?.,")]
 
 
+def _parse_qty_token(tok: str) -> float | None:
+    """رقم (مكتوب/هندي/لفظي عامي) → قيمة رقمية، أو None إن لم يكن عدداً."""
+    tok = (tok or "").strip(" ،،؟?.")
+    v = parse_qty(tok)
+    if v is not None:
+        return v
+    n = normalize_ar(tok)
+    return float(WORD_NUMBERS[n]) if n in WORD_NUMBERS else None
+
+
 def extract_slots(text: str, intent: str) -> dict[str, Any]:
     """Intent-specific slot extraction. Always returns a dict (may be empty).
 
@@ -354,19 +419,26 @@ def extract_slots(text: str, intent: str) -> dict[str, Any]:
                 raw_toks = core.split(None, 1)
                 core = raw_toks[1].strip() if len(raw_toks) > 1 else ""
                 break
+            # Remove any price span BEFORE slotting: «أضف شاي بسعر 500» must
+            # look up «شاي» in the cart, and «أنشئ مادة شاي بسعر خمسمئة» must
+            # capture 500 (digits or written Syrian amount) as the price.
+            amt_pre = match_amount(core)
+            if amt_pre:
+                if intent == "item_create":
+                    slots["selling_price"] = amt_pre[0]
+                core = (core[: amt_pre[1]] + core[amt_pre[2]:]).strip(" ،，")
+
         if intent == "item_create":
-            price_m = re.search(r"(?:بسعر|سعر)\s*(\d+(?:[.,]\d+)?)", core)
-            if price_m:
-                slots["selling_price"] = float(price_m.group(1).replace(",", "."))
-                core = (core[: price_m.start()] + core[price_m.end():]).strip(" ،,")
-            qty_m = re.search(r"(?:بكمية|كمية|بكميه|كميه)\s*(\d+(?:[.,]\d+)?)", core)
+            qty_m = re.search(r"(?:بكمية|كمية|بكميه|كميه)\s*(\S+)", core)
             if qty_m:
-                slots["quantity"] = float(qty_m.group(1).replace(",", "."))
+                slots["quantity"] = float(_parse_qty_token(qty_m.group(1)) or 0)
                 core = (core[: qty_m.start()] + core[qty_m.end():]).strip(" ،,")
             # drop the redundant leading «مادة/صنف/منتج»
             toks = core.split()
             if len(toks) >= 2 and normalize_ar(toks[0]) in ("ماده", "صنف", "منتج"):
                 core = " ".join(toks[1:]).strip()
+        if intent == "item_create":
+            core = re.sub(r"\s*و\s*$", "", core).strip(" ،،")
         name, qty = strip_trailing_qty_words(core, 1.0)
         # leading digit form «3 سكر»
         lead = re.match(r"^(\d+(?:[.,]\d+)?)\s+(.+)$", name)
@@ -545,6 +617,15 @@ def analyze_full(text: str, legacy_parse=None, *, stock_handler=None) -> "object
     )
 
 
+_NAV_AR: dict[str, str] = {
+    "pos": "نقطة البيع", "stocktake": "الجرد", "items": "المواد والمخزون",
+    "customers": "العملاء", "suppliers": "الموردين", "invoices": "الفواتير",
+    "sale": "فاتورة البيع", "purchase": "فاتورة الشراء", "finance": "المالية",
+    "reports": "التقارير", "dashboard": "اللوحة الرئيسية", "admin": "الإدارة",
+    "notifications": "الإشعارات", "security": "الأمان",
+}
+
+
 def materialize(intent: str, slots: dict[str, Any], conf: float) -> "object":
     """Build a CommandResult-shaped object from the NLU triple.
 
@@ -611,7 +692,7 @@ def load_learned_memory(learning_service) -> int:
 
 __all__ = [
     "normalize_ar", "char_ngrams", "IntentClassifier", "analyze", "analyze_full",
-    "materialize", "extract_slots", "parse_qty", "strip_trailing_qty_words",
+    "materialize", "extract_slots", "parse_qty", "match_amount", "strip_trailing_qty_words",
     "get_classifier", "learn_from_phrase", "load_learned_memory", "legacy_matches_nlu",
     "WORD_NUMBERS", "CONF_ACT", "CONF_SOFT", "MUTATING_INTENTS",
     "CONVERSATIONAL_INTENTS",

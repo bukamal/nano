@@ -22,7 +22,7 @@ from nano_offline.core.theme import Colors, Shadow
 from nano_offline.core.toast import toast
 from nano_offline.core.voice_intelligence import (
     VoiceMemory, reply_for, resolve_item_name, extract_again_reference,
-    is_yes, is_no, match_converse, reply_converse,
+    is_yes, is_no, match_converse, reply_converse, ar_section_label,
 )
 from nano_offline.core.voice_guide import match_guide, guide_for_section
 from nano_offline.core.voice_nlu import normalize_ar
@@ -477,7 +477,7 @@ class VoiceSessionController:
                         return
                     if action == "navigate" and target:
                         self.navigate(target)
-                        self._reply(reply_for("navigate", extra=target, memory=self.memory, section=target), kind="success")
+                        self._reply(reply_for("navigate", extra=ar_section_label(target), memory=self.memory, section=target), kind="success")
                         self._schedule_relisten(0.5)
                         return
                     if action in ("pos_pay", "pos_clear", "pos_remove_last", "pos_cart_summary"):
@@ -717,7 +717,7 @@ class VoiceSessionController:
             try:
                 self.navigate(result.target)
                 self.memory.note(last_section=result.target, last_action="navigate")
-                label = result.message or result.target or "القسم"
+                label = ar_section_label(result.target) or ar_section_label(result.message) or "القسم"
                 try:
                     learn = getattr(self.ctx, "voice_learning", None)
                     if learn is not None:

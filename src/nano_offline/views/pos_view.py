@@ -1726,17 +1726,25 @@ class POSCenter:
         qty = float(qty or 1) or 1.0
         # Prefer in-memory catalog; fall back to DB search
         matches = []
-        needle = name.casefold()
+        from nano_offline.core.voice_nlu import normalize_ar
+        needle = normalize_ar(name)
+        needle_noart = needle[2:] if needle.startswith("ال") and len(needle) > 3 else needle
+        needle_art = ("ال" + needle) if not needle.startswith("ال") else needle
         for item in self.item_map.values():
-            iname = str(item.get("name") or "")
-            if needle in iname.casefold() or iname.casefold() in needle:
+            iname = normalize_ar(str(item.get("name") or ""))
+            if not iname:
+                continue
+            if (needle and (needle in iname or iname in needle)) or \
+               (needle_noart and (needle_noart in iname or iname in needle_noart)) or \
+               (needle_art in iname or iname in needle_art):
                 matches.append(item)
         if not matches:
             try:
                 rows = self.ctx.items.list(search=name) if hasattr(self.ctx.items, "list") else []
                 for r in rows or []:
+                    if int(r["id"]) not in self.item_map:
+                        self.item_map[int(r["id"])] = r
                     matches.append(r)
-                    self.item_map[int(r["id"])] = r
             except Exception:
                 pass
         if not matches:

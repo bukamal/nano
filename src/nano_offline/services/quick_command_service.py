@@ -20,13 +20,18 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from nano_offline.core.voice_nlu import (
+    normalize_ar,
     WORD_NUMBERS,
     analyze_full,
     learn_from_phrase,
+    match_amount,
     parse_qty as _nlu_parse_qty,
     strip_trailing_qty_words as _nlu_strip_qty,
 )
-from nano_offline.core.voice_intelligence import resolve_item_name
+from nano_offline.core.voice_intelligence import (
+    ar_section_label,
+    resolve_item_name,
+)
 
 if TYPE_CHECKING:
     from nano_offline.core.database import Database
@@ -40,6 +45,18 @@ class CommandResult:
     target: str | None = None
     message: str | None = None
     data: dict | None = None
+
+
+# Arabic display names for internal section keys — the parser's message
+# and the voice reply must read human names («نقطة البيع»), never the
+# internal English key («pos»).
+_NAV_AR: dict[str, str] = {
+    "pos": "نقطة البيع", "stocktake": "الجرد", "items": "المواد والمخزون",
+    "customers": "العملاء", "suppliers": "الموردين", "invoices": "الفواتير",
+    "sale": "فاتورة البيع", "purchase": "فاتورة الشراء", "finance": "المالية",
+    "reports": "التقارير", "dashboard": "اللوحة الرئيسية", "admin": "الإدارة",
+    "notifications": "الإشعارات", "security": "الأمان",
+}
 
 
 # (keywords that must ALL appear or any of the alternatives, action, target)
@@ -103,6 +120,7 @@ _NAV_PATTERNS: list[tuple[list[str], str, str]] = [
     (["مصاريف"], "navigate", "finance"),
     (["خزنه"], "navigate", "finance"),
     (["خزنة"], "navigate", "finance"),
+    (["الماليه"], "navigate", "finance"),
     (["إشعارات"], "navigate", "notifications"),
     (["تنبيهات"], "navigate", "notifications"),
     (["اشعارات"], "navigate", "notifications"),
@@ -194,22 +212,23 @@ class QuickCommandService:
 
         # Create item: أنشئ مادة X / أضف مادة X بسعر 500
         create_m = re.search(
-            r"(?:انشئ|أنشئ|انشاء|إنشاء|اضف مادة|أضف مادة|سجل مادة|سجّل مادة|مادة جديدة)\s+(.+)$",
+            r"(?:انشئ|أنشئ|انشاء|إنشاء|اضف مادة|أضف مادة|اضف ماده|أضف ماده|سجل مادة|سجّل مادة|سجل ماده|مادة جديدة|ماده جديده)\s+(.+)$",
             normalized,
             flags=re.IGNORECASE,
         )
         if create_m:
             rest = create_m.group(1).strip(" ؟?،,")
             price = 0.0
-            pm = re.search(r"(?:بسعر|سعر)\s*([\d٠-٩]+(?:[.,]\d+)?)", rest)
-            if pm:
-                price = self._parse_qty(pm.group(1))
-                rest = (rest[:pm.start()] + rest[pm.end():]).strip(" ،,")
+            amt = match_amount(rest)
+            if amt:
+                price = amt[0]
+                rest = (rest[: amt[1]] + rest[amt[2]:]).strip(" ،،")
+            rest = re.sub(r"\s*(?:بسعر|سعر)\s*$", "", rest).strip()
             # optional qty opening
             oq = 0.0
-            qm = re.search(r"(?:بكمية|كمية)\s*([\d٠-٩]+(?:[.,]\d+)?)", rest)
+            qm = re.search(r"(?:بكمية|كمية)\s*(\S+)", rest)
             if qm:
-                oq = self._parse_qty(qm.group(1))
+                oq = float(_nlu_parse_qty(qm.group(1)) if _nlu_parse_qty(qm.group(1)) is not None else WORD_NUMBERS.get(normalize_ar(qm.group(1)), 0) or 0)
                 rest = (rest[:qm.start()] + rest[qm.end():]).strip(" ،,")
             name = rest.strip()
             # «انشاء مادة لبنة» — drop the redundant leading «مادة»
@@ -302,6 +321,9 @@ class QuickCommandService:
                 if len(toks) >= 2 and toks[0] in WORD_NUMBERS and qty2 == qty:
                     name2 = " ".join(toks[1:]).strip()
                     qty2 = float(WORD_NUMBERS[toks[0]])
+                amt2 = match_amount(name2)
+                if amt2:
+                    name2 = (name2[: amt2[1]] + name2[amt2[2]:]).strip(" ،،")
                 if name2:
                     return CommandResult(
                         ok=True,
@@ -354,6 +376,9 @@ class QuickCommandService:
                             items.append({"name": " ".join(toks[1:]).strip(), "qty": float(WORD_NUMBERS[toks[0]])})
                             continue
                         name2, qty2 = self._strip_trailing_qty_words(part, 1.0)
+                        amt3 = match_amount(name2)
+                        if amt3:
+                            name2 = (name2[: amt3[1]] + name2[amt3[2]:]).strip(" ،،")
                         items.append({"name": name2, "qty": qty2})
                 if items:
                     return CommandResult(
@@ -380,8 +405,9 @@ class QuickCommandService:
 
         # Navigation
         for keys, action, target in _NAV_PATTERNS:
-            if all(k in lower for k in keys) or (len(keys) == 1 and keys[0] in lower):
-                return CommandResult(ok=True, action=action, target=target, message=f"فتح: {target}")
+            nkeys = [k.replace("ة", "ه") for k in keys]
+            if all(k in lower for k in nkeys) or (len(nkeys) == 1 and nkeys[0] in lower):
+                return CommandResult(ok=True, action=action, target=target, message=f"فتح: {_NAV_AR.get(target, target)}")
 
         # Single-token shortcuts
         shortcuts = {
@@ -409,7 +435,7 @@ class QuickCommandService:
         token = lower.strip()
         if token in shortcuts:
             a, t = shortcuts[token]
-            return CommandResult(ok=True, action=a, target=t)
+            return CommandResult(ok=True, action=a, target=t, message=f"فتح: {ar_section_label(t)}")
 
         return CommandResult(
             ok=False,
