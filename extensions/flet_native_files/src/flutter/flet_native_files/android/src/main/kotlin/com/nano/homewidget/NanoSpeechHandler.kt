@@ -113,7 +113,7 @@ class NanoSpeechHandler(
                         }
                     })
                     // Fallback if OEM never fires utterance callbacks
-                    val approxMs = (cleaned.length * 90L).coerceIn(1500L, 12000L)
+                    val approxMs = (cleaned.length * 140L).coerceIn(2500L, 45000L)
                     mainHandler.postDelayed({ finishOk() }, approxMs)
                     val ok = engine.speak(cleaned, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
                     if (ok == TextToSpeech.ERROR) {

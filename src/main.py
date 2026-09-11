@@ -773,7 +773,7 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
             notify=lambda t, **kw: toast(page, t, **kw),
             get_section=lambda: selected_key.get("value") or "dashboard",
             native_files=native_files,
-            tts_enabled=False,
+            tts_enabled=True,
         )
         # Floating draggable bubble (positioned by VoiceSessionController)
         page.overlay.append(voice_session.banner)

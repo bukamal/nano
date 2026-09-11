@@ -22,7 +22,7 @@ from nano_offline.core.theme import Colors, Shadow
 from nano_offline.core.toast import toast
 from nano_offline.core.voice_intelligence import (
     VoiceMemory, reply_for, resolve_item_name, extract_again_reference,
-    is_yes, is_no,
+    is_yes, is_no, match_converse, reply_converse,
 )
 
 
@@ -43,7 +43,7 @@ class VoiceSessionController:
         notify: Callable[..., None] | None = None,
         get_section: Callable[[], str] | None = None,
         native_files=None,
-        tts_enabled: bool = False,
+        tts_enabled: bool = True,
     ) -> None:
         self.page = page
         self.ctx = ctx
@@ -54,6 +54,9 @@ class VoiceSessionController:
         self.native_files = native_files
         self.tts_enabled = tts_enabled
         self.silent = True  # no toast tones during the call
+        self._speaking = False
+        self._pending_relisten = False
+        self._pending_relisten_delay = 0.4
 
         self.active = False
         self.listening = False
@@ -186,7 +189,7 @@ class VoiceSessionController:
         self._set_listening_visual(False)
         self.memory = VoiceMemory()
         self.memory.last_section = self.get_section() or "dashboard"
-        greet = "معك. تفضل."
+        greet = "معك، تفضل."
         self.fab.icon = ft.Icons.CALL_END_ROUNDED
         self.fab.bgcolor = Colors.DANGER
         self.fab.tooltip = "إنهاء المكالمة"
@@ -235,18 +238,10 @@ class VoiceSessionController:
         self._set_listening_visual(True)
         self._hint.value = "يستمع…"
         self._safe_update()
-        # Stop any TTS so the mic does not hear Nano talking
-        if self.native_files is not None:
-            async def _hush():
-                try:
-                    await self.native_files.speech_stop_speak()
-                except Exception:
-                    pass
-            try:
-                if hasattr(self.page, "run_task"):
-                    self.page.run_task(_hush)
-            except Exception:
-                pass
+        # Do not cut an active reply; listen is only scheduled after TTS ends.
+        if self._speaking:
+            self._pending_relisten = True
+            return
 
         def on_final(text: str):
             self.listening = False
@@ -300,19 +295,17 @@ class VoiceSessionController:
             on_error(str(exc))
 
     def _schedule_relisten(self, delay: float) -> None:
-        """Restart mic quickly for continuous AI-call feel (no dead air)."""
+        """Restart mic after reply — never while TTS is still speaking."""
         if not self.active:
             return
-        extra = 0.0
-        if self.tts_enabled and self._last_spoken:
-            extra = min(12.0, max(1.4, len(self._last_spoken) * 0.095))
-            self._last_spoken = ""
-        # Without TTS: short gap only so the call feels continuous
-        base = 0.35 if not self.tts_enabled else delay
-        wait = max(0.25, (delay if self.tts_enabled else min(delay, base)) + extra)
+        if self.tts_enabled and self._speaking:
+            self._pending_relisten = True
+            self._pending_relisten_delay = max(0.3, delay)
+            return
+        wait = max(0.3, delay)
 
         def _go():
-            if self.active and not self.listening:
+            if self.active and not self.listening and not self._speaking:
                 self._listen()
 
         threading.Timer(wait, _go).start()
@@ -346,6 +339,25 @@ class VoiceSessionController:
                 self._schedule_relisten(0.75)
                 return
             self._pending_followup = None
+
+        conv = match_converse(text)
+        if conv == "repeat" and self.memory.last_action == "pos_add" and self.memory.last_item_name:
+            self._do_pos_add(self.memory.last_item_name, float(self.memory.last_qty or 1))
+            self._schedule_relisten(0.5)
+            return
+        if conv == "undo":
+            fake = type("R", (), {"action": "pos_remove_last", "data": {}, "ok": True, "target": "pos", "message": ""})()
+            if (self.get_section() or "").lower() == "pos":
+                self._apply_pos(fake)
+            else:
+                self._queue_and_go_pos(fake)
+            self._reply(reply_converse("undo"), kind="info")
+            self._schedule_relisten(0.5)
+            return
+        if conv in ("greet", "thanks", "howto", "help"):
+            self._reply(reply_converse(conv), kind="info")
+            self._schedule_relisten(0.5)
+            return
 
         if self._is_help(text):
             self._show_help()
@@ -609,37 +621,52 @@ class VoiceSessionController:
 
     def _do_pos_add(self, name: str, qty: float) -> None:
         section = (self.get_section() or "").lower()
-        matches = resolve_item_name(self.ctx.items, name, limit=5)
+        matches = resolve_item_name(self.ctx.items, name, limit=8)
+        if not matches:
+            # second chance: raw list search
+            try:
+                matches = list(self.ctx.items.list(search=name.strip(), limit=8) or [])
+            except Exception:
+                matches = []
         if not matches:
             self._reply(reply_for("pos_add", ok=False, name=name, memory=self.memory, section=section), kind="warning")
             return
         chosen = matches[0]
         resolved = str(chosen.get("name") or name)
-        item_id = int(chosen.get("id") or 0) or None
+        try:
+            item_id = int(chosen.get("id") or 0) or None
+        except Exception:
+            item_id = None
         result = type(
             "R",
             (),
             {
                 "action": "pos_add",
-                "data": {"name": resolved, "qty": qty, "item_id": item_id},
-                "message": f"إضافة {resolved} × {qty:g}",
+                "data": {"name": resolved, "qty": float(qty or 1), "item_id": item_id},
+                "message": f"إضافة {resolved} × {float(qty or 1):g}",
                 "target": "pos",
                 "ok": True,
             },
         )()
+        applied = False
         if section == "pos":
-            # Prefer direct id add when POS hook can use name still
-            self._apply_pos(result)
-            if item_id and hasattr(self.ctx, "_pos_apply_voice"):
-                pass
+            applied = self._apply_pos(result)
+            if not applied and item_id is not None:
+                # Direct fallback if hook missing mid-rebuild
+                try:
+                    setattr(self.ctx, "_pending_voice_command", result)
+                except Exception:
+                    pass
         else:
             self._queue_and_go_pos(result)
-        self.memory.note(last_item_name=resolved, last_item_id=item_id, last_qty=qty, last_action="pos_add")
+            applied = True
+        self.memory.note(last_item_name=resolved, last_item_id=item_id, last_qty=float(qty or 1), last_action="pos_add")
         self.memory.cart_adds += 1
         self._reply(
-            reply_for("pos_add", ok=True, name=resolved, qty=qty, memory=self.memory, section=section),
+            reply_for("pos_add", ok=True, name=resolved, qty=float(qty or 1), memory=self.memory, section=section),
             kind="success",
         )
+
 
     def _try_fuzzy_pos_add(self, text: str) -> bool:
         rows = resolve_item_name(self.ctx.items, text.strip(), limit=5)
@@ -659,18 +686,19 @@ class VoiceSessionController:
         except Exception as exc:
             self._reply(str(exc), kind="error")
 
-    def _apply_pos(self, result) -> None:
+    def _apply_pos(self, result) -> bool:
         apply = getattr(self.ctx, "_pos_apply_voice", None)
         if callable(apply):
             try:
                 apply(result)
-                return
+                return True
             except Exception:
                 pass
         try:
             setattr(self.ctx, "_pending_voice_command", result)
         except Exception:
             pass
+        return False
 
     def _greeting(self) -> str:
         section = (self.get_section() or "dashboard").lower()
@@ -709,9 +737,8 @@ class VoiceSessionController:
 
     def _reply(self, text: str, *, kind: str = "info") -> None:
         self._push_turn("nano", text)
-        # Tiny caption under bubble icon (optional)
         try:
-            self._bubble_tip.value = (text or "")[:18]
+            self._bubble_tip.value = (text or "")[:22]
             self._bubble_tip.visible = bool(text)
         except Exception:
             pass
@@ -720,9 +747,11 @@ class VoiceSessionController:
             self._notify_quiet(text, kind=kind)
         except Exception:
             pass
-        if self.tts_enabled:
-            self._last_spoken = text or ""
-        self._speak(text)
+        if self.tts_enabled and text:
+            # Any schedule_relisten while speaking will wait until TTS finishes
+            self._pending_relisten = True
+            self._pending_relisten_delay = 0.45
+            self._speak(text)
 
     def _show_help(self) -> None:
         section = (self.get_section() or "dashboard").lower()
@@ -790,28 +819,32 @@ class VoiceSessionController:
         if not self.tts_enabled or not self.native_files or not text:
             return
         spoken = (text or "").strip()
-        if len(spoken) > 120:
-            spoken = spoken[:117] + "…"
+        # Allow long full replies; native layer waits until utterance ends
         self._last_spoken = spoken
+        self._speaking = True
 
         async def _go():
             try:
-                await self.native_files.speech_stop_speak()
-            except Exception:
-                pass
-            try:
+                try:
+                    await self.native_files.speech_stop_speak()
+                except Exception:
+                    pass
                 await self.native_files.speech_speak(spoken, language="ar")
             except Exception:
                 pass
             finally:
-                # Speak finished (or failed) — don't add a second full delay
+                self._speaking = False
                 self._last_spoken = ""
+                if self._pending_relisten and self.active:
+                    self._pending_relisten = False
+                    delay = self._pending_relisten_delay
+                    self._schedule_relisten(delay)
 
         try:
             if hasattr(self.page, "run_task"):
                 self.page.run_task(_go)
         except Exception:
-            pass
+            self._speaking = False
 
 
     def _safe_update(self) -> None:

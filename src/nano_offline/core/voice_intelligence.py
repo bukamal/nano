@@ -75,65 +75,86 @@ def reply_for(
     memory: VoiceMemory | None = None,
     section: str = "",
 ) -> str:
-    """Pick a short natural Arabic reply; optionally append a smart hint."""
+    """Natural Arabic reply — longer, conversational, cashier-friendly."""
     q = f"{qty:g}" if qty is not None else ""
     pool: list[str]
     if intent == "greet":
         pool = [
-            f"{hour_greeting()}. أنا معك — قل أمرك.",
-            f"{hour_greeting()}. جاهز للأوامر الصوتية.",
-            f"{hour_greeting()}. قل «مساعدة» إن احتجت.",
+            f"{hour_greeting()}. أنا مساعدك في نانو، معك الآن في مكالمة مستمرة. قل أمرك بشكل طبيعي: بيع سريع، إضافة مواد، الاستعلام عن الرصيد، أو أي قسم تريده.",
+            f"{hour_greeting()}. جاهز أساعدك خطوة بخطوة. يمكنك القول مثلاً: أضف سكر للسلة، كم باقي الأرز، مبيعات اليوم، أو افتح الجرد.",
         ]
     elif intent == "pos_add" and ok:
         pool = [
-            f"تم. أضفت {name}" + (f" × {q}" if q else "") + ".",
-            f"حاضر. {name}" + (f" كمية {q}" if q else "") + " في السلة.",
-            f"تمام، {name} صارت في الكارت" + (f" ({q})" if q else "") + ".",
+            f"حاضر. أضفت «{name}»" + (f" بكمية {q}" if q else "") + " إلى سلة نقطة البيع. يمكنك إضافة مادة أخرى، أو قول كمان واحد، أو ادفع لإتمام البيع.",
+            f"تم بنجاح. «{name}»" + (f" × {q}" if q else "") + " صارت في الكارت. إذا حابب تعدّل الكمية قل: خلي الكمية ثم الرقم، أو اسأل شو بالسلة.",
         ]
     elif intent == "pos_add" and not ok:
         pool = [
-            f"ما لقيت مادة باسم «{name}». جرّب اسماً أقرب.",
-            f"ما في تطابق لـ «{name}» بالمخزون.",
+            f"عذراً، لم أجد في المخزون مادة تطابق «{name}». جرّب اسماً أقرب، أو أنشئ المادة بقول: أنشئ مادة {name} بسعر ثم الرقم.",
+            f"ما قدرت أطابق «{name}» مع المواد الحالية. تأكد من الاسم، أو افتح المواد وراجع التسمية.",
         ]
     elif intent == "pos_pay":
-        pool = ["فتحت شاشة الدفع.", "يلا على الدفع.", "شاشة التحصيل جاهزة."]
+        pool = [
+            "فتحت شاشة الدفع في نقطة البيع. راجع الإجمالي ثم أكمل التحصيل من الشاشة.",
+            "تم. شاشة إتمام الدفع جاهزة أمامك الآن.",
+        ]
     elif intent == "pos_clear_ask":
-        pool = ["متأكد تفرّغ السلة؟ قل نعم أو لا.", "تأكيد مسح السلة؟ نعم أو لا."]
+        pool = [
+            "هل تريد تفريغ سلة المبيعات بالكامل؟ هذا سيحذف كل البنود. قل نعم للتأكيد أو لا للإلغاء.",
+        ]
     elif intent == "pos_clear_done":
-        pool = ["اتفرّغت السلة.", "السلة فاضية الآن."]
+        pool = [
+            "تم تفريغ السلة بالكامل. السلة فارغة الآن ويمكنك البدء ببيع جديد.",
+        ]
     elif intent == "cancelled":
-        pool = ["تم الإلغاء.", "ماشي، ما نفّذت شيء.", "أُلغي الأمر."]
+        pool = [
+            "حسناً، ألغيت الأمر ولم أنفّذ أي تغيير.",
+            "تم الإلغاء. المكالمة ما زالت مستمرة إذا احتجت أمراً آخر.",
+        ]
     elif intent == "navigate":
         pool = [
-            f"فتحت {extra or 'القسم'}.",
-            f"تم — {extra or 'القسم'}.",
-            f"روحنا على {extra or 'القسم'}.",
+            f"تم. فتحت قسم {extra or 'المطلوب'} من أجلك. يمكنك متابعة الأوامر الصوتية مباشرة.",
+            f"روّحت على {extra or 'القسم'}. قل لي ماذا تريد أن نفعل هنا.",
         ]
     elif intent == "stock":
-        pool = [extra or "هذا رصيد المادة."]
+        pool = [extra or "هذا ملخص رصيد المادة من المخزون."]
     elif intent == "pulse":
-        pool = [extra or "هذا ملخص سريع."]
+        pool = [extra or "هذا ملخص سريع لوضع المحل."]
     elif intent == "crisis_ask":
-        pool = ["تأكيد تفعيل وضع الطوارئ؟ نعم أو لا."]
+        pool = [
+            "طلبت تفعيل وضع الطوارئ، وسيتم تجميد سعر الصرف. هل تؤكد؟ قل نعم أو لا.",
+        ]
     elif intent == "crisis_on":
-        pool = ["وضع الطوارئ شغال وسعر الصرف مجمّد."]
+        pool = [
+            "تم تفعيل وضع الطوارئ. سعر الصرف مجمّد حالياً حتى تلغي الوضع بقول: إلغاء الطوارئ.",
+        ]
     elif intent == "crisis_off":
-        pool = ["أُلغي وضع الطوارئ."]
+        pool = [
+            "أُلغي وضع الطوارئ وعاد التعامل مع سعر الصرف كالمعتاد.",
+        ]
     elif intent == "help":
-        pool = [extra or "قل بيع سريع، جرد، أضف سكر، كم باقي الأرز، ملخص، أو إيقاف."]
+        pool = [extra or (
+            "يمكنك القول: بيع سريع، جرد، مواد، عملاء، مالية، تقارير. "
+            "في الكاشير: أضف اسم المادة، كمان واحد، شو بالسلة، ادفع، احذف الأخير. "
+            "استعلام: كم باقي مع الاسم، مبيعات اليوم، كم الصندوق، ملخص. "
+            "وللإنهاء: إيقاف."
+        )]
     elif intent == "unknown":
         pool = [
-            "ما فهمت تمام. قل «مساعدة» أو أعد الصياغة.",
-            "ممكن تعيد الأمر؟ أو قل مساعدة.",
-            "الأمر غير واضح لي بعد.",
+            "لم أفهم الطلب بوضوح. يمكنك إعادة صياغته، أو قول مساعدة لعرض أمثلة الأوامر المتاحة.",
+            "عذراً، الصياغة غير واضحة لي. جرّب أمراً أقصر مثل: بيع سريع، أو أضف ثم اسم المادة.",
         ]
     elif intent == "stop":
-        pool = ["مع السلامة. انتهت المكالمة.", "تم إنهاء الجلسة الصوتية."]
-    else:
+        pool = [
+            "حسناً، أنهي المكالمة الصوتية الآن. يمكنك بدؤها لاحقاً من الزر في الأعلى.",
+        ]
+    elif intent == "message":
         pool = [extra or "تم."]
+    else:
+        pool = [extra or "تم تنفيذ الطلب."]
 
     text = random.choice(pool)
-    if extra and intent in ("stock", "pulse", "help") and extra not in text:
+    if extra and intent in ("stock", "pulse", "help", "message") and extra not in text:
         text = extra
 
     hint = _next_hint(intent, ok=ok, memory=memory, section=section, name=name)
@@ -152,14 +173,14 @@ def _next_hint(
 ) -> str:
     if intent == "pos_add" and ok:
         if memory and memory.cart_adds >= 2:
-            return "تقدر تقول ادفع متى ما خلصت."
-        return "زيد مادة ثانية أو قل ادفع."
-    if intent == "navigate" and section == "pos":
-        return "قل اسم المادة لإضافتها."
+            return "عندما تنتهي قل ادفع لإتمام العملية."
+        return "يمكنك إضافة مادة أخرى الآن أو مراجعة السلة."
+    if intent == "navigate" and (section or "") == "pos":
+        return "قل اسم المادة مباشرة لإضافتها إلى السلة."
     if intent == "stock" and name:
-        return "بدك تفتح البيع السريع؟"
-    if intent == "unknown" and section == "pos":
-        return "جرّب اسم المادة مباشرة."
+        return "إذا رغبت بالبيع قل بيع سريع ثم اسم المادة."
+    if intent == "unknown" and (section or "") == "pos":
+        return "في نقطة البيع يكفي أن تقول اسم المادة."
     return ""
 
 
@@ -237,3 +258,38 @@ __all__ = [
     "is_no",
     "hour_greeting",
 ]
+
+
+# قاموس عبارات حديث عام → نية مبسطة (للردود والتحويل الخفيف)
+CONVERSE_DICT: list[tuple[tuple[str, ...], str]] = [
+    (("مرحبا", "هلا", "السلام", "سلام", "صباح", "مساء"), "greet"),
+    (("شكرا", "مشكور", "تسلم", "يعطيك العافية"), "thanks"),
+    (("كيفك", "كيف حالك", "شو اخبارك"), "howto"),
+    (("ماذا تستطيع", "وش تقدر", "شو بتقدر", "امثله", "أمثلة"), "help"),
+    (("كرر", "عيد", "نفس الأمر", "كمان مرة"), "repeat"),
+    (("تراجع", "الغاء الاخير", "إلغاء الأخير"), "undo"),
+]
+
+
+def match_converse(text: str) -> str | None:
+    t = _norm(text)
+    for keys, intent in CONVERSE_DICT:
+        if any(k in t for k in keys):
+            return intent
+    return None
+
+
+def reply_converse(intent: str) -> str:
+    if intent == "greet":
+        return reply_for("greet")
+    if intent == "thanks":
+        return "العفو، موجود لأي أمر تاني في المحل."
+    if intent == "howto":
+        return "الحمد لله. خلّينا نكمل شغل المحل — قل أمرك."
+    if intent == "help":
+        return reply_for("help")
+    if intent == "repeat":
+        return "تمام، سأعيد آخر إجراء إن أمكن."
+    if intent == "undo":
+        return "حسناً، سأتراجع عن آخر إضافة في السلة إن وُجدت."
+    return ""

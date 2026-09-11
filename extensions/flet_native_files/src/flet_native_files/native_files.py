@@ -453,7 +453,7 @@ class NativeFiles(Control):
         """Speak Arabic text via Android TTS and wait until utterance finishes."""
         try:
             # ~90ms/char estimate + margin; capped so a hang cannot block forever
-            approx = max(3.0, min(14.0, (len(text or "") * 0.09) + 1.5))
+            approx = max(4.0, min(45.0, (len(text or "") * 0.14) + 2.5))
             raw = await self.invoke_method_async(
                 "speech_speak",
                 {"text": text or "", "language": language or "ar"},
