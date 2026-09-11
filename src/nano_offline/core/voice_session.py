@@ -43,15 +43,17 @@ class VoiceSessionController:
         notify: Callable[..., None] | None = None,
         get_section: Callable[[], str] | None = None,
         native_files=None,
-        tts_enabled: bool = True,
+        tts_enabled: bool = False,
     ) -> None:
         self.page = page
         self.ctx = ctx
         self.navigate = navigate
-        self.notify = notify or (lambda text, **kw: toast(page, text, **kw))
+        # Silent by default: continuous AI-call feel without chimes/TTS.
+        self._raw_notify = notify
         self.get_section = get_section or (lambda: "dashboard")
         self.native_files = native_files
         self.tts_enabled = tts_enabled
+        self.silent = True  # no toast tones during the call
 
         self.active = False
         self.listening = False
@@ -148,6 +150,27 @@ class VoiceSessionController:
             on_click=self.toggle,
         )
 
+
+    def _notify_quiet(self, text: str, *, kind: str = "info") -> None:
+        """Visual feedback only — no success/error chimes during the call."""
+        if self._raw_notify is not None:
+            try:
+                self._raw_notify(text, kind=kind)
+                return
+            except TypeError:
+                pass
+            except Exception:
+                pass
+        try:
+            # sound_kind="" is not enough; toast always plays kind tone.
+            # Use toast with a no-op by temporarily skipping sound via empty overlay message only:
+            toast(self.page, text, kind=kind, duration=1800, sound_kind="__silent__")
+        except Exception:
+            try:
+                toast(self.page, text, kind=kind, duration=1800)
+            except Exception:
+                pass
+
     def toggle(self, _e=None) -> None:
         if self.active:
             self.stop(reason="toggle")
@@ -163,7 +186,7 @@ class VoiceSessionController:
         self._set_listening_visual(False)
         self.memory = VoiceMemory()
         self.memory.last_section = self.get_section() or "dashboard"
-        greet = reply_for("greet", section=self.memory.last_section or "")
+        greet = "معك. تفضل."
         self.fab.icon = ft.Icons.CALL_END_ROUNDED
         self.fab.bgcolor = Colors.DANGER
         self.fab.tooltip = "إنهاء المكالمة"
@@ -177,7 +200,7 @@ class VoiceSessionController:
             pass
         self._push_turn("nano", greet)
         self._safe_update()
-        self.notify(greet, kind="info")
+        self._notify_quiet(greet, kind="info")
         self._listen()
 
     def stop(self, reason: str = "stop") -> None:
@@ -202,7 +225,7 @@ class VoiceSessionController:
             pass
         self._safe_update()
         if reason not in ("silent",):
-            self.notify(reply_for("stop"), kind="info")
+            self._notify_quiet("انتهت المكالمة", kind="info")
 
     def _listen(self) -> None:
         if not self.active or self.listening:
@@ -243,16 +266,22 @@ class VoiceSessionController:
             self._set_listening_visual(False)
             soft = any(
                 x in (msg or "")
-                for x in ("لم يُلتقط", "لم يُفهم", "انتهى وقت", "NO_MATCH", "SPEECH_TIMEOUT", "timeout", "permission")
+                for x in ("لم يُلتقط", "لم يُفهم", "انتهى وقت", "NO_MATCH", "SPEECH_TIMEOUT", "timeout", "permission", "أُلغي")
             )
-            self._hint.value = (msg or "…")[:70]
+            try:
+                self._bubble_tip.value = ""
+                self._bubble_tip.visible = False
+            except Exception:
+                pass
             self._safe_update()
             if not self.active:
                 return
             if "permission" in (msg or "").lower() or "إذن" in (msg or ""):
+                self._notify_quiet("يلزم إذن الميكروفون", kind="warning")
                 self.stop(reason="permission")
                 return
-            self._schedule_relisten(0.85 if soft else 1.1)
+            # Soft miss: stay in the call silently, listen again (AI-call style)
+            self._schedule_relisten(0.4 if soft else 0.7)
 
         def on_partial(text: str):
             if text:
@@ -271,20 +300,22 @@ class VoiceSessionController:
             on_error(str(exc))
 
     def _schedule_relisten(self, delay: float) -> None:
-        """Restart mic after `delay`, extended while TTS may still be speaking."""
+        """Restart mic quickly for continuous AI-call feel (no dead air)."""
         if not self.active:
             return
         extra = 0.0
         if self.tts_enabled and self._last_spoken:
-            # Give the engine time to finish the last reply before opening the mic.
             extra = min(12.0, max(1.4, len(self._last_spoken) * 0.095))
-            self._last_spoken = ""  # consume once
+            self._last_spoken = ""
+        # Without TTS: short gap only so the call feels continuous
+        base = 0.35 if not self.tts_enabled else delay
+        wait = max(0.25, (delay if self.tts_enabled else min(delay, base)) + extra)
 
         def _go():
             if self.active and not self.listening:
                 self._listen()
 
-        threading.Timer(max(0.25, delay + extra), _go).start()
+        threading.Timer(wait, _go).start()
 
     def _execute(self, text: str) -> None:
         section = (self.get_section() or "dashboard").lower()
@@ -686,7 +717,7 @@ class VoiceSessionController:
             pass
         self._safe_update()
         try:
-            self.notify(text, kind=kind)
+            self._notify_quiet(text, kind=kind)
         except Exception:
             pass
         if self.tts_enabled:

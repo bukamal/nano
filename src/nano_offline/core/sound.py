@@ -188,12 +188,10 @@ async def _play_async(native_files, kind: str, volume: float) -> None:
         print(f"nano sound playback failed: {exc!r}")
 
 
-def play(page: ft.Page, kind: SoundKind) -> None:
-    """Play the tone for ``kind`` if the sound system and this specific
-    kind are both enabled in settings. No-op if attach_context() was never
-    called for this page, the native bridge hasn't loaded that tone yet,
-    the kind is muted, or the same kind just played within the debounce
-    window (see _DEBOUNCE_SECONDS)."""
+def play(page: ft.Page, kind: SoundKind | str) -> None:
+    """Play the tone for ``kind`` if enabled. ``__silent__`` / mute skips audio."""
+    if kind in (None, "", "__silent__", "silent", "none", "mute"):
+        return
     ctx = getattr(page, _CTX_ATTR, None)
     native_files = getattr(page, _NATIVE_FILES_ATTR, None)
     if ctx is None or native_files is None:
