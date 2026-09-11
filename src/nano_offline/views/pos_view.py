@@ -1092,6 +1092,14 @@ class POSCenter:
                 _pos_set_listening(False)
                 return
             _pos_set_listening(True)
+            # Auto-register the Android native STT engine (the POS mic used
+            # to run on the stub engine that never captured audio).
+            try:
+                from nano_offline.core.voice_command import AndroidNativeVoiceEngine, get_engine
+                if self.native_files is not None and not isinstance(get_engine(), AndroidNativeVoiceEngine):
+                    voice_cmd.set_engine(AndroidNativeVoiceEngine(self.native_files, page=self.page))
+            except Exception:
+                pass
             try:
                 voice_cmd.listen_once(
                     language="ar-SY",

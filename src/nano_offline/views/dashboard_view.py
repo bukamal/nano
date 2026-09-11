@@ -1376,11 +1376,17 @@ class DashboardCenter:
         def _start_listen():
             _set_listening(True)
             try:
-                if getattr(self.page, "web", False) or str(getattr(self.page, "platform", "")).lower() == "web":
-                    try:
-                        voice_cmd.set_engine(voice_cmd.WebSpeechVoiceEngine(self.page))
-                    except Exception:
-                        pass
+                # Auto-register the Android native STT engine. (The former
+                # WebSpeechVoiceEngine branch was removed: flet 0.28.3's Page
+                # has no run_javascript, so browser STT could never return
+                # results — see core/voice_command.py removal note.)
+                try:
+                    from nano_offline.core.voice_command import AndroidNativeVoiceEngine, get_engine
+                    nf = getattr(self, "native_files", None)
+                    if nf is not None and not isinstance(get_engine(), AndroidNativeVoiceEngine):
+                        voice_cmd.set_engine(AndroidNativeVoiceEngine(nf, page=self.page))
+                except Exception:
+                    pass
                 voice_cmd.listen_once(
                     language="ar-SY",
                     on_partial=on_voice_partial,

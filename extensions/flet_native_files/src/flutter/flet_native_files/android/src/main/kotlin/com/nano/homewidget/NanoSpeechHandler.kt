@@ -172,7 +172,17 @@ class NanoSpeechHandler(
                 recognizer = rec
                 rec.setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {}
-                    override fun onBeginningOfSpeech() {}
+
+                    override fun onBeginningOfSpeech() {
+                        // Barge-in: the moment real speech starts, kill any
+                        // in-flight TTS so it cannot feed back into the mic
+                        // and the user is never talked over.
+                        try {
+                            tts?.stop()
+                        } catch (_: Exception) {
+                        }
+                    }
+
                     override fun onRmsChanged(rmsdB: Float) {}
                     override fun onBufferReceived(buffer: ByteArray?) {}
                     override fun onEndOfSpeech() {}
@@ -199,6 +209,13 @@ class NanoSpeechHandler(
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                     putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, appContext.packageName)
+                    // Silence-based endpointing (VAD): end the utterance after
+                    // a short silence instead of always waiting out the full
+                    // timeout — this is what makes the continuous "مكالمة"
+                    // feel snappy for short commands like «ادفع».
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3000L)
+                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
                 }
                 rec.startListening(intent)
 

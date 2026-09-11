@@ -107,6 +107,16 @@ class AppContext:
         quick_commands_svc = QuickCommandService(db, items=items_repo)
         from nano_offline.services.voice_learning_service import VoiceLearningService
         voice_learning_svc = VoiceLearningService(db)
+        # Quality-metrics + NLU-feedback loop: the parser logs every parse
+        # outcome and feeds successful utterances back into the on-device
+        # classifier through this reference (audit items #1 + #8).
+        quick_commands_svc.voice_learning = voice_learning_svc
+        # Warm-start the classifier with everything learned on this device
+        try:
+            from nano_offline.core.voice_nlu import load_learned_memory
+            load_learned_memory(voice_learning_svc)
+        except Exception:
+            pass
         owner_pulse_svc = OwnerPulseService(
             db,
             dashboard=dashboard_svc,

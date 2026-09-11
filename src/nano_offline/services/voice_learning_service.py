@@ -77,6 +77,18 @@ class VoiceLearningService:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_voice_unknown_norm ON voice_unknown_log(phrase_norm)"
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS voice_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts TEXT DEFAULT CURRENT_TIMESTAMP,
+                    source TEXT,
+                    ok INTEGER NOT NULL,
+                    action TEXT,
+                    confidence REAL
+                )
+                """
+            )
 
     # ---- phrases (commands) -----------------------------------------------
 
@@ -300,6 +312,35 @@ class VoiceLearningService:
             conn.execute("DELETE FROM voice_phrase_memory")
             conn.execute("DELETE FROM voice_item_alias")
             conn.execute("DELETE FROM voice_unknown_log")
+
+    # ---- quality metrics (audit item #8) --------------------------------
+
+    def log_command(self, *, ok: bool, action: str | None = None,
+                    source: str = "voice", confidence: float | None = None) -> None:
+        """Record one parse outcome so the admin panel can show real quality."""
+        try:
+            with self.db.transaction() as conn:
+                conn.execute(
+                    "INSERT INTO voice_metrics(source, ok, action, confidence) VALUES(?,?,?,?)",
+                    (source, 1 if ok else 0, action, confidence),
+                )
+        except Exception:
+            pass
+
+    def quality_stats(self, days: int = 7) -> dict:
+        """Success rate over the last N days (None when no data yet)."""
+        try:
+            with self.db.connect() as conn:
+                row = conn.execute(
+                    """SELECT COUNT(*) total, SUM(ok) good FROM voice_metrics
+                       WHERE ts >= datetime('now', ?)""",
+                    (f"-{int(days)} days",),
+                ).fetchone()
+                total = int(row["total"] or 0)
+                good = int(row["good"] or 0)
+        except Exception:
+            total = good = 0
+        return {"total": total, "ok": good, "success_rate": (good / total) if total else None}
 
 
 __all__ = ["VoiceLearningService", "_norm"]

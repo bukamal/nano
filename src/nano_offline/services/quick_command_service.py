@@ -19,6 +19,13 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from nano_offline.core.voice_nlu import (
+    WORD_NUMBERS,
+    analyze_full,
+    learn_from_phrase,
+    parse_qty as _nlu_parse_qty,
+    strip_trailing_qty_words as _nlu_strip_qty,
+)
 from nano_offline.core.voice_intelligence import resolve_item_name
 
 if TYPE_CHECKING:
@@ -110,8 +117,54 @@ class QuickCommandService:
     def __init__(self, db: "Database", *, items: "ItemRepository | None" = None) -> None:
         self.db = db
         self.items = items
+        # Wired by AppContext.create() after both services exist; enables
+        # the quality-metrics loop (success rate per parse). Optional so
+        # standalone construction (tests, tooling) never crashes.
+        self.voice_learning = None
 
     def parse(self, text: str) -> CommandResult:
+        """Unified analyzer entry point (recommendation #4).
+
+        NLU (char-ngram classifier + slot extraction) first, legacy regex
+        as confirm/override — see ``voice_nlu.analyze_full`` for the merge
+        rules. Every caller (typed command bar, POS mic, voice session)
+        goes through here, so all three share ONE intent contract.
+        """
+        from nano_offline.core import voice_nlu
+        if voice_nlu.get_classifier().stale:
+            voice_nlu.get_classifier().fit()
+        result = analyze_full(text, legacy_parse=self._parse_legacy, stock_handler=self._stock_query)
+        # NLU materializes stock_query with a name slot only — resolve it
+        # against the DB here so EVERY caller gets the same rich result.
+        if result.ok and result.action == "stock_query":
+            name = ((result.data or {}).get("name") or result.message or "").strip()
+            if name:
+                result = self._stock_query(name)
+        # Quality metrics (audit item #8): every parse outcome is recorded
+        # so the admin panel can show the real success rate over time.
+        try:
+            if self.voice_learning is not None:
+                conf = (result.data or {}).get("conf") if isinstance(result.data, dict) else None
+                self.voice_learning.log_command(
+                    ok=bool(result.ok and result.action != "unknown"),
+                    action=result.action,
+                    source="command",
+                    confidence=float(conf) if conf is not None else None,
+                )
+        except Exception:
+            pass
+        # Feedback loop (recommendation #1): successful parses train the
+        # on-device classifier; unknowns are already logged by the session.
+        if result.ok and result.action not in ("unknown", "message"):
+            try:
+                learn_from_phrase(result.action, text or "")
+            except Exception:
+                pass
+        return result
+
+    def _parse_legacy(self, text: str) -> CommandResult:
+        """Original regex keyword parser — kept intact as the exact-match
+        layer the unified analyzer confirms/falls back to."""
         raw = (text or "").strip()
         if not raw:
             return CommandResult(ok=False, action="unknown", message="اكتب أمراً مثل: بيع سريع، جرد، كم باقي السكر")
@@ -159,6 +212,10 @@ class QuickCommandService:
                 oq = self._parse_qty(qm.group(1))
                 rest = (rest[:qm.start()] + rest[qm.end():]).strip(" ،,")
             name = rest.strip()
+            # «انشاء مادة لبنة» — drop the redundant leading «مادة»
+            name_toks = name.split()
+            if len(name_toks) >= 2 and name_toks[0] in ("مادة", "ماده", "صنف", "منتج"):
+                name = " ".join(name_toks[1:]).strip()
             if name:
                 return CommandResult(
                     ok=True,
@@ -229,8 +286,10 @@ class QuickCommandService:
         )
         if pos_add:
             name = (pos_add.group("name") or "").strip(" ؟?،,")
-            # Defer to multi-item parser when conjunctions present
-            if re.search(r"\s+و\s+|،|,", name):
+            # Defer to multi-item parser when conjunctions present — including
+            # the NORMAL Arabic glued form «سكر وحليب» (و attached to the
+            # next word, no space after it).
+            if re.search(r"\s+و|،|,", name):
                 pass  # fall through
             else:
                 qty_raw = pos_add.group("qty")
@@ -238,6 +297,11 @@ class QuickCommandService:
                 if qty_raw:
                     qty = self._parse_qty(qty_raw)
                 name2, qty2 = self._strip_trailing_qty_words(name, qty)
+                # leading written form «ضيف اثنين حليب» (numeral first)
+                toks = name2.split()
+                if len(toks) >= 2 and toks[0] in WORD_NUMBERS and qty2 == qty:
+                    name2 = " ".join(toks[1:]).strip()
+                    qty2 = float(WORD_NUMBERS[toks[0]])
                 if name2:
                     return CommandResult(
                         ok=True,
@@ -271,18 +335,24 @@ class QuickCommandService:
             normalized,
             flags=re.IGNORECASE,
         )
-        if multi and (" و" in multi.group(1) or " و " in multi.group(1) or "،" in multi.group(1)):
+        if multi and (" و" in multi.group(1) or "،" in multi.group(1)):
             raw_list = multi.group(1)
-            parts = re.split(r"\s+و\s+|،|,", raw_list)
+            # Split on «و» as a conjunction: standalone, glued («وحليب»),
+            # or spaced — but never inside a word (عنوان، جواز).
+            parts = re.split(r"\s+و(?=\S)|\s+و\s+|[،,]", raw_list)
             parts = [p.strip(" ؟?،,") for p in parts if p.strip(" ؟?،,")]
             if len(parts) >= 2:
                 items = []
                 for part in parts[:6]:
-                    # optional leading qty
+                    # optional leading qty (digit or written form «اثنين رز»)
                     m2 = re.match(r"^(?P<qty>[\d٠-٩]+(?:[.,]\d+)?)\s+(?P<name>.+)$", part)
                     if m2:
                         items.append({"name": m2.group("name").strip(), "qty": self._parse_qty(m2.group("qty"))})
                     else:
+                        toks = part.split()
+                        if len(toks) >= 2 and toks[0] in WORD_NUMBERS:
+                            items.append({"name": " ".join(toks[1:]).strip(), "qty": float(WORD_NUMBERS[toks[0]])})
+                            continue
                         name2, qty2 = self._strip_trailing_qty_words(part, 1.0)
                         items.append({"name": name2, "qty": qty2})
                 if items:
@@ -348,35 +418,15 @@ class QuickCommandService:
         )
 
 
+    # Canonical implementations now live in core.voice_nlu (single source
+    # of truth shared with the classifier); these thin wrappers preserve
+    # the historical public API used by voice_session and views.
     @staticmethod
     def _parse_qty(raw: str) -> float:
-        arabic_digits = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
-        cleaned = (raw or "").translate(arabic_digits).replace(",", ".").strip()
-        try:
-            v = float(cleaned)
-            return v if v > 0 else 1.0
-        except ValueError:
-            return 1.0
+        v = _nlu_parse_qty(raw)
+        return float(v) if v is not None else 1.0
 
-    @staticmethod
-    def _strip_trailing_qty_words(name: str, qty: float) -> tuple[str, float]:
-        """Handle phrases like «سكر اثنين» / «رز ثلاثة»."""
-        word_qty = {
-            "واحد": 1, "واحده": 1, "واحدة": 1,
-            "اثنين": 2, "اثنان": 2, "ثنين": 2, "زوج": 2,
-            "ثلاثه": 3, "ثلاثة": 3, "ثلاث": 3,
-            "اربعه": 4, "أربعة": 4, "اربع": 4,
-            "خمسه": 5, "خمسة": 5, "خمس": 5,
-            "سته": 6, "ستة": 6, "ست": 6,
-            "سبعه": 7, "سبعة": 7,
-            "ثمانيه": 8, "ثمانية": 8,
-            "تسعه": 9, "تسعة": 9,
-            "عشره": 10, "عشرة": 10,
-        }
-        parts = (name or "").strip().split()
-        if len(parts) >= 2 and parts[-1] in word_qty:
-            return " ".join(parts[:-1]).strip(), float(word_qty[parts[-1]])
-        return (name or "").strip(), qty
+    _strip_trailing_qty_words = staticmethod(_nlu_strip_qty)
 
     def _stock_query(self, name_query: str) -> CommandResult:
         name_query = name_query.strip()

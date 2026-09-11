@@ -1733,11 +1733,65 @@ class AdminCenter:
             if not unknowns:
                 voice_unknowns_list.controls.append(ft.Text("لا عبارات معلّقة.", size=12, color=Colors.TEXT_MUTED))
             for row in unknowns:
+                raw_phrase = str(row.get("phrase_raw") or "")
+                def _promote_unknown(_e=None, r=raw_phrase):
+                    # Promotion (audit item #5): turn a recurring unknown
+                    # phrase into a real command instead of only viewing it.
+                    act_dd = ft.Dropdown(
+                        label="الإجراء",
+                        options=[ft.dropdown.Option(k) for k in (
+                            "navigate", "pos_add", "pos_pay", "pos_clear",
+                            "pos_remove_last", "pos_cart_summary", "today_sales",
+                            "cash_status", "item_create", "tts_mute", "tts_unmute",
+                        )],
+                        value="navigate",
+                    )
+                    target_field = SelectAllTextField(label="الهدف (للتنقل: pos, items, finance…)")
+                    phrase_field = SelectAllTextField(label="العبارة", value=r)
+                    def _confirm_promote(_ev=None):
+                        try:
+                            learn.teach_phrase(
+                                (phrase_field.value or r).strip(),
+                                action=(act_dd.value or "navigate"),
+                                target=(target_field.value or "").strip() or None,
+                            )
+                            self.page.close(dlg2)
+                            refresh_voice_memory()
+                            self._notify(f"حوّلت «{r}» إلى أمر دائم", kind="success")
+                        except Exception as exc:
+                            self._notify_error(str(exc))
+                    dlg2 = ft.AlertDialog(
+                        modal=True,
+                        title=ft.Text("تحويل عبارة غير مفهومة إلى أمر"),
+                        content=ft.Column([phrase_field, act_dd, target_field], spacing=10, tight=True),
+                        actions=[
+                            ft.TextButton("إلغاء", on_click=lambda _: self.page.close(dlg2)),
+                            ft.FilledButton("حفظ الأمر", on_click=_confirm_promote),
+                        ],
+                    )
+                    self.page.open(dlg2)
+                def _delete_unknown(_e=None, r=raw_phrase):
+                    try:
+                        with self.ctx.db.transaction() as conn:
+                            conn.execute("DELETE FROM voice_unknown_log WHERE phrase_raw=?", (r,))
+                        refresh_voice_memory()
+                    except Exception as exc:
+                        self._notify_error(str(exc))
                 voice_unknowns_list.controls.append(
-                    ft.Text(
-                        f"• {row.get('phrase_raw')} ({int(row.get('hits') or 1)}×)"
-                        + (f" — {row.get('section')}" if row.get("section") else ""),
-                        size=12, color=Colors.TEXT_SECONDARY,
+                    ft.Container(
+                        ft.Row(
+                            [
+                                ft.Text(
+                                    f"• {raw_phrase} ({int(row.get('hits') or 1)}×)"
+                                    + (f" — {row.get('section')}" if row.get("section") else ""),
+                                    size=12, color=Colors.TEXT_SECONDARY, expand=True,
+                                ),
+                                ft.IconButton(ft.Icons.BOLT_ROUNDED, icon_color=Colors.PRIMARY, tooltip="تحويل إلى أمر", on_click=_promote_unknown),
+                                ft.IconButton(ft.Icons.DELETE_OUTLINE, icon_color=Colors.DANGER, tooltip="حذف", on_click=_delete_unknown),
+                            ],
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        padding=6, border=ft.border.all(1, Colors.BORDER), border_radius=8,
                     )
                 )
             self.page.update()

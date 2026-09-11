@@ -25,6 +25,7 @@ from nano_offline.core.voice_intelligence import (
     is_yes, is_no, match_converse, reply_converse,
 )
 from nano_offline.core.voice_guide import match_guide, guide_for_section
+from nano_offline.core.voice_nlu import normalize_ar
 
 
 @dataclass
@@ -64,6 +65,8 @@ class VoiceSessionController:
         self.turns: list[Turn] = []
         self._pending_followup: dict[str, Any] | None = None
         self._pending_confirm: dict[str, Any] | None = None
+        self._pending_disambiguate: dict[str, Any] | None = None
+        self._silence_streak = 0  # consecutive no-speech cycles (auto end)
         self._last_command: str = ""
         self.memory = VoiceMemory()
 
@@ -101,8 +104,8 @@ class VoiceSessionController:
             border_radius=26,
             shadow=ft.BoxShadow(blur_radius=14, color="#50000000", offset=ft.Offset(0, 4)),
             ink=True,
-            tooltip="اضغط مطولاً للسحب · نقرة لإنهاء المكالمة",
-            on_click=lambda e: self.stop(reason="ended"),
+            tooltip="اضغط مطولاً للسحب · نقرة أثناء الكلام لمقاطعة الرد · نقرة لإنهاء المكالمة",
+            on_click=lambda e: self._on_bubble_tap(),
         )
 
         self.banner = ft.GestureDetector(
@@ -186,6 +189,9 @@ class VoiceSessionController:
             return
         self.active = True
         self._pending_followup = None
+        self._pending_disambiguate = None
+        self._silence_streak = 0
+        self._register_native_engine()
         self.banner.visible = True
         self._set_listening_visual(False)
         self.memory = VoiceMemory()
@@ -206,6 +212,19 @@ class VoiceSessionController:
         self._safe_update()
         self._notify_quiet(greet, kind="info")
         self._listen()
+
+    def _register_native_engine(self) -> None:
+        """Auto-register the Android native STT engine when available
+        (previously only the web/stub engines were ever wired)."""
+        try:
+            from nano_offline.core.voice_command import AndroidNativeVoiceEngine, get_engine
+            eng = get_engine()
+            if isinstance(eng, AndroidNativeVoiceEngine) and eng.is_available():
+                return  # already registered and usable
+            if self.native_files is not None:
+                voice_cmd.set_engine(AndroidNativeVoiceEngine(self.native_files, page=self.page))
+        except Exception:
+            pass
 
     def stop(self, reason: str = "stop") -> None:
         self.active = False
@@ -239,14 +258,16 @@ class VoiceSessionController:
         self._set_listening_visual(True)
         self._hint.value = "يستمع…"
         self._safe_update()
-        # Do not cut an active reply; listen is only scheduled after TTS ends.
+        # Barge-in (recommendation #3): when a fresh listen cycle starts while
+        # TTS is still speaking (fast user, tap-to-barge-in, or a short
+        # relisten delay), CUT THE TTS NOW instead of waiting for it to end.
         if self._speaking:
-            self._pending_relisten = True
-            return
+            self._interrupt_speech()
 
         def on_final(text: str):
             self.listening = False
             self._set_listening_visual(False)
+            self._silence_streak = 0
             text = (text or "").strip()
             if not text:
                 self._schedule_relisten(0.45)
@@ -276,7 +297,14 @@ class VoiceSessionController:
                 self._notify_quiet("يلزم إذن الميكروفون", kind="warning")
                 self.stop(reason="permission")
                 return
-            # Soft miss: stay in the call silently, listen again (AI-call style)
+            # Soft miss: stay in the call silently, listen again (AI-call style).
+            # After several consecutive silent cycles, end the call gracefully
+            # instead of looping the mic forever (modern-assistant behavior).
+            self._silence_streak += 1
+            if self._silence_streak >= 6:
+                self.stop(reason="silent")
+                self._notify_quiet("أُنهيت المكالمة لعدم وجود نشاط صوتي", kind="info")
+                return
             self._schedule_relisten(0.4 if soft else 0.7)
 
         def on_partial(text: str):
@@ -290,20 +318,53 @@ class VoiceSessionController:
                 on_partial=on_partial,
                 on_final=on_final,
                 on_error=on_error,
-                timeout_sec=8.0,
+                # Adaptive: first utterance gets a generous window; follow-ups
+                # inside the same call get a tighter one (snappier loop).
+                timeout_sec=8.0 if self.memory.turn_count == 0 else 5.5,
             )
         except Exception as exc:
             on_error(str(exc))
 
+    def _on_bubble_tap(self) -> None:
+        """Barge-in (recommendation #3): tapping the bubble while Nano is
+        speaking CUTS THE TTS MID-SENTENCE and reopens the mic immediately —
+        the user never waits out a long reply to give the next command.
+        Tapping otherwise (idle/listening) ends the call as before."""
+        if self._speaking:
+            self._interrupt_speech()
+            self._notify_quiet("تفضل، أنا منصت…", kind="info")
+            self._schedule_relisten(0.1)
+            return
+        self.stop(reason="ended")
+
+    def _interrupt_speech(self) -> None:
+        """Kill in-flight TTS immediately so the mic can hear the user."""
+        if not self._speaking:
+            return
+        self._speaking = False
+        self._pending_relisten = False
+        try:
+            if self.native_files is not None and hasattr(self.page, "run_task"):
+                async def _stop():
+                    try:
+                        await self.native_files.speech_stop_speak()
+                    except Exception:
+                        pass
+                self.page.run_task(_stop)
+        except Exception:
+            pass
+
     def _schedule_relisten(self, delay: float) -> None:
-        """Restart mic after reply — never while TTS is still speaking."""
+        """Restart mic after reply — never while TTS is still speaking
+        (the reply must stay audible); _speak() re-triggers this the moment
+        TTS ends. Tap-to-barge-in (bubble) is the immediate interrupt path."""
         if not self.active:
             return
         if self.tts_enabled and self._speaking:
             self._pending_relisten = True
             self._pending_relisten_delay = max(0.3, delay)
             return
-        wait = max(0.3, delay)
+        wait = max(0.2, delay)
 
         def _go():
             if self.active and not self.listening and not self._speaking:
@@ -313,6 +374,25 @@ class VoiceSessionController:
 
     def _execute(self, text: str) -> None:
         section = (self.get_section() or "dashboard").lower()
+
+        # Pending disambiguation («تقصد سكر ناعم أو سكر خشن؟») — resolved
+        # BEFORE any new command parsing so a short answer like «الأولى»
+        # or the item name is never mistaken for a new order.
+        if self._pending_disambiguate:
+            pend = self._pending_disambiguate
+            best = self._match_disambiguation(text, pend.get("candidates") or [])
+            if best is not None:
+                self._pending_disambiguate = None
+                self._finish_pos_add(best, float(pend.get("qty") or 1), spoken=text)
+                self._schedule_relisten(0.7)
+                return
+            if is_no(text):
+                self._pending_disambiguate = None
+                self._reply("تم الإلغاء — لم تُضف أي مادة.", kind="info")
+                self._schedule_relisten(0.5)
+                return
+            # Anything else: treat as a brand-new command.
+            self._pending_disambiguate = None
 
         # Pending confirmation (clear cart / crisis)
         if self._pending_confirm:
@@ -712,7 +792,52 @@ class VoiceSessionController:
         if not matches:
             self._reply(reply_for("pos_add", ok=False, name=name, memory=self.memory, section=section), kind="warning")
             return
-        chosen = matches[0]
+        # Ambiguity handling (recommendation #6): when several catalog items
+        # are plausible and the spoken name is not an exact/prefix match of
+        # the top hit, ASK instead of silently picking matches[0].
+        if len(matches) >= 2 and not self._confident_match(name, matches[0]):
+            self._pending_disambiguate = {"candidates": matches[:3], "qty": float(qty or 1)}
+            opts = " أو ".join(f"«{str(m.get('name') or '')}»" for m in matches[:3])
+            self._reply(f"تقصد {opts}؟ قل اسمها أو «الأولى» أو «الثانية».", kind="warning")
+            return
+        self._finish_pos_add(matches[0], float(qty or 1), spoken=name)
+
+    @staticmethod
+    def _confident_match(spoken: str, candidate: dict) -> bool:
+        """Exact or prefix containment on either side → pick directly."""
+        q = normalize_ar(spoken)
+        n = normalize_ar(str(candidate.get("name") or ""))
+        if not q or not n:
+            return False
+        return q == n or n.startswith(q) or q.startswith(n)
+
+    _ORDINALS = {
+        "الاولى": 0, "الاوله": 0, "الأولى": 0, "اولى": 0, "الاول": 0, "الأول": 0,
+        "الثانيه": 1, "الثانية": 1, "الثاني": 1, "ثاني": 1,
+        "الثالثه": 2, "الثالثة": 2, "الثالث": 2, "ثالث": 2,
+    }
+
+    def _match_disambiguation(self, text: str, candidates: list[dict]) -> dict | None:
+        """Resolve the user's answer to a disambiguation question.
+        Accepts the item name (either side containment) or an ordinal."""
+        q = normalize_ar(text).strip(" ؟?،.")
+        if not q or not candidates:
+            return None
+        if q in self._ORDINALS:
+            idx = self._ORDINALS[q]
+            return candidates[idx] if idx < len(candidates) else None
+        hits = [
+            c for c in candidates
+            if q and (q in normalize_ar(str(c.get("name") or ""))
+                      or normalize_ar(str(c.get("name") or "")).startswith(q))
+        ]
+        return hits[0] if len(hits) == 1 else (hits[0] if hits and len(hits) > 1 and self._confident_match(text, hits[0]) else None)
+
+    def _finish_pos_add(self, chosen: dict, qty: float, *, spoken: str = "") -> None:
+        """Apply a resolved item to the cart + learn the alias (shared by the
+        direct and disambiguated paths)."""
+        section = (self.get_section() or "dashboard").lower()
+        name = spoken or str(chosen.get("name") or "")
         resolved = str(chosen.get("name") or name)
         try:
             item_id = int(chosen.get("id") or 0) or None

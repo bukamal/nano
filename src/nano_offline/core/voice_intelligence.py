@@ -185,22 +185,47 @@ def _next_hint(
 
 
 def resolve_item_name(db_or_repo, query: str, *, limit: int = 8) -> list[dict]:
-    """Rank catalog rows by simple Arabic-aware similarity."""
+    """Rank catalog rows by simple Arabic-aware similarity.
+
+    Tolerates the definite article («السكر» → «سكر ناعم») by scoring against
+    both the raw query and its article-stripped form, keeping the best.
+    """
     q = _norm(query)
     if not q:
         return []
+    # candidate query forms: as-spoken + article-stripped (and vice-versa:
+    # a catalog name may carry «ال» the spoken form lacks)
+    q_forms = [q]
+    if q.startswith("ال") and len(q) > 3:
+        q_forms.append(q[2:])
+    else:
+        q_forms.append("ال" + q)
     rows: list[dict] = []
+    # Definite-article tolerance: «السكر» must find «سكر ناعم» — try the
+    # as-spoken form first, then the article-stripped one.
+    q_stripped = q[2:] if q.startswith("ال") and len(q) > 3 else q
+    search_forms: list[str] = []
+    for f in (query.strip(), q_stripped):
+        f = (f or "").strip()
+        if f and f not in search_forms:
+            search_forms.append(f)
     try:
         if hasattr(db_or_repo, "list"):
-            rows = db_or_repo.list(search=query.strip(), limit=limit * 2) or []
+            for sf in search_forms:
+                rows = db_or_repo.list(search=sf, limit=limit * 2) or []
+                if rows:
+                    break
         elif hasattr(db_or_repo, "connect"):
             with db_or_repo.connect() as conn:
-                cur = conn.execute(
-                    "SELECT id, name, quantity, selling_price FROM items "
-                    "WHERE item_type='مخزون' AND name LIKE ? ORDER BY name LIMIT ?",
-                    (f"%{query.strip()}%", limit * 2),
-                )
-                rows = [dict(r) for r in cur.fetchall()]
+                for sf in search_forms:
+                    cur = conn.execute(
+                        "SELECT id, name, quantity, selling_price FROM items "
+                        "WHERE item_type='مخزون' AND name LIKE ? ORDER BY name LIMIT ?",
+                        (f"%{sf}%", limit * 2),
+                    )
+                    rows = [dict(r) for r in cur.fetchall()]
+                    if rows:
+                        break
     except Exception:
         return []
 
@@ -209,20 +234,26 @@ def resolve_item_name(db_or_repo, query: str, *, limit: int = 8) -> list[dict]:
         name = _norm(str(r.get("name") or ""))
         if not name:
             continue
+        # best score across query forms and name with/without article
+        name_forms = [name]
+        if name.startswith("ال") and len(name) > 3:
+            name_forms.append(name[2:])
         score = 0.0
-        if name == q:
-            score = 100
-        elif name.startswith(q) or q.startswith(name):
-            score = 80
-        elif q in name:
-            score = 60 + max(0, 20 - abs(len(name) - len(q)))
-        else:
-            # token overlap
-            qt, nt = set(q.split()), set(name.split())
-            if qt & nt:
-                score = 40 + 10 * len(qt & nt)
-            else:
-                continue
+        for qf in q_forms:
+            for nf in name_forms:
+                if nf == qf:
+                    s = 100
+                elif nf.startswith(qf) or qf.startswith(nf):
+                    s = 80
+                elif qf in nf:
+                    s = 60 + max(0, 20 - abs(len(nf) - len(qf)))
+                else:
+                    qt, nt = set(qf.split()), set(nf.split())
+                    s = 40 + 10 * len(qt & nt) if qt & nt else 0
+                if s > score:
+                    score = s
+        if score <= 0:
+            continue
         scored.append((score, r))
     scored.sort(key=lambda x: -x[0])
     return [r for _, r in scored[:limit]]
