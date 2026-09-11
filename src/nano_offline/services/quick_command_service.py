@@ -37,49 +37,72 @@ class CommandResult:
 
 # (keywords that must ALL appear or any of the alternatives, action, target)
 _NAV_PATTERNS: list[tuple[list[str], str, str]] = [
-    # POS / quick sale — must match shell navigate special keys
+    # POS / sales
     (["نقطة", "بيع"], "navigate", "pos"),
-    (["بيع", "سريع"], "navigate", "pos"),
     (["بيع", "سريع"], "navigate", "pos"),
     (["افتح", "البيع"], "navigate", "pos"),
     (["فتح", "البيع"], "navigate", "pos"),
-    (["pos"], "navigate", "pos"),
-
     (["افتح", "نقطة"], "navigate", "pos"),
     (["روح", "البيع"], "navigate", "pos"),
     (["وديني", "البيع"], "navigate", "pos"),
     (["شاشة", "البيع"], "navigate", "pos"),
-    (["افتح", "جرد"], "navigate", "stocktake"),
-    (["روح", "الجرد"], "navigate", "stocktake"),
-    (["عرض", "العملاء"], "navigate", "customers"),
-    (["شوف", "التقارير"], "navigate", "reports"),
+    (["pos"], "navigate", "pos"),
     (["كاشير"], "navigate", "pos"),
+    (["كاش"], "navigate", "pos"),
     # Stocktake
     (["جرد"], "navigate", "stocktake"),
     (["افتح", "الجرد"], "navigate", "stocktake"),
     (["فتح", "الجرد"], "navigate", "stocktake"),
     (["جرد", "مستمر"], "navigate", "stocktake"),
-    # Invoices
+    (["روح", "الجرد"], "navigate", "stocktake"),
+    # Sale / purchase invoices
     (["فاتورة", "بيع"], "navigate", "sale"),
+    (["فاتوره", "بيع"], "navigate", "sale"),
     (["فاتورة", "شراء"], "navigate", "purchase"),
+    (["فاتوره", "شراء"], "navigate", "purchase"),
     (["فواتير"], "navigate", "invoices"),
+    (["المبيعات"], "navigate", "invoices"),
     (["مشتريات"], "navigate", "purchase"),
+    # Catalog / parties
     (["مواد"], "navigate", "items"),
+    (["المخزون"], "navigate", "items"),
     (["مخزون"], "navigate", "items"),
+    (["اصناف"], "navigate", "items"),
+    (["أصناف"], "navigate", "items"),
+    (["منتجات"], "navigate", "items"),
     (["عملاء"], "navigate", "customers"),
+    (["الزبائن"], "navigate", "customers"),
+    (["زبائن"], "navigate", "customers"),
     (["موردين"], "navigate", "suppliers"),
     (["موردون"], "navigate", "suppliers"),
+    (["الموردين"], "navigate", "suppliers"),
+    # Finance / reports / admin
     (["تقارير"], "navigate", "reports"),
     (["تقرير"], "navigate", "reports"),
+    (["شوف", "التقارير"], "navigate", "reports"),
     (["لوحة"], "navigate", "dashboard"),
     (["رئيسية"], "navigate", "dashboard"),
+    (["الرئيسية"], "navigate", "dashboard"),
+    (["المنزل"], "navigate", "dashboard"),
     (["إدارة"], "navigate", "admin"),
     (["اعدادات"], "navigate", "admin"),
     (["إعدادات"], "navigate", "admin"),
+    (["نسخ", "احتياط"], "navigate", "admin"),
+    (["نسخه", "احتياطيه"], "navigate", "admin"),
     (["مالية"], "navigate", "finance"),
     (["صندوق"], "navigate", "finance"),
+    (["سندات"], "navigate", "finance"),
+    (["مصروفات"], "navigate", "finance"),
+    (["مصاريف"], "navigate", "finance"),
+    (["خزنه"], "navigate", "finance"),
+    (["خزنة"], "navigate", "finance"),
     (["إشعارات"], "navigate", "notifications"),
     (["تنبيهات"], "navigate", "notifications"),
+    (["اشعارات"], "navigate", "notifications"),
+    (["امان"], "navigate", "security"),
+    (["أمان"], "navigate", "security"),
+    (["دخول"], "navigate", "security"),
+    (["عرض", "العملاء"], "navigate", "customers"),
 ]
 
 
@@ -175,6 +198,27 @@ class QuickCommandService:
             "شو مبيعات اليوم", "حركة اليوم", "كم الفواتير اليوم",
         )):
             return CommandResult(ok=True, action="today_sales", message="مبيعات اليوم")
+
+        # Expense / cash phrases (navigate finance)
+        if any(k in lower for k in ("سجل مصروف", "اضف مصروف", "أضف مصروف", "مصروف جديد")):
+            return CommandResult(ok=True, action="navigate", target="finance", message="فتح المالية لتسجيل مصروف")
+
+        if any(k in lower for k in ("سند قبض", "قبض من عميل", "استلام من عميل")):
+            return CommandResult(ok=True, action="navigate", target="finance", message="فتح المالية — سند قبض")
+
+        if any(k in lower for k in ("سند دفع", "دفع لمورد", "سداد مورد")):
+            return CommandResult(ok=True, action="navigate", target="finance", message="فتح المالية — سند دفع")
+
+        if any(k in lower for k in ("نسخه احتياطيه", "نسخة احتياطية", "اعمل نسخ", "خذ نسخ", "backup")):
+            return CommandResult(ok=True, action="navigate", target="admin", message="فتح الإدارة للنسخ الاحتياطي")
+
+        if any(k in lower for k in ("من هو المدين", "اكبر دين", "أكبر دين", "ديون العملاء", "الذمم")):
+            return CommandResult(ok=True, action="navigate", target="customers", message="فتح العملاء لمراجعة الذمم")
+
+        if any(k in lower for k in ("كم الصندوق", "رصيد الصندوق", "كم بالصندوق", "حالة الصندوق")):
+            return CommandResult(ok=True, action="cash_status", message="حالة الصندوق")
+
+
 
         # POS: أضف X / زيد X / حط X [عدد]
         # Examples: أضف سكر، أضف 3 سكر، زيد رز اثنين، حط حليب
@@ -273,12 +317,24 @@ class QuickCommandService:
         shortcuts = {
             "بيع": ("navigate", "pos"),
             "كاشير": ("navigate", "pos"),
+            "كاش": ("navigate", "pos"),
             "جرد": ("navigate", "stocktake"),
             "عملاء": ("navigate", "customers"),
+            "زبائن": ("navigate", "customers"),
+            "موردين": ("navigate", "suppliers"),
             "تقارير": ("navigate", "reports"),
             "مواد": ("navigate", "items"),
+            "مخزون": ("navigate", "items"),
             "فواتير": ("navigate", "invoices"),
             "مالية": ("navigate", "finance"),
+            "صندوق": ("navigate", "finance"),
+            "مصاريف": ("navigate", "finance"),
+            "إدارة": ("navigate", "admin"),
+            "اعدادات": ("navigate", "admin"),
+            "إعدادات": ("navigate", "admin"),
+            "رئيسية": ("navigate", "dashboard"),
+            "اشعارات": ("navigate", "notifications"),
+            "إشعارات": ("navigate", "notifications"),
         }
         token = lower.strip()
         if token in shortcuts:

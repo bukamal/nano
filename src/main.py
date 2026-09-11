@@ -157,13 +157,18 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         on_click=notification_center.open_panel,
     )
 
+    # Filled after VoiceSessionController is created (see below).
+    voice_header_slot = ft.Container(width=42, height=42, visible=False)
+
     top_bar = ft.Container(
         ft.Row(
             [
                 ft.Column([header_title, header_subtitle], spacing=1, expand=True),
+                voice_header_slot,
                 bell_button,
             ],
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=8,
         ),
         padding=ft.padding.symmetric(horizontal=18, vertical=12),
         bgcolor=Colors.WHITE,
@@ -770,19 +775,13 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
             native_files=native_files,
             tts_enabled=True,
         )
-        # Top call strip
-        page.overlay.append(
-            ft.Container(
-                voice_session.banner,
-                top=8, left=12, right=12,
-                alignment=ft.alignment.top_center,
-            )
-        )
-        # Keep the call FAB off the "المزيد" corner (left in RTL bottom bar).
-        voice_session.fab.mini = True
-        page.floating_action_button = voice_session.fab
-        page.floating_action_button_location = ft.FloatingActionButtonLocation.START_FLOAT
-        # Keep a handle for POS / dashboard if needed later
+        # Floating draggable bubble (positioned by VoiceSessionController)
+        page.overlay.append(voice_session.banner)
+        # Call control lives in the top bar so it never covers bottom tabs
+        # (الرئيسية / المزيد / نقطة البيع).
+        voice_header_slot.content = voice_session.header_btn
+        voice_header_slot.visible = True
+        page.floating_action_button = None
         ctx._voice_session = voice_session  # type: ignore[attr-defined]
         page.update()
     except Exception:
@@ -816,8 +815,7 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         content.padding = ft.padding.all(0)
         # Keep call banner; hide FAB so it does not cover POS pay bar
         try:
-            if voice_session is not None:
-                voice_session.fab.visible = False
+            voice_header_slot.visible = False
         except Exception:
             pass
         page.update()
@@ -827,7 +825,7 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         top_bar.visible = True
         try:
             if voice_session is not None:
-                voice_session.fab.visible = True
+                voice_header_slot.visible = True
         except Exception:
             pass
         adapt_navigation()

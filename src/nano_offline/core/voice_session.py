@@ -61,56 +61,67 @@ class VoiceSessionController:
         self._last_command: str = ""
         self.memory = VoiceMemory()
 
-        self._status = ft.Text("مكالمة ذكية", size=13, weight=ft.FontWeight.BOLD, color=Colors.WHITE)
-        self._hint = ft.Text("قل «مساعدة» لعرض الأوامر", size=11, color=Colors.WHITE, max_lines=2, overflow=ft.TextOverflow.ELLIPSIS)
-        self._section_chip = ft.Text("", size=10, color=Colors.WHITE)
-        self._wave = ft.Icon(ft.Icons.AUTO_AWESOME, size=22, color=Colors.WHITE)
-        self._chip_row = ft.Row(spacing=6, wrap=True, tight=True)
+        # ---- Option 2: small floating draggable bubble (not a top banner) ----
+        self._bubble_icon = ft.Icon(ft.Icons.GRAPHIC_EQ_ROUNDED, size=22, color=Colors.WHITE)
+        self._bubble_tip = ft.Text("", size=9, color=Colors.WHITE, text_align=ft.TextAlign.CENTER, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, visible=False)
 
-        hang = ft.Container(
-            ft.Icon(ft.Icons.CALL_END_ROUNDED, size=20, color=Colors.WHITE),
-            width=40, height=40, alignment=ft.alignment.center,
-            bgcolor="#991B1B", border_radius=20,
-            on_click=lambda e: self.stop(reason="ended"), ink=True, tooltip="إنهاء المكالمة",
-        )
-        help_btn = ft.Container(
-            ft.Icon(ft.Icons.HELP_OUTLINE_ROUNDED, size=18, color=Colors.WHITE),
-            width=36, height=36, alignment=ft.alignment.center,
-            bgcolor="#FFFFFF22", border_radius=18,
-            on_click=lambda e: self._show_help(), ink=True, tooltip="الأوامر المتاحة",
-        )
+        self._pos_left = 16.0
+        self._pos_bottom = 96.0  # above mobile bottom bar
 
-        self.banner = ft.Container(
+        def _on_pan(e: ft.DragUpdateEvent):
+            # Drag in screen space; clamp lightly
+            try:
+                self._pos_left = max(8.0, float(self._pos_left) + float(e.delta_x))
+                self._pos_bottom = max(72.0, float(self._pos_bottom) - float(e.delta_y))
+                self.banner.left = self._pos_left
+                self.banner.bottom = self._pos_bottom
+                self.banner.right = None
+                self.banner.top = None
+                self.banner.update()
+            except Exception:
+                pass
+
+        bubble_body = ft.Container(
             content=ft.Column(
-                [
-                    ft.Row(
-                        [
-                            self._wave,
-                            ft.Column(
-                                [ft.Row([self._status, self._section_chip], spacing=8, tight=True), self._hint],
-                                spacing=2, expand=True,
-                            ),
-                            help_btn,
-                            hang,
-                        ],
-                        spacing=10,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    self._chip_row,
-                ],
-                spacing=8,
+                [self._bubble_icon, self._bubble_tip],
+                spacing=0,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                tight=True,
             ),
-            padding=ft.padding.symmetric(horizontal=14, vertical=12),
-            gradient=ft.LinearGradient(
-                begin=ft.alignment.center_left,
-                end=ft.alignment.center_right,
-                colors=["#0B63F6", "#1AD8D1"],
-            ),
-            border_radius=20,
-            visible=False,
-            animate_opacity=180,
-            shadow=ft.BoxShadow(blur_radius=18, color="#40000000", offset=ft.Offset(0, 6)),
+            width=52,
+            height=52,
+            alignment=ft.alignment.center,
+            bgcolor=Colors.PRIMARY,
+            border_radius=26,
+            shadow=ft.BoxShadow(blur_radius=14, color="#50000000", offset=ft.Offset(0, 4)),
+            ink=True,
+            tooltip="اضغط مطولاً للسحب · نقرة لإنهاء المكالمة",
+            on_click=lambda e: self.stop(reason="ended"),
         )
+
+        self.banner = ft.GestureDetector(
+            content=bubble_body,
+            on_pan_update=_on_pan,
+            drag_interval=16,
+        )
+        # Positioned host used by main overlay
+        self.banner = ft.Container(
+            content=ft.GestureDetector(
+                content=bubble_body,
+                on_pan_update=_on_pan,
+                drag_interval=16,
+            ),
+            left=self._pos_left,
+            bottom=self._pos_bottom,
+            visible=False,
+            animate_opacity=150,
+        )
+        # aliases for legacy field updates
+        self._status = ft.Text("")  # unused
+        self._hint = ft.Text("")
+        self._section_chip = ft.Text("")
+        self._wave = self._bubble_icon
+        self._chip_row = ft.Row(visible=False, controls=[])
 
         self.fab = ft.FloatingActionButton(
             icon=ft.Icons.AUTO_AWESOME,
@@ -118,8 +129,23 @@ class VoiceSessionController:
             foreground_color=Colors.WHITE,
             tooltip="مكالمة أوامر ذكية",
             on_click=self.toggle,
-            visible=True,
+            visible=False,
             mini=True,
+        )
+
+        self._header_icon = ft.Icon(ft.Icons.AUTO_AWESOME, color=Colors.PRIMARY, size=20)
+        self.header_btn = ft.Container(
+            self._header_icon,
+            width=42,
+            height=42,
+            alignment=ft.alignment.center,
+            border=ft.border.all(1, Colors.BORDER),
+            border_radius=14,
+            bgcolor=Colors.WHITE,
+            shadow=Shadow.SM if hasattr(Shadow, "SM") else None,
+            ink=True,
+            tooltip="مكالمة أوامر ذكية",
+            on_click=self.toggle,
         )
 
     def toggle(self, _e=None) -> None:
@@ -135,17 +161,23 @@ class VoiceSessionController:
         self._pending_followup = None
         self.banner.visible = True
         self._set_listening_visual(False)
-        self._status.value = "مكالمة ذكية نشطة"
-        self._refresh_section_chip()
         self.memory = VoiceMemory()
         self.memory.last_section = self.get_section() or "dashboard"
-        self._hint.value = reply_for("greet", section=self.memory.last_section or "")
+        greet = reply_for("greet", section=self.memory.last_section or "")
         self.fab.icon = ft.Icons.CALL_END_ROUNDED
         self.fab.bgcolor = Colors.DANGER
         self.fab.tooltip = "إنهاء المكالمة"
-        self._push_turn("nano", self._hint.value)
+        try:
+            self._header_icon.name = ft.Icons.CALL_END_ROUNDED
+            self._header_icon.color = Colors.WHITE
+            self.header_btn.bgcolor = Colors.DANGER
+            self.header_btn.border = ft.border.all(1, Colors.DANGER)
+            self.header_btn.tooltip = "إنهاء المكالمة"
+        except Exception:
+            pass
+        self._push_turn("nano", greet)
         self._safe_update()
-        self.notify(self._hint.value, kind="info")
+        self.notify(greet, kind="info")
         self._listen()
 
     def stop(self, reason: str = "stop") -> None:
@@ -160,6 +192,14 @@ class VoiceSessionController:
         self.fab.icon = ft.Icons.AUTO_AWESOME
         self.fab.bgcolor = Colors.PRIMARY
         self.fab.tooltip = "مكالمة أوامر ذكية"
+        try:
+            self._header_icon.name = ft.Icons.AUTO_AWESOME
+            self._header_icon.color = Colors.PRIMARY
+            self.header_btn.bgcolor = Colors.WHITE
+            self.header_btn.border = ft.border.all(1, Colors.BORDER)
+            self.header_btn.tooltip = "مكالمة أوامر ذكية"
+        except Exception:
+            pass
         self._safe_update()
         if reason not in ("silent",):
             self.notify(reply_for("stop"), kind="info")
@@ -462,6 +502,21 @@ class VoiceSessionController:
             self._schedule_relisten(0.8)
             return
 
+        if action == "cash_status":
+            try:
+                s = self.ctx.dashboard.summary()
+                cash = float(s.get("cash") or 0)
+                try:
+                    from nano_offline.core import currency
+                    cash_txt = currency.format_amount(cash, self.ctx.settings)
+                except Exception:
+                    cash_txt = f"{cash:,.0f}"
+                self._reply(f"رصيد الصندوق تقريباً {cash_txt}.", kind="info")
+            except Exception as exc:
+                self._reply(str(exc), kind="error")
+            self._schedule_relisten(0.85)
+            return
+
         if action == "today_sales":
             try:
                 s = self.ctx.dashboard.today_summary()
@@ -597,47 +652,38 @@ class VoiceSessionController:
         return hints.get(section, "قل أمراً… أو «مساعدة»")
 
     def _refresh_section_chip(self) -> None:
-        labels = {
-            "dashboard": "لوحة التحكم", "pos": "نقطة البيع", "stocktake": "الجرد",
-            "items": "المواد", "invoices": "الفواتير", "customers": "العملاء",
-            "suppliers": "الموردون", "finance": "المالية", "reports": "التقارير", "admin": "الإدارة",
-        }
-        sec = (self.get_section() or "dashboard").lower()
-        self._section_chip.value = f"· {labels.get(sec, sec)}"
+        return
 
     def _set_listening_visual(self, active: bool) -> None:
+        body = self.banner.content.content if hasattr(self.banner, "content") else None
+        # banner -> GestureDetector -> Container(bubble_body)
+        try:
+            bubble = self.banner.content.content  # type: ignore
+        except Exception:
+            bubble = None
         if active:
-            self.banner.gradient = ft.LinearGradient(
-                begin=ft.alignment.center_left, end=ft.alignment.center_right,
-                colors=["#DC2626", "#F97316"],
-            )
-            self._wave.name = ft.Icons.MIC_ROUNDED
+            self._bubble_icon.name = ft.Icons.MIC_ROUNDED
+            if bubble is not None:
+                bubble.bgcolor = Colors.DANGER
         else:
-            self.banner.gradient = ft.LinearGradient(
-                begin=ft.alignment.center_left, end=ft.alignment.center_right,
-                colors=["#0B63F6", "#1AD8D1"],
-            )
-            self._wave.name = ft.Icons.AUTO_AWESOME
+            self._bubble_icon.name = ft.Icons.GRAPHIC_EQ_ROUNDED
+            if bubble is not None:
+                bubble.bgcolor = Colors.PRIMARY
+
 
     def _push_turn(self, role: str, text: str) -> None:
         self.turns.append(Turn(role=role, text=text))
-        self.turns = self.turns[-6:]
-        chips = []
-        for t in self.turns[-3:]:
-            bg = "#FFFFFF33" if t.role == "user" else "#00000022"
-            prefix = "أنت: " if t.role == "user" else "نانو: "
-            chips.append(
-                ft.Container(
-                    ft.Text((prefix + t.text)[:36], size=10, color=Colors.WHITE, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
-                    padding=ft.padding.symmetric(horizontal=8, vertical=4),
-                    bgcolor=bg, border_radius=10,
-                )
-            )
-        self._chip_row.controls = chips
+        self.turns = self.turns[-8:]
+
 
     def _reply(self, text: str, *, kind: str = "info") -> None:
-        self._hint.value = text
         self._push_turn("nano", text)
+        # Tiny caption under bubble icon (optional)
+        try:
+            self._bubble_tip.value = (text or "")[:18]
+            self._bubble_tip.visible = bool(text)
+        except Exception:
+            pass
         self._safe_update()
         try:
             self.notify(text, kind=kind)
@@ -650,9 +696,9 @@ class VoiceSessionController:
     def _show_help(self) -> None:
         section = (self.get_section() or "dashboard").lower()
         if section == "pos":
-            msg = "كاشير: اسم المادة، أضف سكر وحليب، كمان واحد، كمية 5، شو بالسلة، احذف الأخير، ادفع، إيقاف."
+            msg = "كاشير: مادة، أضف سكر وحليب، كمان، كمية 5، السلة، احذف الأخير، ادفع، إيقاف."
         else:
-            msg = "بيع سريع، أنشئ مادة شاي بسعر 500، مبيعات اليوم، كم باقي الأرز، ملخص، أضف سكر، مساعدة، إيقاف."
+            msg = "بيع، جرد، مواد، عملاء، مالية، تقارير، مبيعات اليوم، كم الصندوق، أنشئ مادة، كم باقي، ملخص، إيقاف."
         self._reply(reply_for("help", extra=msg, memory=self.memory, section=section), kind="info")
 
     def _is_help(self, text: str) -> bool:
