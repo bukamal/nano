@@ -1640,6 +1640,141 @@ class AdminCenter:
         _refresh_crisis_ui()
         refresh_crisis_suggestions()
 
+
+        # ---- Voice learning memory (self-expanding assistant) ----
+        voice_stats_text = ft.Text("", size=12, color=Colors.TEXT_SECONDARY)
+        voice_phrases_list = ft.Column(spacing=6)
+        voice_aliases_list = ft.Column(spacing=6)
+        voice_unknowns_list = ft.Column(spacing=6)
+
+        def refresh_voice_memory(_e=None):
+            learn = getattr(self.ctx, "voice_learning", None)
+            voice_phrases_list.controls.clear()
+            voice_aliases_list.controls.clear()
+            voice_unknowns_list.controls.clear()
+            if learn is None:
+                voice_stats_text.value = "خدمة الذاكرة الصوتية غير مهيأة."
+                self.page.update()
+                return
+            st = learn.stats()
+            voice_stats_text.value = (
+                f"{st.get('phrases', 0)} عبارة أوامر · "
+                f"{st.get('item_aliases', 0)} اسماً بديلاً · "
+                f"{st.get('unknowns', 0)} غير مفهومة"
+            )
+            phrases = learn.list_phrases(80)
+            if not phrases:
+                voice_phrases_list.controls.append(
+                    ft.Text("لا عبارات بعد. استخدم المساعد الصوتي ليبدأ التعلم.", size=12, color=Colors.TEXT_MUTED)
+                )
+            for row in phrases:
+                rid = int(row["id"])
+                def _del_p(_e=None, i=rid):
+                    try:
+                        self.ctx.voice_learning.delete_phrase(i)
+                        refresh_voice_memory()
+                        self._notify("حُذفت العبارة", kind="info")
+                    except Exception as exc:
+                        self._notify_error(str(exc))
+                voice_phrases_list.controls.append(
+                    ft.Container(
+                        ft.Row(
+                            [
+                                ft.Column(
+                                    [
+                                        ft.Text(str(row.get("phrase_raw") or row.get("phrase_norm") or ""), size=13, weight=ft.FontWeight.W_600),
+                                        ft.Text(
+                                            f"{row.get('action')} → {row.get('target') or '—'} · {int(row.get('hits') or 1)} مرة",
+                                            size=11, color=Colors.TEXT_SECONDARY,
+                                        ),
+                                    ],
+                                    expand=True, spacing=2,
+                                ),
+                                ft.IconButton(ft.Icons.DELETE_OUTLINE, icon_color=Colors.DANGER, tooltip="حذف", on_click=_del_p),
+                            ],
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        padding=10, border=ft.border.all(1, Colors.BORDER), border_radius=10, bgcolor=Colors.BACKGROUND_ALT,
+                    )
+                )
+            aliases = learn.list_aliases(80)
+            if not aliases:
+                voice_aliases_list.controls.append(
+                    ft.Text("لا أسماء بديلة بعد. علّم المساعد: تعلّم أن … تعني …", size=12, color=Colors.TEXT_MUTED)
+                )
+            for row in aliases:
+                rid = int(row["id"])
+                def _del_a(_e=None, i=rid):
+                    try:
+                        self.ctx.voice_learning.delete_alias(i)
+                        refresh_voice_memory()
+                        self._notify("حُذف الاسم البديل", kind="info")
+                    except Exception as exc:
+                        self._notify_error(str(exc))
+                voice_aliases_list.controls.append(
+                    ft.Container(
+                        ft.Row(
+                            [
+                                ft.Column(
+                                    [
+                                        ft.Text(f"«{row.get('alias_raw')}» → {row.get('item_name')}", size=13, weight=ft.FontWeight.W_600),
+                                        ft.Text(f"معرف {row.get('item_id')} · {int(row.get('hits') or 1)} مرة", size=11, color=Colors.TEXT_SECONDARY),
+                                    ],
+                                    expand=True, spacing=2,
+                                ),
+                                ft.IconButton(ft.Icons.DELETE_OUTLINE, icon_color=Colors.DANGER, tooltip="حذف", on_click=_del_a),
+                            ],
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        padding=10, border=ft.border.all(1, Colors.BORDER), border_radius=10, bgcolor=Colors.BACKGROUND_ALT,
+                    )
+                )
+            unknowns = learn.top_unknowns(30)
+            if not unknowns:
+                voice_unknowns_list.controls.append(ft.Text("لا عبارات معلّقة.", size=12, color=Colors.TEXT_MUTED))
+            for row in unknowns:
+                voice_unknowns_list.controls.append(
+                    ft.Text(
+                        f"• {row.get('phrase_raw')} ({int(row.get('hits') or 1)}×)"
+                        + (f" — {row.get('section')}" if row.get("section") else ""),
+                        size=12, color=Colors.TEXT_SECONDARY,
+                    )
+                )
+            self.page.update()
+
+        def clear_voice_unknowns(_e=None):
+            learn = getattr(self.ctx, "voice_learning", None)
+            if not learn:
+                return
+            n = learn.clear_unknowns()
+            refresh_voice_memory()
+            self._notify(f"تم مسح {n} عبارة غير مفهومة", kind="info")
+
+        def clear_voice_all(_e=None):
+            learn = getattr(self.ctx, "voice_learning", None)
+            if not learn:
+                return
+            def confirm(_ev=None):
+                try:
+                    learn.clear_all_memory()
+                    self.page.close(dlg)
+                    refresh_voice_memory()
+                    self._notify("تم مسح الذاكرة الصوتية بالكامل", kind="warning")
+                except Exception as exc:
+                    self._notify_error(str(exc))
+            dlg = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("مسح الذاكرة الصوتية؟"),
+                content=ft.Text("سيُحذف كل ما تعلّمه المساعد على هذا الجهاز (عبارات وأسماء بديلة)."),
+                actions=[
+                    ft.TextButton("إلغاء", on_click=lambda _: self.page.close(dlg)),
+                    ft.FilledButton("مسح الكل", on_click=confirm),
+                ],
+            )
+            self.page.open(dlg)
+
+        refresh_voice_memory()
+
         section_panels: dict[str, ft.Container] = {
             "appearance": self._section(
                 "المظهر والوضع الليلي",
@@ -1948,6 +2083,34 @@ class AdminCenter:
                 ],
             ),
 
+
+            "voice": self._section(
+                "الذاكرة الصوتية (التعلم الذاتي)",
+                [
+                    ft.Text(
+                        "هنا العبارات وأسماء المواد التي تعلّمها المساعد على هذا الجهاز. "
+                        "يمكنك حذف أي بند خاطئ. التعليم الصوتي: «تعلّم أن بيبسي تعني …».",
+                        size=12, color=Colors.TEXT_SECONDARY,
+                    ),
+                    voice_stats_text,
+                    ft.Row(
+                        [
+                            ft.OutlinedButton("تحديث", icon=ft.Icons.REFRESH, on_click=lambda e: refresh_voice_memory()),
+                            ft.OutlinedButton("مسح غير المفهوم", icon=ft.Icons.CLEAR_ALL, on_click=clear_voice_unknowns),
+                            ft.OutlinedButton("مسح كل الذاكرة", icon=ft.Icons.DELETE_FOREVER_OUTLINED, on_click=clear_voice_all),
+                        ],
+                        spacing=8,
+                        wrap=True,
+                    ),
+                    ft.Text("العبارات المتعلَّمة", size=13, weight=ft.FontWeight.W_600),
+                    voice_phrases_list,
+                    ft.Text("أسماء المواد البديلة", size=13, weight=ft.FontWeight.W_600),
+                    voice_aliases_list,
+                    ft.Text("عبارات لم تُفهم (الأكثر تكراراً)", size=13, weight=ft.FontWeight.W_600),
+                    voice_unknowns_list,
+                ],
+            ),
+
         }
 
         TABS = [
@@ -1962,6 +2125,7 @@ class AdminCenter:
             ("pos", "نقطة البيع", ft.Icons.POINT_OF_SALE_OUTLINED),
             ("stocktake", "الجرد", ft.Icons.FACT_CHECK_OUTLINED),
             ("sound", "الصوت", ft.Icons.VOLUME_UP_OUTLINED),
+            ("voice", "الذاكرة الصوتية", ft.Icons.RECORD_VOICE_OVER_OUTLINED),
             ("reports", "التقارير", ft.Icons.BAR_CHART_OUTLINED),
             ("audit", "سجل التدقيق", ft.Icons.HISTORY),
         ]

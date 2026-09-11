@@ -261,8 +261,45 @@ class VoiceLearningService:
         }
 
     def teach_phrase(self, phrase: str, *, action: str, target: str | None = None, data: dict | None = None) -> None:
-        """Explicit teaching API (future admin UI)."""
+        """Explicit teaching API."""
         self.remember_phrase(phrase, action=action, target=target, data=data)
+
+    def list_phrases(self, limit: int = 100) -> list[dict]:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """SELECT id, phrase_raw, phrase_norm, action, target, hits, last_used_at
+                   FROM voice_phrase_memory ORDER BY hits DESC, last_used_at DESC LIMIT ?""",
+                (int(limit),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_aliases(self, limit: int = 100) -> list[dict]:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """SELECT id, alias_raw, alias_norm, item_id, item_name, hits, last_used_at
+                   FROM voice_item_alias ORDER BY hits DESC, last_used_at DESC LIMIT ?""",
+                (int(limit),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_phrase(self, row_id: int) -> None:
+        with self.db.transaction() as conn:
+            conn.execute("DELETE FROM voice_phrase_memory WHERE id=?", (int(row_id),))
+
+    def delete_alias(self, row_id: int) -> None:
+        with self.db.transaction() as conn:
+            conn.execute("DELETE FROM voice_item_alias WHERE id=?", (int(row_id),))
+
+    def clear_unknowns(self) -> int:
+        with self.db.transaction() as conn:
+            cur = conn.execute("DELETE FROM voice_unknown_log")
+            return int(cur.rowcount or 0)
+
+    def clear_all_memory(self) -> None:
+        with self.db.transaction() as conn:
+            conn.execute("DELETE FROM voice_phrase_memory")
+            conn.execute("DELETE FROM voice_item_alias")
+            conn.execute("DELETE FROM voice_unknown_log")
 
 
 __all__ = ["VoiceLearningService", "_norm"]
