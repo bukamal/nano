@@ -24,6 +24,7 @@ from nano_offline.core.voice_intelligence import (
     VoiceMemory, reply_for, resolve_item_name, extract_again_reference,
     is_yes, is_no, match_converse, reply_converse,
 )
+from nano_offline.core.voice_guide import match_guide, guide_for_section
 
 
 @dataclass
@@ -189,7 +190,7 @@ class VoiceSessionController:
         self._set_listening_visual(False)
         self.memory = VoiceMemory()
         self.memory.last_section = self.get_section() or "dashboard"
-        greet = "معك، تفضل."
+        greet = reply_for("greet", section=(self.get_section() or "dashboard"))
         self.fab.icon = ft.Icons.CALL_END_ROUNDED
         self.fab.bgcolor = Colors.DANGER
         self.fab.tooltip = "إنهاء المكالمة"
@@ -373,6 +374,59 @@ class VoiceSessionController:
             except Exception:
                 self._reply("تعذر جلب الملخص الآن", kind="warning")
             self._schedule_relisten(0.9)
+            return
+
+        # Explicit teaching: «تعلم أن بيبسي تعني بيبسي كولا» / «علّم أضف سكر»
+        teach = self._try_teach(text)
+        if teach:
+            self._schedule_relisten(0.5)
+            return
+
+        # Self-learned phrases (this device)
+        try:
+            learn = getattr(self.ctx, "voice_learning", None)
+            if learn is not None:
+                hit = learn.lookup_phrase(text)
+                if hit and hit.get("action"):
+                    action = hit["action"]
+                    target = hit.get("target")
+                    data = hit.get("data") or {}
+                    if action == "pos_add":
+                        self._do_pos_add(data.get("name") or text, float(data.get("qty") or 1))
+                        self._schedule_relisten(0.5)
+                        return
+                    if action == "navigate" and target:
+                        self.navigate(target)
+                        self._reply(reply_for("navigate", extra=target, memory=self.memory, section=target), kind="success")
+                        self._schedule_relisten(0.5)
+                        return
+                    if action in ("pos_pay", "pos_clear", "pos_remove_last", "pos_cart_summary"):
+                        result = type("R", (), {"action": action, "data": data, "target": target or "pos", "ok": True, "message": ""})()
+                        if action == "pos_clear":
+                            self._pending_confirm = {"kind": "pos_clear", "result": result, "section": section}
+                            self._reply(reply_for("pos_clear_ask", memory=self.memory, section=section), kind="warning")
+                        else:
+                            if section != "pos" and target == "pos":
+                                self._queue_and_go_pos(result)
+                            else:
+                                self._apply_pos(result)
+                            self._reply(reply_for(action if action != "pos_remove_last" else "message", extra="تم.", memory=self.memory, section=section), kind="info")
+                        self._schedule_relisten(0.5)
+                        return
+        except Exception:
+            pass
+
+        # Full usage guide / how-to / where-is (offline knowledge base)
+        guided = match_guide(text, section=section)
+        if guided:
+            answer, target = guided
+            if target:
+                try:
+                    self.navigate(target)
+                except Exception:
+                    pass
+            self._reply(answer, kind="info")
+            self._schedule_relisten(0.6)
             return
 
         try:
@@ -584,6 +638,12 @@ class VoiceSessionController:
                 self.navigate(result.target)
                 self.memory.note(last_section=result.target, last_action="navigate")
                 label = result.message or result.target or "القسم"
+                try:
+                    learn = getattr(self.ctx, "voice_learning", None)
+                    if learn is not None:
+                        learn.remember_phrase(text, action="navigate", target=result.target)
+                except Exception:
+                    pass
                 self._reply(reply_for("navigate", extra=label, memory=self.memory, section=result.target or section), kind="success")
             except Exception as exc:
                 self._reply(str(exc), kind="error")
@@ -616,11 +676,32 @@ class VoiceSessionController:
             self._schedule_relisten(0.85)
             return
 
-        self._reply(reply_for("unknown", extra=result.message or "", memory=self.memory, section=section), kind="warning")
+        try:
+            learn = getattr(self.ctx, "voice_learning", None)
+            if learn is not None:
+                learn.remember_unknown(text, section=section)
+                st = learn.stats()
+                extra_u = result.message or ""
+                if st.get("phrases"):
+                    extra_u = (extra_u + f" · ذاكرتي المحلية: {st['phrases']} عبارة و {st['item_aliases']} اسماً للممواد.").strip(" ·")
+                self._reply(reply_for("unknown", extra=extra_u, memory=self.memory, section=section), kind="warning")
+            else:
+                self._reply(reply_for("unknown", extra=result.message or "", memory=self.memory, section=section), kind="warning")
+        except Exception:
+            self._reply(reply_for("unknown", extra=result.message or "", memory=self.memory, section=section), kind="warning")
         self._schedule_relisten(0.75)
 
     def _do_pos_add(self, name: str, qty: float) -> None:
         section = (self.get_section() or "").lower()
+        # Learned nicknames first
+        try:
+            learn = getattr(self.ctx, "voice_learning", None)
+            if learn is not None:
+                alias = learn.resolve_item_alias(name)
+                if alias and alias.get("item_name"):
+                    name = alias["item_name"]
+        except Exception:
+            pass
         matches = resolve_item_name(self.ctx.items, name, limit=8)
         if not matches:
             # second chance: raw list search
@@ -662,6 +743,18 @@ class VoiceSessionController:
             applied = True
         self.memory.note(last_item_name=resolved, last_item_id=item_id, last_qty=float(qty or 1), last_action="pos_add")
         self.memory.cart_adds += 1
+        try:
+            learn = getattr(self.ctx, "voice_learning", None)
+            if learn is not None and item_id and name:
+                learn.remember_item_alias(name, item_id=int(item_id), item_name=resolved)
+                learn.remember_phrase(
+                    f"أضف {name}",
+                    action="pos_add",
+                    target="pos",
+                    data={"name": resolved, "qty": float(qty or 1), "item_id": item_id},
+                )
+        except Exception:
+            pass
         self._reply(
             reply_for("pos_add", ok=True, name=resolved, qty=float(qty or 1), memory=self.memory, section=section),
             kind="success",
@@ -698,6 +791,48 @@ class VoiceSessionController:
             setattr(self.ctx, "_pending_voice_command", result)
         except Exception:
             pass
+        return False
+
+
+    def _try_teach(self, text: str) -> bool:
+        """User teaches the assistant: تعلم أن X تعني Y / علّم هذه."""
+        import re
+        t = (text or "").strip()
+        m = re.search(
+            r"(?:تعلم|تعلّم|علم|علّم)\s+(?:ان|أن)?\s*(?P<a>.+?)\s+(?:تعني|يعني|اسمها|هي)\s+(?P<b>.+)$",
+            t,
+        )
+        learn = getattr(self.ctx, "voice_learning", None)
+        if not learn:
+            return False
+        if m:
+            spoken = m.group("a").strip()
+            official = m.group("b").strip()
+            # try as item alias
+            try:
+                rows = self.ctx.items.list(search=official, limit=5) or []
+            except Exception:
+                rows = []
+            if rows:
+                item = rows[0]
+                learn.remember_item_alias(spoken, item_id=int(item["id"]), item_name=str(item.get("name") or official))
+                self._reply(
+                    f"تعلمت أن «{spoken}» تشير إلى المادة «{item.get('name')}». سأستخدمها في المرات القادمة.",
+                    kind="success",
+                )
+                return True
+            learn.remember_phrase(spoken, action="navigate", target=None, data={"note": official})
+            self._reply(f"حفظت العبارة «{spoken}» في ذاكرتي المحلية وسأحاول الاستفادة منها لاحقاً.", kind="info")
+            return True
+        # stats
+        if any(k in t for k in ("ماذا تعلمت", "شو تعلمت", "ذاكرة الصوت", "كم عبارة")):
+            st = learn.stats()
+            self._reply(
+                f"ذاكرتي على هذا الجهاز: {st.get('phrases', 0)} عبارة أوامر، "
+                f"{st.get('item_aliases', 0)} اسماً بديلاً للمواد، و{st.get('unknowns', 0)} عبارة غير مفهومة سأحاول التعلم منها.",
+                kind="info",
+            )
+            return True
         return False
 
     def _greeting(self) -> str:
@@ -756,9 +891,12 @@ class VoiceSessionController:
     def _show_help(self) -> None:
         section = (self.get_section() or "dashboard").lower()
         if section == "pos":
-            msg = "كاشير: مادة، أضف سكر وحليب، كمان، كمية 5، السلة، احذف الأخير، ادفع، إيقاف."
+            msg = guide_for_section("pos")
         else:
-            msg = "بيع، جرد، مواد، عملاء، مالية، تقارير، مبيعات اليوم، كم الصندوق، أنشئ مادة، كم باقي، ملخص، إيقاف."
+            msg = (
+                guide_for_section(section)
+                + " أيضاً: كيف أبيع، كيف أضيف مادة، كيف أجرد، اشرح الشاشة، مساعدة، إيقاف."
+            )
         self._reply(reply_for("help", extra=msg, memory=self.memory, section=section), kind="info")
 
     def _is_help(self, text: str) -> bool:

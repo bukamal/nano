@@ -61,6 +61,7 @@ class AppContext:
     party_trust: PartyTrustService
     business_memory: BusinessMemoryService
     quick_commands: QuickCommandService
+    voice_learning: object
 
     @classmethod
     def create(cls, db_path: str | Path) -> "AppContext":
@@ -104,6 +105,8 @@ class AppContext:
         )
         party_trust_svc = PartyTrustService(db)
         quick_commands_svc = QuickCommandService(db, items=items_repo)
+        from nano_offline.services.voice_learning_service import VoiceLearningService
+        voice_learning_svc = VoiceLearningService(db)
         owner_pulse_svc = OwnerPulseService(
             db,
             dashboard=dashboard_svc,
@@ -139,6 +142,7 @@ class AppContext:
             party_trust=party_trust_svc,
             business_memory=business_memory_svc,
             quick_commands=quick_commands_svc,
+            voice_learning=voice_learning_svc,
         )
 
     def reload(self, db_path: str | Path) -> None:
