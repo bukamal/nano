@@ -1,17 +1,7 @@
 #!/usr/bin/env bash
 # Build one Nano suite APK (accounting | inventory | pos | full).
-# Designed to be called from GitHub Actions or locally.
-#
-# Usage:
-#   ./apps/build_suite_apk.sh accounting
-#   ./apps/build_suite_apk.sh inventory
-#   ./apps/build_suite_apk.sh pos
-#   ./apps/build_suite_apk.sh full
-#
-# Environment overrides:
-#   BUILD_VERSION   (default: from src/nano_offline/version.py APP_VERSION)
-#   BUILD_NUMBER    (default: from version.py BUILD_NUMBER)
-#   SKIP_FLUTTER_DOCTOR=1  (recommended on CI)
+# Reliable approach for Flet: temporarily replace src/main.py with the
+# selected entry point, patch org/product in pyproject.toml, build, restore.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -19,30 +9,27 @@ cd "$ROOT"
 
 APP="${1:-full}"
 
-# ---------------------------------------------------------------------------
-# App matrix: module / org / product / apk artifact name
-# ---------------------------------------------------------------------------
 case "$APP" in
   accounting|acc)
-    MODULE="main_accounting"
+    MODULE_FILE="src/main_accounting.py"
     ORG="com.nano.accounting"
     PRODUCT="نانو محاسبة"
     APK_NAME="nano-accounting-release.apk"
     ;;
   inventory|inv)
-    MODULE="main_inventory"
+    MODULE_FILE="src/main_inventory.py"
     ORG="com.nano.inventory"
     PRODUCT="نانو المستودع"
     APK_NAME="nano-inventory-release.apk"
     ;;
   pos)
-    MODULE="main_pos"
+    MODULE_FILE="src/main_pos.py"
     ORG="com.nano.pos"
     PRODUCT="نانو نقطة البيع"
     APK_NAME="nano-pos-release.apk"
     ;;
   full|"")
-    MODULE="main"
+    MODULE_FILE="src/main.py"
     ORG="com.nano"
     PRODUCT="Nano | نانو"
     APK_NAME="nano-release.apk"
@@ -53,9 +40,6 @@ case "$APP" in
     ;;
 esac
 
-# ---------------------------------------------------------------------------
-# Version numbers
-# ---------------------------------------------------------------------------
 if [ -z "${BUILD_VERSION:-}" ] || [ -z "${BUILD_NUMBER:-}" ]; then
   eval "$(python3 - <<'PY'
 from pathlib import Path
@@ -72,50 +56,53 @@ BUILD_VERSION="${BUILD_VERSION:-0.0.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 
 echo "==> Building Nano suite app: $APP"
-echo "    module=$MODULE  org=$ORG  product=$PRODUCT"
+echo "    entry=$MODULE_FILE  org=$ORG  product=$PRODUCT"
 echo "    version=$BUILD_VERSION  build=$BUILD_NUMBER"
 
-# ---------------------------------------------------------------------------
-# Point Flet at the correct entry module (in-place edit of pyproject.toml)
-# ---------------------------------------------------------------------------
+MAIN_SRC="src/main.py"
+MAIN_BAK="src/main.py.bak.suite"
 PYPROJECT="pyproject.toml"
-BACKUP="${PYPROJECT}.bak.suite"
-cp "$PYPROJECT" "$BACKUP"
+PYPROJECT_BAK="${PYPROJECT}.bak.suite"
 
-python3 - "$MODULE" <<'PY'
-import sys
-from pathlib import Path
-import re
-module = sys.argv[1]
-path = Path("pyproject.toml")
-text = path.read_text(encoding="utf-8")
-if re.search(r"(?m)^module\s*=", text):
-    text = re.sub(r'(?m)^module\s*=\s*".*"', f'module = "{module}"', text)
-else:
-    text = re.sub(
-        r"(\[tool\.flet\.app\]\s*\n)",
-        rf'\1module = "{module}"\n',
-        text,
-        count=1,
-    )
-path.write_text(text, encoding="utf-8")
-print(f"pyproject.toml module -> {module}")
-PY
-
-restore_pyproject() {
-  if [ -f "$BACKUP" ]; then
-    mv -f "$BACKUP" "$PYPROJECT"
+restore_all() {
+  if [ -f "$MAIN_BAK" ]; then
+    mv -f "$MAIN_BAK" "$MAIN_SRC"
+  fi
+  if [ -f "$PYPROJECT_BAK" ]; then
+    mv -f "$PYPROJECT_BAK" "$PYPROJECT"
   fi
 }
-trap restore_pyproject EXIT
+trap restore_all EXIT
 
-# ---------------------------------------------------------------------------
-# Dependencies (same as original build_nano_apk.sh)
-# ---------------------------------------------------------------------------
+cp -f "$MAIN_SRC" "$MAIN_BAK"
+cp -f "$PYPROJECT" "$PYPROJECT_BAK"
+
+if [ "$APP" != "full" ] && [ -n "$APP" ]; then
+  if [ ! -f "$MODULE_FILE" ]; then
+    echo "Missing entry point: $MODULE_FILE" >&2
+    exit 1
+  fi
+  cp -f "$MODULE_FILE" "$MAIN_SRC"
+  echo "    swapped src/main.py <- $MODULE_FILE"
+fi
+
+python3 - "$ORG" "$PRODUCT" <<'PY'
+import re, sys
+from pathlib import Path
+org, product = sys.argv[1], sys.argv[2]
+path = Path("pyproject.toml")
+text = path.read_text(encoding="utf-8")
+text = re.sub(r'(?m)^(org\s*=\s*).*$', rf'\1"{org}"', text, count=1)
+text = re.sub(r'(?m)^(product\s*=\s*).*$', rf'\1"{product}"', text, count=1)
+if re.search(r'(?m)^module\s*=', text):
+    text = re.sub(r'(?m)^module\s*=\s*".*"', 'module = "main"', text)
+path.write_text(text, encoding="utf-8")
+print(f"    pyproject org={org} product={product} module=main")
+PY
+
 uv sync
 uv run python -m ensurepip --upgrade >/dev/null 2>&1 || true
 
-# Core library desugaring init script (required by flet_native_files)
 GRADLE_INIT_DIR="${GRADLE_USER_HOME:-$HOME/.gradle}/init.d"
 mkdir -p "$GRADLE_INIT_DIR"
 cat > "$GRADLE_INIT_DIR/nano-core-library-desugaring.init.gradle.kts" <<'EOF'
@@ -132,13 +119,10 @@ gradle.beforeProject {
 }
 EOF
 
-# Remove stale Glance widget that breaks builds
 find . -name "NanoGlanceWidget.kt" -type f -delete 2>/dev/null || true
 rm -rf build/flutter-packages 2>/dev/null || true
+rm -rf build 2>/dev/null || true
 
-# ---------------------------------------------------------------------------
-# flet build with retries (pub.dev flakes)
-# ---------------------------------------------------------------------------
 export FLET_CLI_NO_RICH_OUTPUT="${FLET_CLI_NO_RICH_OUTPUT:-1}"
 export FLET_CLI_SKIP_FLUTTER_DOCTOR="${FLET_CLI_SKIP_FLUTTER_DOCTOR:-1}"
 
@@ -152,13 +136,15 @@ attempt=1
 status=1
 while true; do
   set +e
+  set -o pipefail
   uv run flet build apk \
     --product "$PRODUCT" \
     --org "$ORG" \
     --build-number "$BUILD_NUMBER" \
     --build-version "$BUILD_VERSION" \
-    "${EXTRA_ARGS[@]}" 2>&1 | tee flet-build-${APP}.log
-  status=${PIPESTATUS[0]}
+    "${EXTRA_ARGS[@]}" 2>&1 | tee "flet-build-${APP}.log"
+  status=$?
+  set +o pipefail
   set -e
 
   if [ "$status" -eq 0 ]; then
@@ -168,7 +154,7 @@ while true; do
     echo "flet build apk failed after ${MAX_ATTEMPTS} attempts (exit ${status})." >&2
     exit "$status"
   fi
-  echo "flet build apk failed (attempt ${attempt}/${MAX_ATTEMPTS}). Clearing pub cache and retrying..." >&2
+  echo "flet build apk failed (attempt ${attempt}/${MAX_ATTEMPTS}). Retrying..." >&2
   if command -v dart >/dev/null 2>&1; then
     dart pub cache clean -f 2>/dev/null || true
   fi
@@ -176,9 +162,6 @@ while true; do
   attempt=$((attempt + 1))
 done
 
-# ---------------------------------------------------------------------------
-# Collect APK
-# ---------------------------------------------------------------------------
 APK_PATH="$(find build -name '*.apk' -type f 2>/dev/null | head -n 1 || true)"
 if [ -z "$APK_PATH" ]; then
   echo "Nano APK was not produced for app=$APP." >&2
@@ -186,5 +169,17 @@ if [ -z "$APK_PATH" ]; then
 fi
 mkdir -p dist
 cp "$APK_PATH" "dist/${APK_NAME}"
+cp "$APK_PATH" "dist/nano-${APP}.apk"
 echo "Nano installer: $(pwd)/dist/${APK_NAME}"
 ls -lh "dist/${APK_NAME}"
+
+{
+  echo "app=$APP"
+  echo "org=$ORG"
+  echo "product=$PRODUCT"
+  echo "entry=$MODULE_FILE"
+  echo "apk=$APK_NAME"
+  echo "version=$BUILD_VERSION"
+  echo "build=$BUILD_NUMBER"
+} > "dist/${APP}-build-info.txt"
+cat "dist/${APP}-build-info.txt"

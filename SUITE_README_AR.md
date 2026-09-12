@@ -60,3 +60,18 @@ export NANO_SHARED_DATA_DIR="$HOME/.nano"
 - على أندرويد قد يُطلب من المستخدم منح «الوصول لكل الملفات» مرة واحدة.
 - الحزم الثلاث يجب توقيعها بنفس مفتاح التوقيع لصلاحية Content Provider.
 - `MANAGE_EXTERNAL_STORAGE` مقيد في Google Play — مناسب للاستخدام الداخلي.
+
+## إصلاح بناء APK واحد فقط على GitHub
+
+إذا ظهر artifact واحد فقط:
+
+1. شغّل workflow اسمه **Build Android Suite APKs** (وليس Full only).
+2. أو استخدم **Build Android Suite APKs (Sequential)** — يبني الثلاثة في مهمة واحدة.
+3. بعد النجاح يجب أن ترى:
+   - `nano-accounting-apk`
+   - `nano-inventory-apk`
+   - `nano-pos-apk`
+   - أو `nano-suite-three-apks` / `nano-suite-all-apks`
+
+السكربت الآن يستبدل `src/main.py` مؤقتًا بنقطة الدخول الصحيحة قبل كل بناء
+(أكثر موثوقية من الاعتماد على تغيير `module` في pyproject فقط).
