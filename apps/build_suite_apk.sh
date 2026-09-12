@@ -106,18 +106,22 @@ uv run python -m ensurepip --upgrade >/dev/null 2>&1 || true
 GRADLE_INIT_DIR="${GRADLE_USER_HOME:-$HOME/.gradle}/init.d"
 mkdir -p "$GRADLE_INIT_DIR"
 cat > "$GRADLE_INIT_DIR/nano-core-library-desugaring.init.gradle.kts" <<'EOF'
-gradle.beforeProject {
-    if (name != "app") return@beforeProject
+// Auto-applied by Gradle to every build (init script).
+// flutter_local_notifications requires core library desugaring on :app.
+allprojects {
     plugins.withId("com.android.application") {
         extensions.getByName("android").withGroovyBuilder {
             "compileOptions" {
-                "isCoreLibraryDesugaringEnabled" to true
+                setProperty("coreLibraryDesugaringEnabled", true)
             }
         }
-        dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.0.4")
+        dependencies {
+            add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.1.4")
+        }
     }
 }
 EOF
+echo "Installed Gradle init script for core library desugaring at ${GRADLE_INIT_DIR}/nano-core-library-desugaring.init.gradle.kts" >&2
 
 find . -name "NanoGlanceWidget.kt" -type f -delete 2>/dev/null || true
 rm -rf build/flutter-packages 2>/dev/null || true
