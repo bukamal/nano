@@ -81,7 +81,5 @@ jobs:
             dist/nano-accounting-release.apk
             dist/nano-inventory-release.apk
             dist/nano-pos-release.apk
-            dist/*-build-info.txt
-            flet-build-*.log
           if-no-files-found: warn
           retention-days: 14

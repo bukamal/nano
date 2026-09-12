@@ -59,8 +59,5 @@ jobs:
           name: nano-full-apk
           path: |
             dist/nano-release.apk
-            dist/nano-full.apk
-            dist/full-build-info.txt
-            flet-build-full.log
           if-no-files-found: warn
           retention-days: 14

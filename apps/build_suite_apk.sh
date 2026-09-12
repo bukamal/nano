@@ -12,26 +12,28 @@ APP="${1:-full}"
 case "$APP" in
   accounting|acc)
     MODULE_FILE="src/main_accounting.py"
+    # Unique applicationId base — MUST be ASCII; Arabic product names can
+    # collapse to the same package id inside Flet's Android template.
     ORG="com.nano.accounting"
-    PRODUCT="نانو محاسبة"
+    PRODUCT="NanoAccounting"
     APK_NAME="nano-accounting-release.apk"
     ;;
   inventory|inv)
     MODULE_FILE="src/main_inventory.py"
     ORG="com.nano.inventory"
-    PRODUCT="نانو المستودع"
+    PRODUCT="NanoInventory"
     APK_NAME="nano-inventory-release.apk"
     ;;
   pos)
     MODULE_FILE="src/main_pos.py"
     ORG="com.nano.pos"
-    PRODUCT="نانو نقطة البيع"
+    PRODUCT="NanoPOS"
     APK_NAME="nano-pos-release.apk"
     ;;
   full|"")
     MODULE_FILE="src/main.py"
     ORG="com.nano"
-    PRODUCT="Nano | نانو"
+    PRODUCT="Nano"
     APK_NAME="nano-release.apk"
     ;;
   *)
@@ -173,7 +175,6 @@ if [ -z "$APK_PATH" ]; then
 fi
 mkdir -p dist
 cp "$APK_PATH" "dist/${APK_NAME}"
-cp "$APK_PATH" "dist/nano-${APP}.apk"
 echo "Nano installer: $(pwd)/dist/${APK_NAME}"
 ls -lh "dist/${APK_NAME}"
 
@@ -187,3 +188,30 @@ ls -lh "dist/${APK_NAME}"
   echo "build=$BUILD_NUMBER"
 } > "dist/${APP}-build-info.txt"
 cat "dist/${APP}-build-info.txt"
+
+# Verify the *actual* package name inside the APK (not just what we requested).
+verify_pkg() {
+  local apk="$1"
+  local aapt=""
+  if [ -n "${ANDROID_HOME:-}" ]; then
+    aapt="$(ls -1 "$ANDROID_HOME"/build-tools/*/aapt 2>/dev/null | tail -n 1 || true)"
+  fi
+  if [ -z "$aapt" ] && command -v aapt >/dev/null 2>&1; then
+    aapt="$(command -v aapt)"
+  fi
+  if [ -n "$aapt" ] && [ -f "$apk" ]; then
+    local line
+    line="$("$aapt" dump badging "$apk" 2>/dev/null | grep "^package:" | head -n 1 || true)"
+    echo "    aapt: $line"
+    echo "package_line=$line" >> "dist/${APP}-build-info.txt"
+    if echo "$line" | grep -q "name='${ORG}'"; then
+      echo "    OK: applicationId contains org=$ORG"
+    elif echo "$line" | grep -q "name='"; then
+      echo "    WARN: applicationId may differ from org=$ORG — check line above" >&2
+    fi
+  else
+    echo "    (aapt not available — skip package-id verify)"
+  fi
+}
+verify_pkg "dist/${APK_NAME}"
+

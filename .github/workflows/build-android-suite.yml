@@ -124,9 +124,6 @@ jobs:
           name: nano-${{ matrix.app }}-apk
           path: |
             dist/${{ matrix.apk }}
-            dist/nano-${{ matrix.app }}.apk
-            dist/${{ matrix.app }}-build-info.txt
-            flet-build-${{ matrix.app }}.log
           if-no-files-found: warn
           retention-days: 14
 
