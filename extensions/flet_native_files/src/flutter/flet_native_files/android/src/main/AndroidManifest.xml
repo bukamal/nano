@@ -4,44 +4,19 @@
     <!-- Voice commands: on-device SpeechRecognizer -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Cross-APK shared SQLite directory (Documents/NanoShared) -->
+    <!-- Shared SQLite directory (Documents/NanoShared) across suite APKs -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
-    <!-- Signature-level permission: only suite APKs signed with the same key -->
-    <permission
-        android:name="com.nano.permission.ACCESS_SHARED_DB"
-        android:protectionLevel="signature"
-        android:label="Nano shared database" />
-    <uses-permission android:name="com.nano.permission.ACCESS_SHARED_DB" />
-
     <!--
-      PHASE10: home screen widget (Glance). This is a *plugin library*
-      manifest; Gradle's manifest merger folds the <receiver> below into
-      the generated app's final AndroidManifest.xml automatically, the same
-      standard mechanism flutter_local_notifications and workmanager already
-      rely on elsewhere in this project. Nothing here touches (or needs to
-      survive regeneration of) build/flutter/android/app/.../AndroidManifest.xml
-      directly; see build_nano_apk.sh's core-library-desugaring comment for
-      why editing that generated file directly is the approach to avoid.
+      NOTE: Do NOT declare a custom <permission android:name="com.nano.permission...">
+      here. Defining the same custom permission in multiple APKs causes
+      INSTALL_FAILED_DUPLICATE_PERMISSION / "App not installed" when installing
+      the 2nd suite package. Shared DB uses the public Documents path instead.
     -->
+
     <application>
-        <!--
-          android:exported must be TRUE here, not false. This receiver is
-          invoked by the launcher/System Server process (a different app
-          entirely) via the APPWIDGET_UPDATE broadcast whenever the widget
-          is placed, resized, or hits its periodic update tick: that is
-          a genuine cross-process/cross-app call, exactly what `exported`
-          gates on Android 12+ (API 31 made the attribute mandatory and
-          the OS now enforces it strictly instead of silently defaulting).
-          With exported="false" the broadcast is dropped before it ever
-          reaches NanoWidgetReceiver, so the widget is added to the home
-          screen but never actually renders, which is exactly the
-          "يتعذر عرض المحتوى" / "Couldn't load widget" placeholder Android
-          shows for a provider that never responded, not a crash inside
-          NanoWidgetReceiver's own onUpdate() rendering (see FIX_0.9.1).
-        -->
         <receiver
             android:name="com.nano.homewidget.NanoWidgetReceiver"
             android:exported="true"
@@ -54,13 +29,6 @@
                 android:resource="@xml/nano_widget_info" />
         </receiver>
 
-        <!--
-          PHASE10: Quick Settings tile, a fast launcher for Nano from the
-          QS panel. android:icon/android:label below are the static
-          fallback shown before the service first binds;
-          NanoQuickSettingsTileService overrides both at runtime in
-          onStartListening once it's live.
-        -->
         <service
             android:name="com.nano.homewidget.NanoQuickSettingsTileService"
             android:exported="true"
@@ -73,19 +41,15 @@
         </service>
 
         <!--
-          Shared SQLite for the multi-app suite (accounting / inventory / POS).
-          Authority is per-app (${applicationId}.shared.db) so multiple suite APKs
-          can install side-by-side. Clients open the URI under
-          signature-level permission com.nano.permission.ACCESS_SHARED_DB.
-          Prefer NanoSharedStorage public Documents path when available —
-          the provider is the fallback bridge.
+          Provider is NOT exported. Cross-app DB sharing uses Documents/NanoShared.
+          exported=true + a shared custom permission previously blocked installing
+          a second suite APK on the same device.
         -->
         <provider
             android:name="com.nano.shared.NanoSharedDbProvider"
             android:authorities="${applicationId}.shared.db"
-            android:exported="true"
-            android:grantUriPermissions="true"
-            android:permission="com.nano.permission.ACCESS_SHARED_DB" />
+            android:exported="false"
+            android:grantUriPermissions="false" />
     </application>
 
 </manifest>
