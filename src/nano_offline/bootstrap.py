@@ -1,13 +1,14 @@
 """Shared bootstrap for multi-app Nano suite.
 
-Splash → activation → login → shell. Never leave a blank white screen.
-Database open always falls back to private app storage if shared path fails.
+Ensures all suite APKs open the same SQLite file when a shared directory is
+writable. Private per-app DBs are promoted into the shared folder once.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import sqlite3
 import traceback
 from pathlib import Path
@@ -20,6 +21,7 @@ from nano_offline.app_context import AppContext
 from nano_offline.core import theme
 from nano_offline.core import theme_settings
 from nano_offline.core.paths import (
+    PRIMARY_DB_NAME,
     apply_shared_data_dir,
     database_path,
     migrate_legacy_database,
@@ -40,6 +42,13 @@ APP_FONTS = {
     if (_FONTS_DIR / Path(rel).name).exists()
 }
 APP_FONT_FAMILY = "Plex" if "Plex" in APP_FONTS else None
+
+_SHARED_CANDIDATES = (
+    "/storage/emulated/0/Documents/NanoShared",
+    "/sdcard/Documents/NanoShared",
+    "/storage/emulated/0/NanoShared",
+    "/sdcard/NanoShared",
+)
 
 
 def resolve_and_set_theme(page: ft.Page, ctx: AppContext) -> str:
@@ -67,7 +76,6 @@ def apply_theme(page: ft.Page) -> None:
 
 
 def _sqlite_can_use_dir(path: Path) -> bool:
-    """Return True only if SQLite can create/open a DB in this directory."""
     try:
         path.mkdir(parents=True, exist_ok=True)
         probe = path / ".nano_sqlite_probe.db"
@@ -90,34 +98,103 @@ def _sqlite_can_use_dir(path: Path) -> bool:
         return False
 
 
-def _try_default_android_shared_dir() -> None:
-    """Apply shared dir only if SQLite can actually open a file there."""
-    if os.environ.get("NANO_SHARED_DATA_DIR", "").strip():
-        # Validate existing env; clear if unusable so private storage is used.
-        existing = Path(os.environ["NANO_SHARED_DATA_DIR"].strip())
-        if _sqlite_can_use_dir(existing):
-            return
+def _private_data_dirs() -> list[Path]:
+    dirs: list[Path] = []
+    for key in ("FLET_APP_STORAGE_DATA", "NANO_DATA_DIR", "QEID_DATA_DIR"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            dirs.append(Path(raw).expanduser())
+    # Flet Android typical private location pattern (best-effort scan not needed)
+    return dirs
+
+
+def _copy_db_tree(src_db: Path, dest_db: Path) -> None:
+    dest_db.parent.mkdir(parents=True, exist_ok=True)
+    # Prefer consistent SQLite backup API when possible
+    try:
+        src = sqlite3.connect(str(src_db))
+        dst = sqlite3.connect(str(dest_db))
+        try:
+            src.backup(dst)
+            dst.commit()
+        finally:
+            dst.close()
+            src.close()
+        return
+    except Exception:
+        pass
+    shutil.copy2(src_db, dest_db)
+    for suffix in ("-wal", "-shm"):
+        side = Path(str(src_db) + suffix)
+        if side.exists():
+            try:
+                shutil.copy2(side, Path(str(dest_db) + suffix))
+            except Exception:
+                pass
+
+
+def _promote_private_db_into_shared(shared: Path) -> None:
+    """If shared nano.db is missing/empty of items but a private DB exists, copy it."""
+    shared_db = shared / PRIMARY_DB_NAME
+    private_dbs: list[Path] = []
+    for d in _private_data_dirs():
+        candidate = d / PRIMARY_DB_NAME
+        if candidate.is_file():
+            private_dbs.append(candidate)
+
+    if not private_dbs:
+        return
+
+    def _item_count(db_path: Path) -> int:
+        try:
+            conn = sqlite3.connect(str(db_path), timeout=2.0)
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='items'"
+                ).fetchone()
+                if not row or row[0] == 0:
+                    return 0
+                return int(conn.execute("SELECT COUNT(*) FROM items").fetchone()[0])
+            finally:
+                conn.close()
+        except Exception:
+            return 0
+
+    best_private = max(private_dbs, key=_item_count)
+    private_count = _item_count(best_private)
+    shared_count = _item_count(shared_db) if shared_db.is_file() else 0
+
+    # Promote when shared is empty but private has data
+    if private_count > 0 and shared_count == 0:
+        try:
+            _copy_db_tree(best_private, shared_db)
+        except Exception:
+            pass
+
+
+def pin_shared_data_dir_if_possible() -> Path | None:
+    """Force NANO_SHARED_DATA_DIR before opening AppContext when possible."""
+    existing = (os.environ.get("NANO_SHARED_DATA_DIR") or "").strip()
+    if existing:
+        path = Path(existing)
+        if _sqlite_can_use_dir(path):
+            _promote_private_db_into_shared(path)
+            apply_shared_data_dir(path)
+            return path
         os.environ.pop("NANO_SHARED_DATA_DIR", None)
 
-    candidates = [
-        "/storage/emulated/0/Documents/NanoShared",
-        "/sdcard/Documents/NanoShared",
-        "/storage/emulated/0/NanoShared",
-        "/sdcard/NanoShared",
-    ]
-    for raw in candidates:
+    for raw in _SHARED_CANDIDATES:
         path = Path(raw)
         if _sqlite_can_use_dir(path):
+            _promote_private_db_into_shared(path)
             apply_shared_data_dir(path)
-            return
-
-
-def _clear_shared_data_dir() -> None:
-    os.environ.pop("NANO_SHARED_DATA_DIR", None)
+            return path
+    return None
 
 
 def create_context() -> AppContext:
-    """Open DB; on failure clear shared path and retry private storage once."""
+    """Open the suite database (shared when available)."""
+
     def _open() -> AppContext:
         db_path = database_path()
         legacy_candidates = [
@@ -133,11 +210,12 @@ def create_context() -> AppContext:
                 break
         return AppContext.create(db_path)
 
+    pin_shared_data_dir_if_possible()
     try:
         return _open()
     except sqlite3.OperationalError:
-        # Shared external path not writable for this app — fall back to private.
-        _clear_shared_data_dir()
+        # Shared path became unusable — fall back to private storage.
+        os.environ.pop("NANO_SHARED_DATA_DIR", None)
         return _open()
 
 
@@ -286,7 +364,8 @@ def run_app(
 
     def _boot_sync() -> None:
         try:
-            _try_default_android_shared_dir()
+            # MUST pin shared dir before AppContext opens SQLite.
+            pin_shared_data_dir_if_possible()
             state["ctx"] = create_context()
             resolve_and_set_theme(page, state["ctx"])
             apply_theme(page)
@@ -300,6 +379,8 @@ def run_app(
     _boot_sync()
 
     async def _refine_shared_storage() -> None:
+        """Native channel may refine the path; only matters on next cold start
+        unless we already opened shared. Do not reopen live connections here."""
         try:
             from nano_offline.shared_storage_boot import prepare_shared_storage
 
@@ -320,4 +401,5 @@ __all__ = [
     "create_context",
     "resolve_and_set_theme",
     "run_app",
+    "pin_shared_data_dir_if_possible",
 ]
