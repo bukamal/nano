@@ -1,13 +1,14 @@
 """Shared bootstrap for multi-app Nano suite.
 
-Splash → activation → login → shell. Designed to never leave a blank white
-screen: the first paint is synchronous, and any boot error is shown on-page.
+Splash → activation → login → shell. Never leave a blank white screen.
+Database open always falls back to private app storage if shared path fails.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import sqlite3
 import traceback
 from pathlib import Path
 from typing import Callable
@@ -65,13 +66,39 @@ def apply_theme(page: ft.Page) -> None:
     )
 
 
-def _try_default_android_shared_dir() -> None:
-    """Best-effort shared path without waiting on native channels.
+def _sqlite_can_use_dir(path: Path) -> bool:
+    """Return True only if SQLite can create/open a DB in this directory."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".nano_sqlite_probe.db"
+        conn = sqlite3.connect(str(probe), timeout=2.0)
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS _probe (id INTEGER)")
+            conn.execute("INSERT INTO _probe(id) VALUES (1)")
+            conn.commit()
+        finally:
+            conn.close()
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            try:
+                p = Path(str(probe) + suffix) if suffix else probe
+                if p.exists():
+                    p.unlink()
+            except Exception:
+                pass
+        return True
+    except Exception:
+        return False
 
-    Avoids a blank screen if MethodChannel is not ready yet at first frame.
-    """
+
+def _try_default_android_shared_dir() -> None:
+    """Apply shared dir only if SQLite can actually open a file there."""
     if os.environ.get("NANO_SHARED_DATA_DIR", "").strip():
-        return
+        # Validate existing env; clear if unusable so private storage is used.
+        existing = Path(os.environ["NANO_SHARED_DATA_DIR"].strip())
+        if _sqlite_can_use_dir(existing):
+            return
+        os.environ.pop("NANO_SHARED_DATA_DIR", None)
+
     candidates = [
         "/storage/emulated/0/Documents/NanoShared",
         "/sdcard/Documents/NanoShared",
@@ -80,35 +107,41 @@ def _try_default_android_shared_dir() -> None:
     ]
     for raw in candidates:
         path = Path(raw)
-        try:
-            path.mkdir(parents=True, exist_ok=True)
-            probe = path / ".nano_write_probe"
-            probe.write_text("ok", encoding="utf-8")
-            probe.unlink(missing_ok=True)
+        if _sqlite_can_use_dir(path):
             apply_shared_data_dir(path)
             return
-        except Exception:
-            continue
+
+
+def _clear_shared_data_dir() -> None:
+    os.environ.pop("NANO_SHARED_DATA_DIR", None)
 
 
 def create_context() -> AppContext:
-    db_path = database_path()
-    legacy_candidates = [
-        Path(__file__).resolve().parent.parent.parent / "data" / "nano.db",
-        Path(__file__).resolve().parent.parent.parent / "data" / "qeid.db",
-    ]
-    for legacy in legacy_candidates:
-        if legacy.exists():
-            try:
-                migrate_legacy_database(legacy, db_path)
-            except Exception:
-                pass
-            break
-    return AppContext.create(db_path)
+    """Open DB; on failure clear shared path and retry private storage once."""
+    def _open() -> AppContext:
+        db_path = database_path()
+        legacy_candidates = [
+            Path(__file__).resolve().parent.parent.parent / "data" / "nano.db",
+            Path(__file__).resolve().parent.parent.parent / "data" / "qeid.db",
+        ]
+        for legacy in legacy_candidates:
+            if legacy.exists():
+                try:
+                    migrate_legacy_database(legacy, db_path)
+                except Exception:
+                    pass
+                break
+        return AppContext.create(db_path)
+
+    try:
+        return _open()
+    except sqlite3.OperationalError:
+        # Shared external path not writable for this app — fall back to private.
+        _clear_shared_data_dir()
+        return _open()
 
 
 def _show_boot_error(page: ft.Page, err: BaseException) -> None:
-    """Visible fallback so users never stare at a pure white screen."""
     detail = "".join(traceback.format_exception(type(err), err, err.__traceback__))
     page.controls.clear()
     page.bgcolor = "#0F172A"
@@ -147,7 +180,6 @@ def run_app(
     page.padding = 0
     page.bgcolor = Colors.BACKGROUND if hasattr(Colors, "BACKGROUND") else "#F8FAFC"
 
-    # First paint immediately — never leave an empty page.
     page.controls.clear()
     page.add(
         ft.Container(
@@ -253,9 +285,7 @@ def run_app(
             _show_boot_error(page, exc)
 
     def _boot_sync() -> None:
-        """Synchronous boot path — reliable on Android packaged builds."""
         try:
-            # Do not block on native MethodChannel at first launch.
             _try_default_android_shared_dir()
             state["ctx"] = create_context()
             resolve_and_set_theme(page, state["ctx"])
@@ -267,11 +297,8 @@ def run_app(
         except Exception as exc:
             _show_boot_error(page, exc)
 
-    # Prefer sync boot so SeriousPython / Android never waits forever on
-    # an async task that never gets scheduled.
     _boot_sync()
 
-    # Optional: refine shared dir via native channel after UI is up (non-blocking).
     async def _refine_shared_storage() -> None:
         try:
             from nano_offline.shared_storage_boot import prepare_shared_storage

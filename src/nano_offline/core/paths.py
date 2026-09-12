@@ -14,32 +14,44 @@ def app_data_dir() -> Path:
 
     Priority order (first match wins):
 
-    1. ``NANO_SHARED_DATA_DIR`` — explicit shared location for multi-app setups
-       (accounting / inventory / POS). Use this so separate processes open the
-       same SQLite file.
-    2. ``FLET_APP_STORAGE_DATA`` — set by Flet on packaged mobile apps (private
-       per-package storage; different for each APK).
+    1. ``NANO_SHARED_DATA_DIR`` — multi-app shared location (only if usable).
+    2. ``FLET_APP_STORAGE_DATA`` — Flet private storage on packaged mobile.
     3. ``NANO_DATA_DIR`` / ``QEID_DATA_DIR`` — desktop override.
-    4. Fallback ``~/.nano`` (desktop) so packaged assets are never treated as
-       writable data.
-
-    On Android with truly separate APKs, set ``NANO_SHARED_DATA_DIR`` to a
-    common external path (or implement a ContentProvider). On desktop the
-    default ``~/.nano`` already works for multiple concurrent apps.
+    4. Fallback ``~/.nano``.
     """
-    configured = (
-        os.environ.get("NANO_SHARED_DATA_DIR")
-        or os.environ.get("FLET_APP_STORAGE_DATA")
-        or os.environ.get("NANO_DATA_DIR")
-        or os.environ.get("QEID_DATA_DIR")
-        or ""
-    ).strip()
-    if configured:
-        path = Path(configured).expanduser()
-    else:
-        path = Path.home() / ".nano"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    candidates: list[Path] = []
+    for key in (
+        "NANO_SHARED_DATA_DIR",
+        "FLET_APP_STORAGE_DATA",
+        "NANO_DATA_DIR",
+        "QEID_DATA_DIR",
+    ):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            candidates.append(Path(raw).expanduser())
+    candidates.append(Path.home() / ".nano")
+
+    last_err: Exception | None = None
+    for path in candidates:
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            # Ensure the process can create files here (not only the directory).
+            probe = path / ".nano_dir_probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            return path
+        except Exception as exc:
+            last_err = exc
+            continue
+    # Last resort: relative ./data next to cwd
+    fallback = Path("data").resolve()
+    try:
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+    except Exception:
+        if last_err:
+            raise last_err
+        raise RuntimeError("لا يمكن إنشاء مجلد بيانات قابل للكتابة")
 
 
 def migrate_legacy_database(legacy_path: str | Path, target_path: str | Path | None = None) -> bool:
