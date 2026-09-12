@@ -379,12 +379,32 @@ def run_app(
     _boot_sync()
 
     async def _refine_shared_storage() -> None:
-        """Native channel may refine the path; only matters on next cold start
-        unless we already opened shared. Do not reopen live connections here."""
+        """Native channel may refine the path after the control is attached.
+
+        If the path becomes truly shared only after permission is granted, the
+        *next* cold start will open the shared DB. We never reopen live SQLite
+        connections here (would corrupt in-flight transactions).
+        """
         try:
             from nano_offline.shared_storage_boot import prepare_shared_storage
 
-            await asyncio.wait_for(prepare_shared_storage(native_files), timeout=5.0)
+            status = await asyncio.wait_for(
+                prepare_shared_storage(
+                    native_files,
+                    request_permission_if_needed=False,
+                ),
+                timeout=8.0,
+            )
+            # Surface a soft warning when apps would see different DBs
+            if status.get("needs_permission"):
+                import logging as _logging
+
+                _logging.getLogger("nano.shared_storage").warning(
+                    "قاعدة البيانات غير مشتركة بين التطبيقات — "
+                    "امنح صلاحية «الوصول إلى كل الملفات» ثم أعد تشغيل التطبيق. "
+                    "dir=%s",
+                    status.get("dir"),
+                )
         except Exception:
             pass
 
@@ -392,6 +412,7 @@ def run_app(
         page.run_task(_refine_shared_storage)
     except Exception:
         pass
+
 
 
 __all__ = [
