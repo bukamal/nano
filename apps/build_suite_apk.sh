@@ -12,28 +12,30 @@ APP="${1:-full}"
 case "$APP" in
   accounting|acc)
     MODULE_FILE="src/main_accounting.py"
-    # Unique applicationId base — MUST be ASCII; Arabic product names can
-    # collapse to the same package id inside Flet's Android template.
     ORG="com.nano.accounting"
     PRODUCT="NanoAccounting"
+    APPLICATION_ID="com.nano.accounting"
     APK_NAME="nano-accounting-release.apk"
     ;;
   inventory|inv)
     MODULE_FILE="src/main_inventory.py"
     ORG="com.nano.inventory"
     PRODUCT="NanoInventory"
+    APPLICATION_ID="com.nano.inventory"
     APK_NAME="nano-inventory-release.apk"
     ;;
   pos)
     MODULE_FILE="src/main_pos.py"
     ORG="com.nano.pos"
     PRODUCT="NanoPOS"
+    APPLICATION_ID="com.nano.pos"
     APK_NAME="nano-pos-release.apk"
     ;;
   full|"")
     MODULE_FILE="src/main.py"
     ORG="com.nano"
     PRODUCT="Nano"
+    APPLICATION_ID="com.nano.app"
     APK_NAME="nano-release.apk"
     ;;
   *)
@@ -41,6 +43,8 @@ case "$APP" in
     exit 1
     ;;
 esac
+export NANO_APPLICATION_ID="$APPLICATION_ID"
+echo "    applicationId=$APPLICATION_ID (forced via Gradle init)"
 
 if [ -z "${BUILD_VERSION:-}" ] || [ -z "${BUILD_NUMBER:-}" ]; then
   eval "$(python3 - <<'PY'
@@ -107,9 +111,10 @@ uv run python -m ensurepip --upgrade >/dev/null 2>&1 || true
 
 GRADLE_INIT_DIR="${GRADLE_USER_HOME:-$HOME/.gradle}/init.d"
 mkdir -p "$GRADLE_INIT_DIR"
-cat > "$GRADLE_INIT_DIR/nano-core-library-desugaring.init.gradle.kts" <<'EOF'
-// Auto-applied by Gradle to every build (init script).
-// flutter_local_notifications requires core library desugaring on :app.
+# Force unique applicationId + core library desugaring for every Android app module.
+# NANO_APPLICATION_ID is set per suite app above (com.nano.accounting / inventory / pos).
+cat > "$GRADLE_INIT_DIR/nano-android-suite.init.gradle.kts" <<'EOF'
+// Applied automatically to every Gradle build on this runner.
 allprojects {
     plugins.withId("com.android.application") {
         extensions.getByName("android").withGroovyBuilder {
@@ -121,9 +126,26 @@ allprojects {
             add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.1.4")
         }
     }
+    afterEvaluate {
+        if (!plugins.hasPlugin("com.android.application")) return@afterEvaluate
+        val appId = System.getenv("NANO_APPLICATION_ID")?.trim().orEmpty()
+        if (appId.isEmpty()) return@afterEvaluate
+        try {
+            extensions.getByName("android").withGroovyBuilder {
+                "defaultConfig" {
+                    setProperty("applicationId", appId)
+                }
+            }
+            println("nano-android-suite: forced applicationId=$appId for project=${project.name}")
+        } catch (e: Exception) {
+            logger.warn("nano-android-suite: could not set applicationId: ${e.message}")
+        }
+    }
 }
 EOF
-echo "Installed Gradle init script for core library desugaring at ${GRADLE_INIT_DIR}/nano-core-library-desugaring.init.gradle.kts" >&2
+# Remove old desugar-only script if present so we don't double-apply oddly
+rm -f "$GRADLE_INIT_DIR/nano-core-library-desugaring.init.gradle.kts"
+echo "Installed Gradle init script at ${GRADLE_INIT_DIR}/nano-android-suite.init.gradle.kts (applicationId=$APPLICATION_ID)" >&2
 
 find . -name "NanoGlanceWidget.kt" -type f -delete 2>/dev/null || true
 rm -rf build/flutter-packages 2>/dev/null || true
@@ -181,6 +203,7 @@ ls -lh "dist/${APK_NAME}"
 {
   echo "app=$APP"
   echo "org=$ORG"
+  echo "applicationId=$APPLICATION_ID"
   echo "product=$PRODUCT"
   echo "entry=$MODULE_FILE"
   echo "apk=$APK_NAME"
@@ -204,10 +227,11 @@ verify_pkg() {
     line="$("$aapt" dump badging "$apk" 2>/dev/null | grep "^package:" | head -n 1 || true)"
     echo "    aapt: $line"
     echo "package_line=$line" >> "dist/${APP}-build-info.txt"
-    if echo "$line" | grep -q "name='${ORG}'"; then
-      echo "    OK: applicationId contains org=$ORG"
+    if echo "$line" | grep -q "name='${APPLICATION_ID}'"; then
+      echo "    OK: applicationId=$APPLICATION_ID"
     elif echo "$line" | grep -q "name='"; then
-      echo "    WARN: applicationId may differ from org=$ORG — check line above" >&2
+      echo "    ERROR: expected applicationId=$APPLICATION_ID but got: $line" >&2
+      exit 1
     fi
   else
     echo "    (aapt not available — skip package-id verify)"

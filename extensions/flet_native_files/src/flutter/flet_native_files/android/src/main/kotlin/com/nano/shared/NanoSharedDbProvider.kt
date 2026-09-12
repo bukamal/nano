@@ -13,29 +13,18 @@ import java.io.File
 import java.io.FileNotFoundException
 
 /**
- * Exposes the shared Nano SQLite database to other suite APKs signed with the
- * same certificate (signature-level permission).
+ * Exposes the shared Nano SQLite database file.
  *
- * Authority: com.nano.shared.db
+ * Authority is **per applicationId**: `{applicationId}.shared.db`
+ * so accounting / inventory / POS can all install on the same device
+ * without AUTHORITY conflicts (a global authority would block the 2nd APK).
  *
- * URIs:
- *   content://com.nano.shared.db/database          → openFile (rwt) on nano.db
- *   content://com.nano.shared.db/info              → cursor with path/size metadata
- *   content://com.nano.shared.db/wal               → openFile on nano.db-wal (if any)
- *   content://com.nano.shared.db/shm               → openFile on nano.db-shm (if any)
- *
- * Only one package should *host* the provider (typically the accounting APK).
- * Client apps open the URI and either:
- *   - copy bytes into their private storage (simple, eventual consistency), or
- *   - prefer the shared-directory strategy from [NanoSharedStorage] for true
- *     concurrent WAL access.
- *
- * This provider is the safety net when external shared dirs are unavailable.
+ * Cross-app sharing prefers [NanoSharedStorage] public Documents path;
+ * this provider is a same-app / fallback bridge.
  */
 class NanoSharedDbProvider : ContentProvider() {
 
     companion object {
-        const val AUTHORITY = "com.nano.shared.db"
         const val PATH_DATABASE = "database"
         const val PATH_INFO = "info"
         const val PATH_WAL = "wal"
@@ -48,24 +37,26 @@ class NanoSharedDbProvider : ContentProvider() {
 
         private const val TAG = "NanoSharedDbProvider"
 
-        val CONTENT_URI: Uri = Uri.parse("content://$AUTHORITY/$PATH_DATABASE")
-        val INFO_URI: Uri = Uri.parse("content://$AUTHORITY/$PATH_INFO")
-
-        private val matcher = UriMatcher(UriMatcher.NO_MATCH).apply {
-            addURI(AUTHORITY, PATH_DATABASE, CODE_DATABASE)
-            addURI(AUTHORITY, PATH_INFO, CODE_INFO)
-            addURI(AUTHORITY, PATH_WAL, CODE_WAL)
-            addURI(AUTHORITY, PATH_SHM, CODE_SHM)
-        }
+        fun authorityFor(context: Context): String = "${context.packageName}.shared.db"
 
         fun dbFile(context: Context): File = NanoSharedStorage.databaseFile(context)
     }
 
+    private lateinit var matcher: UriMatcher
+    private lateinit var authority: String
+
     override fun onCreate(): Boolean {
         val ctx = context ?: return false
+        authority = authorityFor(ctx)
+        matcher = UriMatcher(UriMatcher.NO_MATCH).apply {
+            addURI(authority, PATH_DATABASE, CODE_DATABASE)
+            addURI(authority, PATH_INFO, CODE_INFO)
+            addURI(authority, PATH_WAL, CODE_WAL)
+            addURI(authority, PATH_SHM, CODE_SHM)
+        }
         try {
             NanoSharedStorage.resolveDir(ctx)
-            Log.i(TAG, "Provider ready, db=${dbFile(ctx).absolutePath}")
+            Log.i(TAG, "Provider ready authority=$authority db=${dbFile(ctx).absolutePath}")
         } catch (e: Exception) {
             Log.e(TAG, "Provider init failed", e)
         }
@@ -73,6 +64,7 @@ class NanoSharedDbProvider : ContentProvider() {
     }
 
     override fun getType(uri: Uri): String? {
+        if (!::matcher.isInitialized) return null
         return when (matcher.match(uri)) {
             CODE_DATABASE, CODE_WAL, CODE_SHM -> "application/x-sqlite3"
             CODE_INFO -> "vnd.android.cursor.item/vnd.com.nano.shared.info"
@@ -88,9 +80,9 @@ class NanoSharedDbProvider : ContentProvider() {
         sortOrder: String?
     ): Cursor? {
         val ctx = context ?: return null
-        if (matcher.match(uri) != CODE_INFO) return null
+        if (!::matcher.isInitialized || matcher.match(uri) != CODE_INFO) return null
         val file = dbFile(ctx)
-        val cols = arrayOf("path", "size", "exists", "dir", "truly_shared")
+        val cols = arrayOf("path", "size", "exists", "dir", "truly_shared", "authority")
         val cursor = MatrixCursor(cols)
         cursor.addRow(
             arrayOf(
@@ -98,7 +90,8 @@ class NanoSharedDbProvider : ContentProvider() {
                 if (file.exists()) file.length() else 0L,
                 if (file.exists()) 1 else 0,
                 file.parent ?: "",
-                if (NanoSharedStorage.isTrulyShared(file.absolutePath)) 1 else 0
+                if (NanoSharedStorage.isTrulyShared(file.absolutePath)) 1 else 0,
+                authority
             )
         )
         return cursor
@@ -106,6 +99,7 @@ class NanoSharedDbProvider : ContentProvider() {
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         val ctx = context ?: throw FileNotFoundException("no context")
+        if (!::matcher.isInitialized) throw FileNotFoundException("matcher not ready")
         val file = when (matcher.match(uri)) {
             CODE_DATABASE -> dbFile(ctx)
             CODE_WAL -> File(dbFile(ctx).path + "-wal")
@@ -116,7 +110,6 @@ class NanoSharedDbProvider : ContentProvider() {
         if (matcher.match(uri) == CODE_DATABASE) {
             file.parentFile?.mkdirs()
             if (!file.exists()) {
-                // Create empty file so clients can open rwt
                 file.createNewFile()
             }
         } else if (!file.exists()) {
@@ -125,11 +118,9 @@ class NanoSharedDbProvider : ContentProvider() {
 
         val pfdMode = when {
             mode.contains("w") && mode.contains("r") ->
-                ParcelFileDescriptor.MODE_READ_WRITE or
-                    ParcelFileDescriptor.MODE_CREATE
+                ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE
             mode.contains("w") ->
-                ParcelFileDescriptor.MODE_WRITE_ONLY or
-                    ParcelFileDescriptor.MODE_CREATE
+                ParcelFileDescriptor.MODE_WRITE_ONLY or ParcelFileDescriptor.MODE_CREATE
             else ->
                 ParcelFileDescriptor.MODE_READ_ONLY
         }

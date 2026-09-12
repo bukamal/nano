@@ -74,15 +74,15 @@
 
         <!--
           Shared SQLite for the multi-app suite (accounting / inventory / POS).
-          Authority is global (com.nano.shared.db). Only one installed suite
-          package should host the live provider; clients open the URI under
+          Authority is per-app (${applicationId}.shared.db) so multiple suite APKs
+          can install side-by-side. Clients open the URI under
           signature-level permission com.nano.permission.ACCESS_SHARED_DB.
           Prefer NanoSharedStorage public Documents path when available —
           the provider is the fallback bridge.
         -->
         <provider
             android:name="com.nano.shared.NanoSharedDbProvider"
-            android:authorities="com.nano.shared.db"
+            android:authorities="${applicationId}.shared.db"
             android:exported="true"
             android:grantUriPermissions="true"
             android:permission="com.nano.permission.ACCESS_SHARED_DB" />
