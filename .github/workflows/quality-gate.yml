@@ -1,0 +1,71 @@
+# Fast quality gate (no Android SDK). Runs on every PR touching Python sources.
+name: Quality Gate
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "apps/**"
+      - "tools/**"
+      - "pyproject.toml"
+  push:
+    branches: [main, master]
+    paths:
+      - "src/**"
+      - "apps/**"
+      - "tools/**"
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install project
+        run: |
+          uv sync
+          uv pip install -e . -e extensions/flet_native_files 2>/dev/null || uv pip install -e .
+
+      - name: Suite import smoke
+        env:
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          # Verify multi-app entry points import without launching UI
+          import importlib
+          for mod in (
+              "nano_offline.bootstrap",
+              "nano_offline.suite.accounting_app",
+              "nano_offline.suite.inventory_app",
+              "nano_offline.suite.pos_app",
+          ):
+              importlib.import_module(mod)
+              print("OK", mod)
+          from nano_offline.core.paths import database_path, app_data_dir
+          print("db path helper:", database_path())
+          print("data dir:", app_data_dir())
+          PY
+
+      - name: Quality gate script
+        env:
+          PYTHONPATH: src
+        run: |
+          if [ -f tools/quality_gate.py ]; then
+            uv run python tools/quality_gate.py
+          else
+            echo "tools/quality_gate.py not present — skip"
+          fi

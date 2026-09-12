@@ -287,6 +287,7 @@ List<_NativeAlert> _checkLicense(Database db, Map<String, dynamic> config) {
 // Both funnel into the same native channel; NanoHomeWidgetPlugin.kt is the
 // single place that actually touches the Glance widget state.
 const MethodChannel _homeWidgetChannel = MethodChannel('nano/home_widget');
+const MethodChannel _sharedStorageChannel = MethodChannel('nano/shared_storage');
 const MethodChannel _speechChannel = MethodChannel('nano/speech');
 
 Future<void> _pushHomeWidgetJson(String snapshotJson) async {
@@ -808,6 +809,47 @@ class _FletNativeFilesControlState extends State<FletNativeFilesControl> {
             return 'ok';
           } catch (error) {
             return 'error:$error';
+          }
+
+
+        case 'get_shared_data_dir':
+          try {
+            final path = await _sharedStorageChannel.invokeMethod<String>('get_shared_dir');
+            return path ?? 'error:empty';
+          } catch (e) {
+            return 'error:$e';
+          }
+
+        case 'get_shared_db_path':
+          try {
+            final path = await _sharedStorageChannel.invokeMethod<String>('get_db_path');
+            return path ?? 'error:empty';
+          } catch (e) {
+            return 'error:$e';
+          }
+
+        case 'diagnose_shared_storage':
+          try {
+            final raw = await _sharedStorageChannel.invokeMethod<String>('diagnose');
+            return raw ?? '{}';
+          } catch (e) {
+            return 'error:$e';
+          }
+
+        case 'request_manage_storage':
+          try {
+            final raw = await _sharedStorageChannel.invokeMethod<String>('request_manage_storage');
+            return raw ?? 'error:empty';
+          } catch (e) {
+            return 'error:$e';
+          }
+
+        case 'has_manage_storage':
+          try {
+            final raw = await _sharedStorageChannel.invokeMethod<String>('has_manage_storage');
+            return raw ?? 'false';
+          } catch (e) {
+            return 'false';
           }
 
         case 'speech_stop_speak':

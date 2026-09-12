@@ -4,6 +4,18 @@
     <!-- Voice commands: on-device SpeechRecognizer -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Cross-APK shared SQLite directory (Documents/NanoShared) -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
+    <!-- Signature-level permission: only suite APKs signed with the same key -->
+    <permission
+        android:name="com.nano.permission.ACCESS_SHARED_DB"
+        android:protectionLevel="signature"
+        android:label="Nano shared database" />
+    <uses-permission android:name="com.nano.permission.ACCESS_SHARED_DB" />
+
     <!--
       PHASE10: home screen widget (Glance). This is a *plugin library*
       manifest; Gradle's manifest merger folds the <receiver> below into
@@ -59,6 +71,21 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+
+        <!--
+          Shared SQLite for the multi-app suite (accounting / inventory / POS).
+          Authority is global (com.nano.shared.db). Only one installed suite
+          package should host the live provider; clients open the URI under
+          signature-level permission com.nano.permission.ACCESS_SHARED_DB.
+          Prefer NanoSharedStorage public Documents path when available —
+          the provider is the fallback bridge.
+        -->
+        <provider
+            android:name="com.nano.shared.NanoSharedDbProvider"
+            android:authorities="com.nano.shared.db"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="com.nano.permission.ACCESS_SHARED_DB" />
     </application>
 
 </manifest>

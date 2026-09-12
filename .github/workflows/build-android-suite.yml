@@ -1,0 +1,158 @@
+# Build the three standalone Nano suite APKs:
+#   - نانو محاسبة   (com.nano.accounting)
+#   - نانو المستودع  (com.nano.inventory)
+#   - نانو نقطة البيع (com.nano.pos)
+#
+# Each job produces a separate APK that can be installed side-by-side.
+# They share business logic and (on desktop) the same SQLite file via
+# NANO_SHARED_DATA_DIR. On Android, shared DB requires an additional
+# storage strategy (see apps/README_MULTI_APP_AR.md).
+name: Build Android Suite APKs
+
+on:
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: "Comma-separated apps to build (accounting,inventory,pos) or 'all'"
+        required: false
+        default: "all"
+  push:
+    tags:
+      - "suite-v*"
+      - "v*"
+  pull_request:
+    paths:
+      - "src/**"
+      - "apps/**"
+      - "extensions/**"
+      - "pyproject.toml"
+      - ".github/workflows/build-android-suite.yml"
+
+concurrency:
+  group: android-suite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-suite:
+    name: APK (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - accounting
+          - inventory
+          - pos
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Optionally skip app
+        id: gate
+        shell: bash
+        run: |
+          INPUT="${{ github.event.inputs.apps || 'all' }}"
+          if [ "$INPUT" = "all" ] || echo ",$INPUT," | grep -q ",${{ matrix.app }},"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping ${{ matrix.app }} (not in inputs: $INPUT)"
+          fi
+
+      - name: Set up Python
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Java 17
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        if: steps.gate.outputs.run == 'true'
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android licenses
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;34.0.0" "cmdline-tools;latest"
+
+      - name: Install uv
+        if: steps.gate.outputs.run == 'true'
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Verify suite entry points exist
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          test -f "src/main_${{ matrix.app }}.py" || {
+            echo "Missing src/main_${{ matrix.app }}.py — apply the multi-app patch first." >&2
+            exit 1
+          }
+          test -f "src/nano_offline/suite/${{ matrix.app }}_app.py" || {
+            echo "Missing suite shell for ${{ matrix.app }}" >&2
+            exit 1
+          }
+          test -f "src/nano_offline/bootstrap.py" || {
+            echo "Missing bootstrap.py" >&2
+            exit 1
+          }
+
+      - name: Build suite APK
+        if: steps.gate.outputs.run == 'true'
+        env:
+          FLET_CLI_NO_RICH_OUTPUT: "1"
+          FLET_CLI_SKIP_FLUTTER_DOCTOR: "1"
+          SKIP_FLUTTER_DOCTOR: "1"
+        run: |
+          set -euo pipefail
+          chmod +x apps/build_suite_apk.sh
+          ./apps/build_suite_apk.sh "${{ matrix.app }}"
+
+      - name: Upload APK + log
+        if: always() && steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nano-${{ matrix.app }}-apk
+          path: |
+            dist/nano-${{ matrix.app }}-release.apk
+            dist/*.apk
+            flet-build-${{ matrix.app }}.log
+            flet-build*.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Optional: single job that zips all three APKs when the whole matrix succeeds
+  package-all:
+    name: Package suite artifacts
+    needs: build-suite
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download all suite artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nano-*-apk
+          path: collected
+          merge-multiple: false
+
+      - name: List collected files
+        run: find collected -type f | sort
+
+      - name: Upload combined suite bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: nano-suite-all-apks
+          path: collected
+          if-no-files-found: warn
+          retention-days: 14

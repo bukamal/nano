@@ -476,3 +476,79 @@ class NativeFiles(Control):
             )
         except Exception:
             pass
+
+
+    async def get_shared_data_dir(self) -> str | None:
+        """Return the cross-APK shared data directory on Android (or None).
+
+        Resolves via the native ``nano/shared_storage`` channel to a path under
+        Documents/NanoShared when possible so accounting / inventory / POS can
+        open the same ``nano.db``.
+        """
+        try:
+            raw = await self.invoke_method_async(
+                "get_shared_data_dir",
+                {},
+                wait_for_result=True,
+                wait_timeout=_QUICK_TIMEOUT,
+            )
+            if not raw or str(raw).startswith("error:"):
+                return None
+            return str(raw).strip() or None
+        except Exception:
+            return None
+
+    async def get_shared_db_path(self) -> str | None:
+        """Absolute path to the shared ``nano.db`` file on Android."""
+        try:
+            raw = await self.invoke_method_async(
+                "get_shared_db_path",
+                {},
+                wait_for_result=True,
+                wait_timeout=_QUICK_TIMEOUT,
+            )
+            if not raw or str(raw).startswith("error:"):
+                return None
+            return str(raw).strip() or None
+        except Exception:
+            return None
+
+    async def diagnose_shared_storage(self) -> dict | None:
+        """JSON diagnostics for shared storage (path, permissions, size)."""
+        try:
+            raw = await self.invoke_method_async(
+                "diagnose_shared_storage",
+                {},
+                wait_for_result=True,
+                wait_timeout=_QUICK_TIMEOUT,
+            )
+            if not raw or str(raw).startswith("error:"):
+                return None
+            return json.loads(str(raw))
+        except Exception:
+            return None
+
+    async def request_manage_storage(self) -> str | None:
+        """Open system settings for All-files access (Android 11+)."""
+        try:
+            raw = await self.invoke_method_async(
+                "request_manage_storage",
+                {},
+                wait_for_result=True,
+                wait_timeout=_QUICK_TIMEOUT,
+            )
+            return str(raw) if raw else None
+        except Exception:
+            return None
+
+    async def has_manage_storage(self) -> bool:
+        try:
+            raw = await self.invoke_method_async(
+                "has_manage_storage",
+                {},
+                wait_for_result=True,
+                wait_timeout=_QUICK_TIMEOUT,
+            )
+            return str(raw).lower() in ("true", "1", "yes")
+        except Exception:
+            return False

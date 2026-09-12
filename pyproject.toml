@@ -81,6 +81,11 @@ android_permissions = [
   "android.permission.POST_NOTIFICATIONS",
   "android.permission.RECEIVE_BOOT_COMPLETED",
   "android.permission.WAKE_LOCK",
+  # Multi-app shared SQLite under Documents/NanoShared (Android 11+).
+  "android.permission.MANAGE_EXTERNAL_STORAGE",
+  "android.permission.READ_EXTERNAL_STORAGE",
+  "android.permission.WRITE_EXTERNAL_STORAGE",
+  "android.permission.RECORD_AUDIO",
 ]
 
 [tool.flet.app]
@@ -106,6 +111,10 @@ allowBackup = "false"
 "android.permission.POST_NOTIFICATIONS" = true
 "android.permission.RECEIVE_BOOT_COMPLETED" = true
 "android.permission.WAKE_LOCK" = true
+"android.permission.MANAGE_EXTERNAL_STORAGE" = true
+"android.permission.READ_EXTERNAL_STORAGE" = true
+"android.permission.WRITE_EXTERNAL_STORAGE" = true
+"android.permission.RECORD_AUDIO" = true
 
 # Not "required" -- devices without a camera can still install and use Nano;
 # barcode scanning is just unavailable there. Camera permission above is

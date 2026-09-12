@@ -3,6 +3,11 @@ package com.nano.homewidget
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import com.nano.shared.NanoSharedStorage
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -15,20 +20,68 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * Registers two channels:
- *   - nano/home_widget  (existing widget push/clear/refresh/diagnose)
- *   - nano/speech       (on-device SpeechRecognizer for Arabic commands)
+ * Registers three channels:
+ *   - nano/home_widget     (widget push/clear/refresh/diagnose)
+ *   - nano/speech          (on-device SpeechRecognizer for Arabic commands)
+ *   - nano/shared_storage  (cross-APK shared DB directory + diagnostics)
  */
 class NanoHomeWidgetPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware {
     private lateinit var channel: MethodChannel
     private lateinit var speechChannel: MethodChannel
+    private lateinit var sharedStorageChannel: MethodChannel
     private lateinit var context: Context
     private var speechHandler: NanoSpeechHandler? = null
+    private var activity: android.app.Activity? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
         channel = MethodChannel(binding.binaryMessenger, "nano/home_widget")
         channel.setMethodCallHandler(this)
+
+        sharedStorageChannel = MethodChannel(binding.binaryMessenger, "nano/shared_storage")
+        sharedStorageChannel.setMethodCallHandler { call, result ->
+            try {
+                when (call.method) {
+                    "get_shared_dir" ->
+                        result.success(NanoSharedStorage.resolveDir(context).absolutePath)
+                    "get_db_path" ->
+                        result.success(NanoSharedStorage.databaseFile(context).absolutePath)
+                    "diagnose" ->
+                        result.success(NanoSharedStorage.diagnose(context))
+                    "has_manage_storage" ->
+                        result.success(
+                            if (NanoSharedStorage.hasLegacyStoragePermission(context)) "true" else "false"
+                        )
+                    "request_manage_storage" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            val act = activity
+                            if (act == null) {
+                                result.error("no_activity", "Activity required", null)
+                            } else {
+                                try {
+                                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                                    intent.data = Uri.parse("package:${context.packageName}")
+                                    act.startActivity(intent)
+                                    result.success("opened")
+                                } catch (_: Exception) {
+                                    try {
+                                        act.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                                        result.success("opened_general")
+                                    } catch (e2: Exception) {
+                                        result.error("intent_failed", e2.message, null)
+                                    }
+                                }
+                            }
+                        } else {
+                            result.success("not_required")
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            } catch (e: Exception) {
+                result.error("error", e.message, null)
+            }
+        }
 
         speechHandler = NanoSpeechHandler(context)
         speechChannel = MethodChannel(binding.binaryMessenger, NanoSpeechHandler.CHANNEL)
@@ -153,23 +206,28 @@ class NanoHomeWidgetPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Act
         try {
             channel.setMethodCallHandler(null)
             speechChannel.setMethodCallHandler(null)
+            sharedStorageChannel.setMethodCallHandler(null)
         } catch (_: Exception) {
         }
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity
         speechHandler?.attachActivity(binding.activity)
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
+        activity = null
         speechHandler?.attachActivity(null)
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
         speechHandler?.attachActivity(binding.activity)
     }
 
     override fun onDetachedFromActivity() {
+        activity = null
         speechHandler?.attachActivity(null)
     }
 }

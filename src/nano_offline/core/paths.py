@@ -12,13 +12,24 @@ LEGACY_DB_NAME = "qeid.db"
 def app_data_dir() -> Path:
     """Return the persistent writable application data directory.
 
-    Flet exposes ``FLET_APP_STORAGE_DATA`` on packaged mobile apps.  Desktop
-    development can override the location with ``NANO_DATA_DIR`` (with ``QEID_DATA_DIR`` retained for backward compatibility).  The fallback
-    deliberately lives outside the source tree so packaged assets are never
-    treated as writable data.
+    Priority order (first match wins):
+
+    1. ``NANO_SHARED_DATA_DIR`` — explicit shared location for multi-app setups
+       (accounting / inventory / POS). Use this so separate processes open the
+       same SQLite file.
+    2. ``FLET_APP_STORAGE_DATA`` — set by Flet on packaged mobile apps (private
+       per-package storage; different for each APK).
+    3. ``NANO_DATA_DIR`` / ``QEID_DATA_DIR`` — desktop override.
+    4. Fallback ``~/.nano`` (desktop) so packaged assets are never treated as
+       writable data.
+
+    On Android with truly separate APKs, set ``NANO_SHARED_DATA_DIR`` to a
+    common external path (or implement a ContentProvider). On desktop the
+    default ``~/.nano`` already works for multiple concurrent apps.
     """
     configured = (
-        os.environ.get("FLET_APP_STORAGE_DATA")
+        os.environ.get("NANO_SHARED_DATA_DIR")
+        or os.environ.get("FLET_APP_STORAGE_DATA")
         or os.environ.get("NANO_DATA_DIR")
         or os.environ.get("QEID_DATA_DIR")
         or ""
@@ -77,4 +88,36 @@ def backups_dir() -> Path:
     return path
 
 
-__all__ = ["app_data_dir", "database_path", "backups_dir", "migrate_legacy_database", "APP_DIR_NAME"]
+def apply_shared_data_dir(path: str | Path | None) -> Path | None:
+    """Pin ``NANO_SHARED_DATA_DIR`` so every subsequent ``app_data_dir()`` call
+    resolves to the cross-APK shared location returned by the native layer.
+
+    Call this once at startup on Android after ``NativeFiles.get_shared_data_dir()``
+    succeeds. Returns the resolved directory, or ``None`` if *path* is empty.
+    """
+    if not path:
+        return None
+    resolved = Path(str(path)).expanduser()
+    try:
+        resolved.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    os.environ["NANO_SHARED_DATA_DIR"] = str(resolved)
+    return resolved
+
+
+def is_shared_data_dir_active() -> bool:
+    """True when an explicit shared directory has been configured."""
+    return bool(os.environ.get("NANO_SHARED_DATA_DIR", "").strip())
+
+
+__all__ = [
+    "app_data_dir",
+    "database_path",
+    "backups_dir",
+    "migrate_legacy_database",
+    "apply_shared_data_dir",
+    "is_shared_data_dir_active",
+    "APP_DIR_NAME",
+    "PRIMARY_DB_NAME",
+]

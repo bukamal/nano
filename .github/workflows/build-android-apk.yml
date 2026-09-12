@@ -1,55 +1,92 @@
-name: Build Android APK
+# Build the full Nano app (single APK) — original entry point src/main.py
+name: Build Android APK (Full)
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - "src/**"
+      - "extensions/**"
+      - "pyproject.toml"
+      - "build_nano_apk.sh"
+      - ".github/workflows/build-android-apk.yml"
+
+concurrency:
+  group: android-apk-full-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
+    name: Full APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: actions/setup-java@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
         with:
-          distribution: "temurin"
-          java-version: '17'
-      - name: Prepare Android SDK and accept licenses
-        shell: bash
-        run: |
-          export SDK_ROOT="$ANDROID_SDK_ROOT"
-          export ANDROID_SDK_ROOT="$SDK_ROOT"
-          yes | "$SDKMANAGER" --licenses
-          "$SDKMANAGER" "platforms;android-35" "build-tools;34.0.0"
-      - name: Install dependencies
-        run: |
-          pip install -e extensions/flet_native_files
-          pip install flet==0.28.3
-      - name: Run quality gate
-        run: PYTHONPATH=src python tools/quality_gate.py
-      - name: Build APK
-        shell: bash
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android licenses
         run: |
           set -euo pipefail
-          mkdir -p dist
-          flet build apk --build-version 0.8.1 --build-number 14 --skip-flutter-doctor 2>&1 | tee flet-build.log
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;34.0.0" "cmdline-tools;latest"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Build full APK
         env:
-          ANDROID_SDK_ROOT: "$SDK_ROOT"
-          FLET_CLI_SKIP_FLUTTER_DOCTOR: "1"
           FLET_CLI_NO_RICH_OUTPUT: "1"
-      - name: Verify native files
-        run: python tools/verify_flet_native_files_registration.py build/flutter
-      - name: Copy release APK
+          FLET_CLI_SKIP_FLUTTER_DOCTOR: "1"
+          SKIP_FLUTTER_DOCTOR: "1"
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
         run: |
-          apk=$(find build/apk -name '*.apk' | head -1)
-          [ -n "$apk" ] && cp "$apk" dist/nano-release.apk
+          set -euo pipefail
+          chmod +x apps/build_suite_apk.sh 2>/dev/null || true
+          if [ -x apps/build_suite_apk.sh ]; then
+            ./apps/build_suite_apk.sh full
+          else
+            # Fallback to legacy script if suite helper is not present
+            chmod +x build_nano_apk.sh
+            ./build_nano_apk.sh
+          fi
+
       - name: Upload APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nano-release
-          path: dist/nano-release.apk
+          name: nano-full-apk
+          path: |
+            dist/*.apk
+            flet-build*.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nano-full-flet-build-log
+          path: flet-build*.log
+          if-no-files-found: ignore
+          retention-days: 7
