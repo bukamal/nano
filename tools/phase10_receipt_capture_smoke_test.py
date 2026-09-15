@@ -72,7 +72,9 @@ with tempfile.TemporaryDirectory(prefix="nano_phase10_capture_") as td:
         cols = {r[1] for r in c.execute("PRAGMA table_info(expenses)").fetchall()}
         assert {"receipt_image", "receipt_name"} <= cols, cols
         version = int(c.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0])
-        assert version == SCHEMA_VERSION and SCHEMA_VERSION == 14, version
+        # Photo columns landed in schema 14; PHASE11 later advanced the version
+        # to SCHEMA_VERSION. The migration must land on the current version.
+        assert version == SCHEMA_VERSION and int(SCHEMA_VERSION) >= 14, version
         assert c.execute("SELECT COUNT(*) FROM expenses").fetchone()[0] == 1  # untouched
 
     # --- 8. contract needles: bridge + dart + pubspec + service + UI ---

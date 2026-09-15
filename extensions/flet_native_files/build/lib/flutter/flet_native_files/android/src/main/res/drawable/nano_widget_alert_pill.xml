@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FIX_0.9.3: neutral glassy pill for the smart status line. One background
+  for every state — the text color (set at render time) carries the
+  semantics: mint green = all good, amber = warning, soft red = urgent.
+  Translucent white keeps it legible over the teal gradient in both light
+  wallpaper and dark wallpaper cases.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="12dp" />
+    <solid android:color="#1FFFFFFF" />
+    <stroke
+        android:width="0.5dp"
+        android:color="#40FFFFFF" />
+</shape>

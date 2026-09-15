@@ -59,6 +59,7 @@ SCRIPTS = [
     "tools/phase10_public_qr_verify_smoke_test.py",
     "tools/phase10_receipt_capture_smoke_test.py",
     "tools/phase10_forecast_smoke_test.py",
+    "tools/money_consistency_smoke_test.py",
     "tools/apk_release_preflight.py",
 ]
 

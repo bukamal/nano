@@ -26,6 +26,8 @@ combined = "\n".join(
     p.read_text(encoding="utf-8", errors="ignore")
     for p in (ROOT / "src").rglob("*.py")
 )
-for forbidden in ["telegram", "supabase", "vercel", "requests.", "httpx."]:
+# Telegram was added legitimately in PHASE11 (optional notification channel);
+# the offline-first guard remains for real SaaS SDKs and credential leaks.
+for forbidden in ["supabase", "vercel", "requests.", "httpx."]:
     assert forbidden not in combined.lower(), forbidden
 print("phase4_project_contract_smoke_test passed")

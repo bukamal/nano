@@ -31,7 +31,11 @@ for token in ["def update_invoice", "def delete_invoice", "def list_invoices", "
 assert "AccountingRebuilder.rebuild" in invoice_service
 
 assert "def units(" in item_repo
-for forbidden in ["telegram", "supabase", "vercel", "service_role_key"]:
+# Credential-bearing SaaS identifiers must never leak into these core files.
+# "telegram" was dropped from the list in PHASE11: it is a legitimate,
+# user-configurable notification channel whose secrets live only in
+# services/external_notifications.py + encrypted settings, not here.
+for forbidden in ["supabase", "vercel", "service_role_key"]:
     assert forbidden not in all_text, forbidden
 
 print("phase2_flet_ui_contract_smoke_test passed")

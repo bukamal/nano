@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 
 from nano_offline.core.database import Database
 from nano_offline.core import currency
+from nano_offline.core import money
 from nano_offline.services.accounting_rebuilder import AccountingRebuilder
 
 EPSILON = 1e-9
@@ -240,15 +242,15 @@ class InvoiceService:
         if supplier_id is not None and conn.execute("SELECT 1 FROM suppliers WHERE id=?", (supplier_id,)).fetchone() is None:
             raise ValueError("المورد غير موجود")
 
-        paid = float(paid_amount or 0)
+        paid = money.quantized(paid_amount or 0)
         if paid < -EPSILON:
             raise ValueError("المبلغ المدفوع غير صحيح")
 
         prepared: list[dict] = []
-        total = 0.0
+        total = Decimal(0)
         for raw in lines:
             qty = float(raw.quantity)
-            price = float(raw.unit_price)
+            price = money.quantized(raw.unit_price)
             if qty <= 0 or price < 0:
                 raise ValueError("بيانات بند الفاتورة غير صحيحة")
 
@@ -267,15 +269,18 @@ class InvoiceService:
             if not description:
                 raise ValueError("وصف البند مطلوب")
             base_qty = qty * factor
-            line_total = qty * price
+            # Money discipline (core/money.py): every stored money value is
+            # quantized to cents, half-up, so per-line totals and the running
+            # invoice total never accumulate binary-float noise.
+            line_total = money.quantized(qty * price)
             unit_cost = 0.0
             cost_amount = 0.0
             # Services do not move inventory. Their purchase_price is the
             # standard cost per base unit and is snapshotted into the sale
             # invoice line so future price edits do not rewrite history.
             if item is not None and item["item_type"] == "خدمة" and invoice_type == "sale":
-                unit_cost = float(item["purchase_price"] or 0) * factor
-                cost_amount = unit_cost * qty
+                unit_cost = money.quantized(float(item["purchase_price"] or 0) * factor)
+                cost_amount = money.quantized(unit_cost * qty)
             prepared.append(
                 {
                     "item_id": raw.item_id,
@@ -284,17 +289,20 @@ class InvoiceService:
                     "conversion_factor": factor,
                     "quantity": qty,
                     "quantity_in_base": base_qty,
-                    "unit_price": price,
+                    "unit_price": money.quantized(price),
                     "total": line_total,
                     "unit_cost": unit_cost,
                     "cost_amount": cost_amount,
                 }
             )
-            total += line_total
+            total += money.quantize(line_total)
 
-        if paid > total + EPSILON:
+        total_decimal = money.quantize(total)
+        total_float = float(total_decimal)
+        if paid > total_float + EPSILON:
             raise ValueError("المبلغ المدفوع لا يمكن أن يتجاوز إجمالي الفاتورة")
-        return prepared, total, paid
+        paid = min(paid, total_float)
+        return prepared, total_float, paid
 
     @staticmethod
     def _cash_paid_without_party(

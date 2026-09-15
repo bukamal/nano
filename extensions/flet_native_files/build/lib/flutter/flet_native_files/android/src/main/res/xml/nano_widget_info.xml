@@ -27,5 +27,7 @@
     android:updatePeriodMillis="1800000"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
+    android:initialLayout="@layout/nano_widget"
+    android:previewLayout="@layout/nano_widget"
     android:previewImage="@drawable/nano_widget_preview"
     android:description="@string/nano_widget_description" />

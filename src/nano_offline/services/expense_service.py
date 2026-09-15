@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 from nano_offline.core.database import Database
+from nano_offline.core import money
 from nano_offline.services.accounting_rebuilder import EPSILON
 
 
@@ -205,7 +206,7 @@ class ExpenseService:
 
     @staticmethod
     def _validate(amount: float, description: str, category_id: int | None):
-        value = float(amount or 0)
+        value = money.quantized(amount or 0)
         if value <= EPSILON:
             raise ValueError("قيمة المصروف يجب أن تكون أكبر من صفر")
         desc = (description or "").strip()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 from nano_offline.core.database import Database
+from nano_offline.core import money
 
 
 class ItemRepository:
@@ -345,8 +346,9 @@ class ItemRepository:
         if item_type not in {"مخزون", "خدمة"}:
             raise ValueError("نوع المادة غير صحيح")
         initial_qty = 0.0 if item_type == "خدمة" else float(quantity or 0)
-        avg = float(purchase_price or 0)
-        if initial_qty < 0 or avg < 0 or float(selling_price or 0) < 0:
+        avg = money.quantized(purchase_price or 0)
+        selling = money.quantized(selling_price or 0)
+        if initial_qty < 0 or avg < 0 or selling < 0:
             raise ValueError("القيم المالية أو الكمية غير صحيحة")
         code = (barcode or "").strip() or None
         with self.db.transaction() as conn:
@@ -359,7 +361,7 @@ class ItemRepository:
                            opening_quantity,opening_unit_cost,base_unit_id,barcode
                        ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                     (
-                        name, category_id, item_type, avg, float(selling_price or 0), initial_qty, avg,
+                        name, category_id, item_type, avg, selling, initial_qty, avg,
                         initial_qty, avg if initial_qty else 0.0, base_unit_id, code,
                     ),
                 )
@@ -373,7 +375,7 @@ class ItemRepository:
                 conn.execute(
                     """INSERT INTO inventory_movements(item_id,movement_type,quantity_delta,unit_cost,value_delta,movement_date)
                        VALUES(?,?,?,?,?,date('now'))""",
-                    (item_id, "adjustment", initial_qty, avg, initial_qty * avg),
+                    (item_id, "adjustment", initial_qty, avg, money.quantized(initial_qty * avg)),
                 )
             conn.execute(
                 "INSERT INTO audit_log(action,entity_type,entity_id,details) VALUES('create','item',?,?)",
@@ -414,7 +416,7 @@ class ItemRepository:
                 conn.execute(
                     """UPDATE items SET name=?,category_id=?,item_type=?,purchase_price=?,selling_price=?,base_unit_id=?,barcode=?,updated_at=CURRENT_TIMESTAMP
                        WHERE id=?""",
-                    (name, category_id, item_type, float(purchase_price or 0), float(selling_price or 0), base_unit_id, code, item_id),
+                    (name, category_id, item_type, money.quantized(purchase_price or 0), money.quantized(selling_price or 0), base_unit_id, code, item_id),
                 )
             except sqlite3.IntegrityError as exc:
                 if "barcode" in str(exc):
@@ -462,11 +464,11 @@ class ItemRepository:
                 continue
             seen.add(unit_id)
             sp_raw = raw.get("selling_price")
-            sp_val = float(sp_raw) if sp_raw not in (None, "") else None
+            sp_val = money.quantized(sp_raw) if sp_raw not in (None, "") else None
             if sp_val is not None and sp_val < 0:
                 raise ValueError("سعر بيع الوحدة الفرعية لا يمكن أن يكون سالبًا")
             pp_raw = raw.get("purchase_price")
-            pp_val = float(pp_raw) if pp_raw not in (None, "") else None
+            pp_val = money.quantized(pp_raw) if pp_raw not in (None, "") else None
             if pp_val is not None and pp_val < 0:
                 raise ValueError("سعر شراء الوحدة الفرعية لا يمكن أن يكون سالبًا")
             conn.execute(

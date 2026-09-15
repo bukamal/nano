@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from nano_offline.core import money
+
 EPSILON = 1e-9
 
 
@@ -82,7 +84,7 @@ class AccountingRebuilder:
                         f"المخزون غير كافٍ للمادة: {row['item_name']} — المتاح {st['qty']:.3f} والمطلوب {base_qty:.3f}"
                     )
                 unit_cost = st["avg"]
-                cost_amount = unit_cost * base_qty
+                cost_amount = money.quantized(unit_cost * base_qty)
                 st["qty"] -= base_qty
                 if st["qty"] <= EPSILON:
                     st["qty"] = 0.0
@@ -121,7 +123,7 @@ class AccountingRebuilder:
             "SELECT * FROM invoices ORDER BY invoice_date, created_at, id"
         ).fetchall()
         for inv in invoices:
-            initial = float(inv["initial_paid_amount"] or 0)
+            initial = money.quantized(inv["initial_paid_amount"] or 0)
             total = float(inv["total"] or 0)
             if initial < -EPSILON or initial > total + EPSILON:
                 raise ValueError(f"الدفعة الأولى غير صالحة للفاتورة #{inv['id']}")
@@ -255,7 +257,7 @@ class AccountingRebuilder:
                         (inv["invoice_date"], "INVENTORY", cogs, invoice_id, "انخفاض مخزون"),
                     )
                 if inv["customer_id"]:
-                    conn.execute("UPDATE customers SET balance=balance+? WHERE id=?", (total, inv["customer_id"]))
+                    conn.execute("UPDATE customers SET balance=balance+? WHERE id=?", (money.quantized(total), inv["customer_id"]))
             else:
                 conn.execute(
                     "INSERT INTO ledger_entries(entry_date,account_code,debit,source_type,source_id,description) VALUES(?,?,?,'invoice',?,?)",
@@ -272,10 +274,10 @@ class AccountingRebuilder:
                     ),
                 )
                 if inv["supplier_id"]:
-                    conn.execute("UPDATE suppliers SET balance=balance+? WHERE id=?", (total, inv["supplier_id"]))
+                    conn.execute("UPDATE suppliers SET balance=balance+? WHERE id=?", (money.quantized(total), inv["supplier_id"]))
 
         for p in conn.execute("SELECT * FROM payments ORDER BY payment_date, created_at, id").fetchall():
-            amount = float(p["amount"])
+            amount = money.quantized(p["amount"])
             cls._write_payment_ledger(
                 conn, int(p["id"]), str(p["direction"]), amount,
                 str(p["payment_date"]), p["customer_id"], p["supplier_id"],

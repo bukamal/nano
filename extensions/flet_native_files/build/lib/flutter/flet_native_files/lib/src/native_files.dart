@@ -287,6 +287,7 @@ List<_NativeAlert> _checkLicense(Database db, Map<String, dynamic> config) {
 // Both funnel into the same native channel; NanoHomeWidgetPlugin.kt is the
 // single place that actually touches the Glance widget state.
 const MethodChannel _homeWidgetChannel = MethodChannel('nano/home_widget');
+const MethodChannel _speechChannel = MethodChannel('nano/speech');
 
 Future<void> _pushHomeWidgetJson(String snapshotJson) async {
   try {
@@ -310,28 +311,52 @@ Future<String> _diagnoseHomeWidget() async {
 }
 
 Future<void> _pushHomeWidgetSnapshot(Database db) async {
-  final sales = db.select(
-    "SELECT COALESCE(SUM(total),0) s FROM invoices "
+  final salesRow = db.select(
+    "SELECT COALESCE(SUM(total),0) s, COUNT(*) c FROM invoices "
     "WHERE type = 'sale' AND status != 'cancelled' AND date(invoice_date) = date('now','localtime')",
-  ).first['s'] as num? ?? 0;
+  ).first;
+  final sales = ((salesRow['s'] as num?) ?? 0).toDouble();
+  final salesCount = ((salesRow['c'] as num?) ?? 0).toInt();
   // Same definition DashboardService.summary() uses on the Python side
   // (sum of debit-credit on the CASH ledger account) -- there is no
   // separate cash_transactions table in this schema.
   final cash = db.select(
     "SELECT COALESCE(SUM(debit-credit),0) c FROM ledger_entries WHERE account_code = 'CASH'",
   ).first['c'] as num? ?? 0;
-  final overdue = db.select(
-    "SELECT COUNT(*) c FROM invoices WHERE type = 'sale' AND status != 'cancelled' AND (total - paid_amount) > 0.01",
-  ).first['c'] as num? ?? 0;
+  final overdueRow = db.select(
+    "SELECT COUNT(*) c, COALESCE(SUM(total - paid_amount),0) t FROM invoices "
+    "WHERE type = 'sale' AND status != 'cancelled' AND (total - paid_amount) > 0.01",
+  ).first;
+  final overdue = ((overdueRow['c'] as num?) ?? 0).toInt();
+  final overdueTotal = ((overdueRow['t'] as num?) ?? 0).toDouble();
   final lowStock = db.select(
     "SELECT COUNT(*) c FROM items WHERE item_type = 'مخزون' AND quantity <= 5",
   ).first['c'] as num? ?? 0;
 
+  // Display currency + store name -- the same settings the app uses, so the
+  // periodic (closed-app) pass renders exactly like the in-app snapshot.
+  final company =
+      db.select("SELECT value FROM settings WHERE key = 'company_name'").first['value'] as String? ?? '';
+  final code =
+      db.select("SELECT value FROM settings WHERE key = 'display_currency_code'").first['value'] as String? ?? 'SYP';
+  final symbolRaw =
+      db.select("SELECT value FROM settings WHERE key = 'display_currency_symbol'").first['value'] as String? ?? 'ل.س';
+  final symbolUsd =
+      db.select("SELECT value FROM settings WHERE key = 'display_currency_symbol_usd'").first['value'] as String? ?? '\$';
+  final rateRaw =
+      db.select("SELECT value FROM settings WHERE key = 'exchange_rate_syp_per_usd'").first['value'] as String? ?? '13500';
+  final rate = double.tryParse(rateRaw) ?? 13500.0;
+  final symbol = code == 'USD' ? symbolUsd : symbolRaw;
+
   await _pushHomeWidgetJson(jsonEncode({
-    'sales_today': sales,
-    'cash_balance': cash,
+    'sales_today': sales * rate,
+    'sales_count_today': salesCount,
+    'cash_balance': (cash as num).toDouble() * rate,
     'overdue_count': overdue,
-    'low_stock_count': lowStock,
+    'overdue_total': overdueTotal * rate,
+    'low_stock_count': (lowStock as num).toInt(),
+    'currency_symbol': symbol,
+    'store_name': company,
     'updated_at': DateTime.now().toIso8601String(),
   }));
 }
@@ -705,6 +730,94 @@ class _FletNativeFilesControlState extends State<FletNativeFilesControl> {
             return jsonEncode({'unsupported_platform': Platform.operatingSystem});
           }
           return await _diagnoseHomeWidget();
+
+        case 'clear_home_widget':
+          // FIX_0.9.2 -- wipe the widget's stored snapshot so a stale
+          // pre-restore snapshot cannot be shown against the restored
+          // database on the next periodic pass. Used after restore.
+          if (!Platform.isAndroid) return 'ok';
+          try {
+            await _homeWidgetChannel.invokeMethod('clear');
+          } catch (error) {
+            debugPrint('nano home widget clear failed: $error');
+          }
+          return 'ok';
+
+        case 'force_refresh_home_widget':
+          // FIX_0.9.2 -- re-render every placed widget instance now,
+          // without changing the underlying snapshot. Collapses the
+          // cached frame the launcher is still holding across a restore.
+          if (!Platform.isAndroid) return 'ok';
+          try {
+            await _homeWidgetChannel.invokeMethod('refresh_now');
+          } catch (error) {
+            debugPrint('nano home widget refresh_now failed: $error');
+          }
+          return 'ok';
+
+        case 'speech_is_available':
+          if (!Platform.isAndroid) return '0';
+          try {
+            final raw = await _speechChannel.invokeMethod<String>('is_available');
+            return raw ?? '0';
+          } catch (error) {
+            debugPrint('nano speech is_available failed: $error');
+            return '0';
+          }
+
+        case 'speech_listen':
+          // On-device Android SpeechRecognizer. Blocks until final result,
+          // error, cancel, or timeout (native side).
+          if (!Platform.isAndroid) return 'error:التعرّف الصوتي متاح على أندرويد فقط';
+          try {
+            final language = args['language'] ?? 'ar-SY';
+            final timeoutMs = int.tryParse(args['timeout_ms'] ?? '') ?? 8000;
+            final text = await _speechChannel.invokeMethod<String>(
+              'listen',
+              <String, dynamic>{
+                'language': language,
+                'timeout_ms': timeoutMs,
+              },
+            );
+            return text ?? '';
+          } catch (error) {
+            final msg = error.toString();
+            // Flutter PlatformException: PlatformException(code, message, details)
+            return 'error:$msg';
+          }
+
+        case 'speech_cancel':
+          if (!Platform.isAndroid) return 'ok';
+          try {
+            await _speechChannel.invokeMethod('cancel');
+          } catch (error) {
+            debugPrint('nano speech cancel failed: $error');
+          }
+          return 'ok';
+
+        case 'speech_speak':
+          if (!Platform.isAndroid) return 'ok';
+          try {
+            await _speechChannel.invokeMethod(
+              'speak',
+              <String, dynamic>{
+                'text': args['text'] ?? '',
+                'language': args['language'] ?? 'ar',
+              },
+            );
+            return 'ok';
+          } catch (error) {
+            return 'error:$error';
+          }
+
+        case 'speech_stop_speak':
+          if (!Platform.isAndroid) return 'ok';
+          try {
+            await _speechChannel.invokeMethod('stop_speak');
+          } catch (error) {
+            debugPrint('nano speech stop_speak failed: $error');
+          }
+          return 'ok';
 
         default:
           return null;

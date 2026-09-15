@@ -4,6 +4,7 @@ from datetime import date
 
 from nano_offline.core.database import Database
 from nano_offline.core import currency
+from nano_offline.core import money
 from nano_offline.services.accounting_rebuilder import AccountingRebuilder, EPSILON
 
 
@@ -302,7 +303,7 @@ class PaymentService:
         value = float(amount or 0)
         if value <= EPSILON:
             raise ValueError("المبلغ يجب أن يكون أكبر من صفر")
-        return value
+        return money.quantized(value)
 
     @staticmethod
     def _validate_party(conn, voucher_type: str, customer_id: int | None, supplier_id: int | None):
@@ -346,7 +347,7 @@ class PaymentService:
                 return
             used = 0.0
             for invoice_id, raw_amount in manual.items():
-                alloc = float(raw_amount or 0)
+                alloc = money.quantized(raw_amount or 0)
                 if alloc <= EPSILON:
                     continue
                 remaining = self._invoice_remaining_for_allocation(
@@ -382,7 +383,7 @@ class PaymentService:
             remaining = max(0.0, float(inv["total"]) - float(inv["allocated"] or 0))
             if remaining <= EPSILON:
                 continue
-            alloc = min(left, remaining)
+            alloc = money.quantized(min(left, remaining))
             conn.execute(
                 "INSERT INTO payment_allocations(payment_id,invoice_id,amount) VALUES(?,?,?)",
                 (payment_id, inv["id"], alloc),

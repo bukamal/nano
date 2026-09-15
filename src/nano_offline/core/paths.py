@@ -12,46 +12,23 @@ LEGACY_DB_NAME = "qeid.db"
 def app_data_dir() -> Path:
     """Return the persistent writable application data directory.
 
-    Priority order (first match wins):
-
-    1. ``NANO_SHARED_DATA_DIR`` — multi-app shared location (only if usable).
-    2. ``FLET_APP_STORAGE_DATA`` — Flet private storage on packaged mobile.
-    3. ``NANO_DATA_DIR`` / ``QEID_DATA_DIR`` — desktop override.
-    4. Fallback ``~/.nano``.
+    Flet exposes ``FLET_APP_STORAGE_DATA`` on packaged mobile apps.  Desktop
+    development can override the location with ``NANO_DATA_DIR`` (with ``QEID_DATA_DIR`` retained for backward compatibility).  The fallback
+    deliberately lives outside the source tree so packaged assets are never
+    treated as writable data.
     """
-    candidates: list[Path] = []
-    for key in (
-        "NANO_SHARED_DATA_DIR",
-        "FLET_APP_STORAGE_DATA",
-        "NANO_DATA_DIR",
-        "QEID_DATA_DIR",
-    ):
-        raw = (os.environ.get(key) or "").strip()
-        if raw:
-            candidates.append(Path(raw).expanduser())
-    candidates.append(Path.home() / ".nano")
-
-    last_err: Exception | None = None
-    for path in candidates:
-        try:
-            path.mkdir(parents=True, exist_ok=True)
-            # Ensure the process can create files here (not only the directory).
-            probe = path / ".nano_dir_probe"
-            probe.write_text("ok", encoding="utf-8")
-            probe.unlink(missing_ok=True)
-            return path
-        except Exception as exc:
-            last_err = exc
-            continue
-    # Last resort: relative ./data next to cwd
-    fallback = Path("data").resolve()
-    try:
-        fallback.mkdir(parents=True, exist_ok=True)
-        return fallback
-    except Exception:
-        if last_err:
-            raise last_err
-        raise RuntimeError("لا يمكن إنشاء مجلد بيانات قابل للكتابة")
+    configured = (
+        os.environ.get("FLET_APP_STORAGE_DATA")
+        or os.environ.get("NANO_DATA_DIR")
+        or os.environ.get("QEID_DATA_DIR")
+        or ""
+    ).strip()
+    if configured:
+        path = Path(configured).expanduser()
+    else:
+        path = Path.home() / ".nano"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def migrate_legacy_database(legacy_path: str | Path, target_path: str | Path | None = None) -> bool:
@@ -100,36 +77,4 @@ def backups_dir() -> Path:
     return path
 
 
-def apply_shared_data_dir(path: str | Path | None) -> Path | None:
-    """Pin ``NANO_SHARED_DATA_DIR`` so every subsequent ``app_data_dir()`` call
-    resolves to the cross-APK shared location returned by the native layer.
-
-    Call this once at startup on Android after ``NativeFiles.get_shared_data_dir()``
-    succeeds. Returns the resolved directory, or ``None`` if *path* is empty.
-    """
-    if not path:
-        return None
-    resolved = Path(str(path)).expanduser()
-    try:
-        resolved.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        return None
-    os.environ["NANO_SHARED_DATA_DIR"] = str(resolved)
-    return resolved
-
-
-def is_shared_data_dir_active() -> bool:
-    """True when an explicit shared directory has been configured."""
-    return bool(os.environ.get("NANO_SHARED_DATA_DIR", "").strip())
-
-
-__all__ = [
-    "app_data_dir",
-    "database_path",
-    "backups_dir",
-    "migrate_legacy_database",
-    "apply_shared_data_dir",
-    "is_shared_data_dir_active",
-    "APP_DIR_NAME",
-    "PRIMARY_DB_NAME",
-]
+__all__ = ["app_data_dir", "database_path", "backups_dir", "migrate_legacy_database", "APP_DIR_NAME"]

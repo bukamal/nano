@@ -15,6 +15,9 @@ assert build and int(build.group(1)) >= 2
 schema = re.search(r'SCHEMA_VERSION\s*=\s*(\d+)', database)
 assert schema and int(schema.group(1)) >= 2
 assert '"flet==0.28.3"' in pyproject
-for forbidden in ["supabase", "telegram", "vercel", "requests", "httpx"]:
+# Offline-first: no online SaaS identifiers or mandatory web SDKs in src.
+# "telegram" is excluded since PHASE11: it is an optional, user-configured
+# notification channel isolated in services/external_notifications.py.
+for forbidden in ["supabase", "vercel", "requests", "httpx"]:
     assert forbidden not in source.lower(), forbidden
 print("phase2_project_contract_smoke_test passed")

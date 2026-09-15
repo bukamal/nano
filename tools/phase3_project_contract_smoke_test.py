@@ -13,12 +13,14 @@ assert version and tuple(map(int, version.groups())) >= (0, 3, 0)
 build = re.search(r'^build_number\s*=\s*(\d+)', pyproject, re.M)
 assert build and int(build.group(1)) >= 3
 assert "SCHEMA_VERSION = " in database
-assert int(database.split("SCHEMA_VERSION = ", 1)[1].splitlines()[0].strip()) >= 3
+assert int(re.search(r"SCHEMA_VERSION\s*=\s*(\d+)", database).group(1)) >= 3
 for table in ["payment_allocations", "vouchers", "expense_categories"]:
     assert f"CREATE TABLE IF NOT EXISTS {table}" in database
 
-# Offline accounting path: no web/database SDKs are dependencies or imported by app source.
-for forbidden in ["supabase", "telegram", "vercel", "requests", "httpx", "firebase"]:
+# Offline accounting path: no web/database SDKs are dependencies or imported by
+# app source. Telegram is excluded since PHASE11 (optional channel isolated in
+# services/external_notifications.py).
+for forbidden in ["supabase", "vercel", "requests", "httpx", "firebase"]:
     assert forbidden.lower() not in all_source.lower(), forbidden
 
 assert re.search(r'dependencies\s*=\s*\[\s*"flet==0\.28\.3"', pyproject, re.S)

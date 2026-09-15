@@ -42,7 +42,7 @@ class NanoQuickSettingsTileService : TileService() {
         super.onClick()
         // mainActivityClass() throws if it can't resolve the generated
         // app's launcher Activity by name (see its own doc comment in
-        // NanoGlanceWidget.kt). A tile tap is user-initiated and not on any
+        // NanoWidgetReceiver.kt). A tile tap is user-initiated and not on any
         // hot rendering path like the widget is, so an uncaught exception
         // here would just crash the System UI process's tile interaction --
         // still worth swallowing rather than letting a resolution failure
