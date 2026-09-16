@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from nano_offline.core.asyncdb import Offloadable, blocking
 from nano_offline.core.database import Database
 
 
-class SettingsRepository:
+class SettingsRepository(Offloadable):
     """Thin key/value accessor over the ``settings`` table.
 
     The schema already has an open-ended ``settings(key,value)`` table (used
@@ -14,15 +15,18 @@ class SettingsRepository:
     def __init__(self, db: Database):
         self.db = db
 
+    @blocking
     def get_all(self) -> dict[str, str]:
         with self.db.connect() as conn:
             return {str(r["key"]): str(r["value"]) for r in conn.execute("SELECT key,value FROM settings").fetchall()}
 
+    @blocking
     def get(self, key: str, default: str = "") -> str:
         with self.db.connect() as conn:
             row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
             return str(row["value"]) if row else default
 
+    @blocking
     def set(self, key: str, value: str | None) -> None:
         with self.db.transaction() as conn:
             if value is None or value == "":
@@ -33,6 +37,7 @@ class SettingsRepository:
                     (key, str(value)),
                 )
 
+    @blocking
     def set_many(self, values: dict[str, str | None]) -> None:
         with self.db.transaction() as conn:
             for key, value in values.items():

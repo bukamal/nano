@@ -962,7 +962,38 @@ def main(page: ft.Page):
     def open_shell():
         current_screen["value"] = "shell"
         reset_page()
-        build_shell(page, ctx, on_logout=logout, native_files=native_files, on_theme_changed=open_shell)
+        try:
+            build_shell(page, ctx, on_logout=logout, native_files=native_files, on_theme_changed=open_shell)
+        except Exception as exc:
+            # Never leave the user on a blank/gray page: build_shell failing
+            # used to be silent (controls already cleared by reset_page).
+            # Surface the real cause, keep a retry, and log to stderr for
+            # adb logcat capture.
+            import traceback
+
+            traceback.print_exc()
+
+            def retry(_=None):
+                page.close(err_dialog)
+                open_shell()
+
+            err_dialog = ft.AlertDialog(
+                modal=True,
+                icon=ft.Icon(ft.Icons.ERROR_OUTLINE, color=Colors.DANGER, size=40),
+                title=ft.Text("تعذر تحميل الواجهة", text_align=ft.TextAlign.CENTER),
+                content=ft.Column(
+                    [
+                        ft.Text(str(exc) or exc.__class__.__name__, selectable=True),
+                        ft.Text("جرّب إعادة التشغيل. إن تكررت المشكلة أبلغ الدعم بهذه الرسالة.", size=11, color=Colors.TEXT_SECONDARY),
+                    ],
+                    tight=True,
+                    width=320,
+                ),
+                actions=[ft.FilledButton("إعادة المحاولة", on_click=retry)],
+                actions_alignment=ft.MainAxisAlignment.CENTER,
+            )
+            page.open(err_dialog)
+            page.update()
 
     def handle_brightness_change(_=None):
         # Best-effort: only matters at all for users on "تلقائي حسب النظام"
@@ -1027,4 +1058,8 @@ def main(page: ft.Page):
     SplashGate(page, on_ready=route_after_splash).show()
 
 
+# NOTE: keep this call unconditional and module-level. The Android Flet
+# runtime imports this file as a regular module (not __main__) and relies
+# on the embedded ft.app() call to start the app -- a __main__ guard here
+# ships an APK that starts and then renders nothing (gray screen).
 ft.app(target=main)

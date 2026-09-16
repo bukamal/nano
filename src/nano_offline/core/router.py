@@ -85,6 +85,7 @@ class Router:
         permission: str | None = None,
         render: Render | None = None,
         replace_current: bool = False,
+        on_leave: Render | None = None,
     ) -> Route:
         route = Route(
             key=key,
@@ -94,6 +95,7 @@ class Router:
             permission=permission,
             render=render,
             replace_current=replace_current,
+            on_leave=on_leave,
         )
         self._routes[key] = route
         return route
@@ -225,7 +227,7 @@ class Router:
         key, kwargs = self._stack.pop()
         try:
             route = self._resolve(key)
-        except RouteDenied as exc:
+        except RouteDenied:
             # The user lost permission to a screen while it sat on the
             # stack (role changed mid-session) -- fall through home.
             self._stack.clear()

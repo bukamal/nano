@@ -48,8 +48,15 @@ flet run src/main.py
 ## الاختبارات
 
 ```bash
-PYTHONPATH=src python tools/quality_gate.py
+python -m pip install -e ".[dev]"
+python -m pytest                     # unit + integration (pytest-cov للتغطية)
+python -m pytest --cov               # مع تقرير التغطية
+PYTHONPATH=src python tools/quality_gate.py   # البوابة الكاملة: pytest + كل smoke/contract
 ```
+
+- `tests/unit/` اختبارات نقية سريعة (Router، asyncdb، money، NLU، audit hash).
+- `tests/integration/` اختبارات بـ AppContext/SQLite حقيقي (repositories + الجسر غير المتزامن `.aio` + سلسلة التدقيق + النسخ المشفر).
+- سكربتات `tools/*_smoke_test.py` باقية كسلطة عقود المراحل حتى تكتمل هجرتها.
 
 ## Android
 

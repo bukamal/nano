@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+from nano_offline.core.asyncdb import Offloadable, blocking
 from nano_offline.core.database import Database
 
 
-class PartyRepository:
+class PartyRepository(Offloadable):
     def __init__(self, db: Database, table: str):
         if table not in {"customers", "suppliers"}:
             raise ValueError(table)
         self.db = db
         self.table = table
 
+    @blocking
     def list(self, search: str = "") -> list[dict]:
         with self.db.connect() as conn:
             if search.strip():
@@ -21,11 +23,13 @@ class PartyRepository:
                 rows = conn.execute(f"SELECT * FROM {self.table} ORDER BY name").fetchall()
             return [dict(r) for r in rows]
 
+    @blocking
     def get(self, party_id: int) -> dict | None:
         with self.db.connect() as conn:
             row = conn.execute(f"SELECT * FROM {self.table} WHERE id=?", (party_id,)).fetchone()
             return dict(row) if row else None
 
+    @blocking
     def activity_summary(self, party_id: int) -> dict:
         party = self.get(party_id)
         if party is None:
@@ -53,6 +57,7 @@ class PartyRepository:
         result["recent_invoices"] = [dict(r) for r in recent]
         return result
 
+    @blocking
     def create(self, name: str, phone: str | None = None, address: str | None = None) -> int:
         name = name.strip()
         if not name:
@@ -74,6 +79,7 @@ class PartyRepository:
             )
             return party_id
 
+    @blocking
     def update(self, party_id: int, name: str, phone: str | None = None, address: str | None = None) -> None:
         name = name.strip()
         if not name:
@@ -88,6 +94,7 @@ class PartyRepository:
                 (self.table[:-1], party_id, name),
             )
 
+    @blocking
     def delete(self, party_id: int) -> None:
         with self.db.transaction() as conn:
             related = "customer_id" if self.table == "customers" else "supplier_id"

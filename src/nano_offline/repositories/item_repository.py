@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import sqlite3
 
+from nano_offline.core.asyncdb import Offloadable, blocking
 from nano_offline.core.database import Database
 from nano_offline.core import money
 
 
-class ItemRepository:
+class ItemRepository(Offloadable):
     def __init__(self, db: Database):
         self.db = db
 
+    @blocking
     def list(self, search: str = "", limit: int | None = None, offset: int = 0) -> list[dict]:
         """List items, optionally filtered by name/barcode.
 
@@ -46,6 +48,7 @@ class ItemRepository:
         with self.db.connect() as conn:
             return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
+    @blocking
     def get(self, item_id: int) -> dict | None:
         with self.db.connect() as conn:
             row = conn.execute(
@@ -58,6 +61,7 @@ class ItemRepository:
             ).fetchone()
             return dict(row) if row else None
 
+    @blocking
     def pos_catalog(self, limit_best_sellers: int = 12) -> list[dict]:
         """Items ordered for the POS grid: best sellers first, then the rest A-Z.
 
@@ -83,6 +87,7 @@ class ItemRepository:
         rest = sorted((r for r in rows if r["id"] not in best_ids), key=lambda r: r["name"])
         return best + rest
 
+    @blocking
     def purchased_by_party(self, party_type: str, party_id: int, limit: int = 20) -> list[dict]:
         """Items a given customer/supplier has previously transacted, most-frequent first.
 
@@ -109,6 +114,7 @@ class ItemRepository:
             rows = conn.execute(sql, (party_type, party_id, int(limit))).fetchall()
             return [dict(r) for r in rows]
 
+    @blocking
     def find_by_barcode(self, barcode: str) -> dict | None:
         """Resolve ``barcode`` against an item's primary code (``items.barcode``)
         or any of its secondary codes (``item_barcodes`` -- e.g. a carton
@@ -147,6 +153,7 @@ class ItemRepository:
             ).fetchone()
             return dict(alt) if alt else None
 
+    @blocking
     def list_barcodes(self, item_id: int) -> list[dict]:
         """Secondary codes registered for an item (primary code lives on
         the item row itself and is not included here)."""
@@ -160,6 +167,7 @@ class ItemRepository:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    @blocking
     def add_barcode(self, item_id: int, barcode: str, *, unit_id: int | None = None, label: str | None = None) -> int:
         code = (barcode or "").strip()
         if not code:
@@ -175,10 +183,12 @@ class ItemRepository:
                 raise ValueError("هذا الباركود مسجّل بالفعل لهذه المادة") from exc
             return int(cur.lastrowid)
 
+    @blocking
     def remove_barcode(self, barcode_row_id: int) -> None:
         with self.db.transaction() as conn:
             conn.execute("DELETE FROM item_barcodes WHERE id=?", (barcode_row_id,))
 
+    @blocking
     def find_similar_barcodes(self, code: str, *, exclude_item_id: int | None = None) -> list[str]:
         """Item names whose primary or secondary barcode is a likely
         typo/scan-glitch away from ``code`` (see
@@ -205,6 +215,7 @@ class ItemRepository:
                 candidates.append((row["barcode"], row["name"]))
         return find_similar(code, candidates)
 
+    @blocking
     def find_similar_names(self, name: str, *, exclude_item_id: int | None = None) -> list[str]:
         """Existing item names that look like a likely duplicate of
         ``name`` -- an exact match once case/whitespace is normalized, or
@@ -256,6 +267,7 @@ class ItemRepository:
         if clash is not None:
             raise ValueError("هذا الباركود مستخدم بالفعل لمادة أخرى")
 
+    @blocking
     def units(self, item_id: int) -> list[dict]:
         """Return allowed invoice units with authoritative conversion factors."""
         with self.db.connect() as conn:
@@ -286,6 +298,7 @@ class ItemRepository:
                 result.append(d)
             return result
 
+    @blocking
     def activity_summary(self, item_id: int) -> dict:
         """Return sales/purchase and stock metrics for an item."""
         with self.db.connect() as conn:
@@ -314,6 +327,7 @@ class ItemRepository:
             result["inventory_sale_value"] = qty * sell
             return result
 
+    @blocking
     def movements(self, item_id: int, limit: int = 30) -> list[dict]:
         with self.db.connect() as conn:
             rows = conn.execute(
@@ -327,6 +341,7 @@ class ItemRepository:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    @blocking
     def create(
         self,
         *,
@@ -383,6 +398,7 @@ class ItemRepository:
             )
             return item_id
 
+    @blocking
     def update(
         self,
         item_id: int,
@@ -428,6 +444,7 @@ class ItemRepository:
                 (item_id, name),
             )
 
+    @blocking
     def delete(self, item_id: int) -> None:
         # Deliberately narrow: safe only for an item that has never
         # appeared on an invoice and never generated an inventory movement

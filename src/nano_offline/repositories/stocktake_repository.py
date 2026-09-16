@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from nano_offline.core.asyncdb import Offloadable, blocking
 from nano_offline.core.database import Database
 
 
-class StocktakeRepository:
+class StocktakeRepository(Offloadable):
     """Low-level storage for a stocktake session and its accumulated lines.
 
     A session is a scratchpad: nothing here touches `inventory_movements`
@@ -17,6 +18,7 @@ class StocktakeRepository:
     def __init__(self, db: Database):
         self.db = db
 
+    @blocking
     def create_session(self, *, notes: str | None = None) -> int:
         with self.db.transaction() as conn:
             cur = conn.execute(
@@ -25,6 +27,7 @@ class StocktakeRepository:
             )
             return int(cur.lastrowid)
 
+    @blocking
     def find_open_session(self) -> dict | None:
         """The most recent still-open session, if any.
 
@@ -40,11 +43,13 @@ class StocktakeRepository:
             ).fetchone()
             return dict(row) if row else None
 
+    @blocking
     def get_session(self, session_id: int) -> dict | None:
         with self.db.connect() as conn:
             row = conn.execute("SELECT * FROM stocktake_sessions WHERE id=?", (session_id,)).fetchone()
             return dict(row) if row else None
 
+    @blocking
     def add_scan(self, session_id: int, item_id: int, *, qty: float = 1.0, system_qty_snapshot: float) -> None:
         """Accumulate ``qty`` onto this item's counted total for the session.
 
@@ -65,6 +70,7 @@ class StocktakeRepository:
                 (session_id, item_id, qty, system_qty_snapshot),
             )
 
+    @blocking
     def set_counted_qty(self, session_id: int, item_id: int, counted_qty: float) -> None:
         """Manual correction of a line's running count (sidebar edit)."""
         with self.db.transaction() as conn:
@@ -73,10 +79,12 @@ class StocktakeRepository:
                 (counted_qty, session_id, item_id),
             )
 
+    @blocking
     def remove_line(self, session_id: int, item_id: int) -> None:
         with self.db.transaction() as conn:
             conn.execute("DELETE FROM stocktake_lines WHERE session_id=? AND item_id=?", (session_id, item_id))
 
+    @blocking
     def list_lines(self, session_id: int) -> list[dict]:
         with self.db.connect() as conn:
             rows = conn.execute(
@@ -91,6 +99,7 @@ class StocktakeRepository:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    @blocking
     def discard_session(self, session_id: int) -> None:
         with self.db.transaction() as conn:
             conn.execute(
@@ -98,6 +107,7 @@ class StocktakeRepository:
                 (session_id,),
             )
 
+    @blocking
     def commit_session(self, session_id: int, adjustments: list[dict], *, actor_username: str | None = None) -> None:
         """Write the real inventory effect for lines with a nonzero diff.
 

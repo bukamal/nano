@@ -6,9 +6,39 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-print("▶ compileall", flush=True)
-subprocess.run([sys.executable, "-m", "compileall", "-q", "src", "tools", "extensions/flet_native_files/src"], check=True, cwd=ROOT)
 
+def _has_module(name: str) -> bool:
+    return subprocess.run([sys.executable, "-c", f"import {name}"], cwd=ROOT, capture_output=True).returncode == 0
+
+
+print("▶ compileall", flush=True)
+subprocess.run([sys.executable, "-m", "compileall", "-q", "src", "tools", "tests", "extensions/flet_native_files/src"], check=True, cwd=ROOT)
+
+# ---------------------------------------------------------------------------
+# pytest suite: tests/unit (pure-python) + tests/integration (real DB).
+# Skips gracefully when pytest isn't installed so the gate is never *weaker*
+# than it used to be -- the standalone smoke scripts below always run.
+# ---------------------------------------------------------------------------
+if _has_module("pytest"):
+    print("▶ pytest", flush=True)
+    args = [sys.executable, "-m", "pytest", "-q"]
+    if _has_module("coverage"):
+        args = [sys.executable, "-m", "coverage", "run", "-m", "pytest", "-q"]
+    result = subprocess.run(args, cwd=ROOT)
+    if result.returncode != 0:
+        raise SystemExit(result.returncode)
+    if _has_module("coverage"):
+        print("▶ coverage report", flush=True)
+        subprocess.run([sys.executable, "-m", "coverage", "report"], check=True, cwd=ROOT)
+else:
+    print("▶ pytest (skipped: pytest not installed in this environment)", flush=True)
+
+# ---------------------------------------------------------------------------
+# Standalone smoke/contract scripts. These predate pytest and are still the
+# authority for the phase-by-phase functional guarantees; several are also
+# mirrored as pytest contract tests under tests/contract, but the originals
+# stay wired here until that migration is complete.
+# ---------------------------------------------------------------------------
 SCRIPTS = [
     "tools/schema_smoke_test.py",
     "tools/core_smoke_test.py",
@@ -60,9 +90,12 @@ SCRIPTS = [
     "tools/phase10_receipt_capture_smoke_test.py",
     "tools/phase10_forecast_smoke_test.py",
     "tools/money_consistency_smoke_test.py",
+    "tools/phase11_router_contract_smoke_test.py",
     "tools/apk_release_preflight.py",
 ]
 
+env_note = "(pytest already covered unit+integration; smoke scripts verify phase contracts)"
+print(f"▶ smoke/contract scripts {env_note}", flush=True)
 for script in SCRIPTS:
     print("▶", script, flush=True)
     subprocess.run([sys.executable, str(ROOT / script)], check=True, cwd=ROOT)

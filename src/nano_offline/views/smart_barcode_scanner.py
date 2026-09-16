@@ -69,6 +69,10 @@ _KIND_BY_PREFIX = {
     "QR": ScanKind.QR,
     "QRCODE": ScanKind.QR,
     "DATA_MATRIX": ScanKind.DATA_MATRIX,
+    # parse_kind normalizes "-" and spaces away before lookup, so the
+    # underscore form above only ever matches a raw "DATA_MATRIX"; this is
+    # the key a real scanner payload ("DataMatrix"/"datamatrix") reaches.
+    "DATAMATRIX": ScanKind.DATA_MATRIX,
 }
 
 

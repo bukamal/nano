@@ -29,10 +29,11 @@ with tempfile.TemporaryDirectory(prefix="nano_phase9_native_notify_") as td:
 
     # -- payload shape ------------------------------------------------------
     payload = ctx.notifications.native_schedule_payload()
-    assert set(payload) == {"config_json", "db_path", "interval_minutes"}, payload
+    assert set(payload) == {"config_json", "db_path", "interval_minutes", "initial_delay_minutes"}, payload
     assert payload["db_path"] == str(db_path)
     assert Path(payload["db_path"]).exists(), "db_path must point at a real, already-initialized database file"
     assert payload["interval_minutes"] >= 15, "below Android WorkManager's periodic floor"
+    assert 0 <= payload["initial_delay_minutes"] < 24 * 60, "first background check must land within a day of registration"
 
     cfg = json.loads(payload["config_json"])
     for rule in ("receivables", "low_stock", "backup", "license", "quiet_hours"):

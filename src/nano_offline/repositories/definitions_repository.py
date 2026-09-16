@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from nano_offline.core.asyncdb import Offloadable, blocking
 from nano_offline.core.database import Database
 
 
-class DefinitionsRepository:
+class DefinitionsRepository(Offloadable):
     def __init__(self, db: Database):
         self.db = db
 
+    @blocking
     def list_categories(self) -> list[dict]:
         """Categories with a live count of items referencing each one.
 
@@ -23,6 +25,7 @@ class DefinitionsRepository:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    @blocking
     def create_category(self, name: str) -> int:
         name = name.strip()
         if not name:
@@ -35,6 +38,7 @@ class DefinitionsRepository:
             )
             return category_id
 
+    @blocking
     def rename_category(self, category_id: int, name: str) -> None:
         name = name.strip()
         if not name:
@@ -46,6 +50,7 @@ class DefinitionsRepository:
                 (category_id, name),
             )
 
+    @blocking
     def delete_category(self, category_id: int) -> None:
         # Checked explicitly (same convention as PartyRepository.delete)
         # rather than relying on the schema's ON DELETE RESTRICT alone, so
@@ -61,6 +66,7 @@ class DefinitionsRepository:
                 (category_id,),
             )
 
+    @blocking
     def list_units(self) -> list[dict]:
         """Units with a live count of items that reference each one — either
         as their base unit, or as one of their alternate/conversion units
@@ -78,6 +84,7 @@ class DefinitionsRepository:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    @blocking
     def create_unit(self, name: str, abbreviation: str | None = None) -> int:
         name = name.strip()
         if not name:
@@ -90,6 +97,7 @@ class DefinitionsRepository:
             )
             return unit_id
 
+    @blocking
     def rename_unit(self, unit_id: int, name: str, abbreviation: str | None = None) -> None:
         name = name.strip()
         if not name:
@@ -101,6 +109,7 @@ class DefinitionsRepository:
                 (unit_id, name),
             )
 
+    @blocking
     def delete_unit(self, unit_id: int) -> None:
         with self.db.transaction() as conn:
             as_base = conn.execute("SELECT 1 FROM items WHERE base_unit_id=? LIMIT 1", (unit_id,)).fetchone()

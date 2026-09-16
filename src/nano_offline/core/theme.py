@@ -248,6 +248,7 @@ class IconSize:
 #     ft.Container(..., shadow=Shadow.LG)   # dialogs, KPI/metric cards
 _SHADOW_RECIPES: dict[str, tuple[int, int, tuple[int, int], str]] = {
     "SM": (10, 0, (0, 2), "BORDER"),
+    "SOFT": (14, 0, (0, 3), "BORDER"),  # used by the smart barcode scanner's floating chips/dock
     "MD": (18, 0, (0, 5), "BORDER"),
     "LG": (26, 0, (0, 9), "BORDER_STRONG"),
 }
