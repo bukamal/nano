@@ -123,7 +123,17 @@ class AccountingRebuilder:
             "SELECT * FROM invoices ORDER BY invoice_date, created_at, id"
         ).fetchall()
         for inv in invoices:
-            initial = money.quantized(inv["initial_paid_amount"] or 0)
+            # Deliberately NOT money.quantized here: stored initial/total were
+            # already quantized to cents at write time for every modern row.
+            # Legacy rate-derived rows (51000 SYP / 13500 = 3.7760000000000002)
+            # hold raw recurring totals; quantizing only the initial payment
+            # against them made valid fully-paid invoices fail every rebuild
+            # with "الدفعة الأولى غير صالحة" (raise) — or worse, silently
+            # rewrite the derived payment to the cent value and leave a
+            # phantom "partial" remaining balance. Raw-vs-raw keeps derived
+            # rows (payment, allocation, paid_amount) exactly equal to the
+            # stored total whenever the stored initial was.
+            initial = float(inv["initial_paid_amount"] or 0)
             total = float(inv["total"] or 0)
             if initial < -EPSILON or initial > total + EPSILON:
                 raise ValueError(f"الدفعة الأولى غير صالحة للفاتورة #{inv['id']}")
@@ -170,7 +180,10 @@ class AccountingRebuilder:
         }
         for p in conn.execute("SELECT * FROM payments").fetchall():
             allocated = payment_sums.get(int(p["id"]), 0.0)
-            if allocated > float(p["amount"]) + EPSILON:
+            # Same quantized-vs-quantized discipline as _sync_initial_invoice_payments:
+            # allocations are written at the cent boundary, legacy payment/total
+            # rows can carry raw rate-derived floats (3.7760000000000002).
+            if money.quantized(allocated) > money.quantized(p["amount"]) + EPSILON:
                 raise ValueError(f"توزيع الدفعة #{p['id']} يتجاوز قيمة الدفعة")
 
         invoice_sums = {
@@ -181,7 +194,7 @@ class AccountingRebuilder:
         }
         for inv in conn.execute("SELECT * FROM invoices").fetchall():
             allocated = invoice_sums.get(int(inv["id"]), 0.0)
-            if allocated > float(inv["total"]) + EPSILON:
+            if money.quantized(allocated) > money.quantized(inv["total"]) + EPSILON:
                 raise ValueError(
                     f"الدفعات الموزعة على الفاتورة #{inv['id']} تتجاوز إجمالي الفاتورة؛ عدّل السندات المرتبطة أولًا"
                 )
