@@ -128,8 +128,8 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         header_title.value = title
         header_subtitle.value = subtitle
 
-    def notify(text: str):
-        toast(page, text)
+    def notify(text: str, kind: str | None = None):
+        toast(page, text, kind=kind)
 
     notification_center = NotificationCenter(
         page, ctx, content, native_files=native_files, on_title_change=set_header,
@@ -194,7 +194,7 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
     )
     items_center = ItemsCenter(
         page, ctx, content, native_files=native_files, on_title_change=set_header,
-        on_open_stocktake=lambda: stocktake_center.show_center(),
+        on_open_stocktake=lambda: navigate("stocktake"),
     )
     stocktake_center = StocktakeCenter(
         page, ctx, content, native_files=native_files, on_title_change=set_header,
@@ -309,6 +309,18 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
     sidebar_buttons: dict[str, ft.Container] = {}
     mobile_buttons: dict[str, tuple[ft.Container, ft.Icon, ft.Text]] = {}
 
+    # ---------------- central Router (v0.18: real back-stack) ----------------
+    # The old shell re-rendered sections from a hand-rolled navigate()
+    # closure with no history at all, so the Android back button could only
+    # ever "jump to dashboard" (see the old prevent_close workaround). All
+    # navigation now flows through nano_offline.core.router.Router: tab taps
+    # (reset) make the destination the new root, in-app transitions push,
+    # and hardware back pops the stack properly. Router itself is pure
+    # Python (no flet import) and unit-tested under tests/unit/test_router.py;
+    # the render callback below keeps the exact cross-fade + header + badge
+    # behavior the old navigate() had.
+    from nano_offline.core.router import Router, Route, RouteDenied
+
     def refresh_navigation_state() -> None:
         current = selected_key["value"]
         for key, button in sidebar_buttons.items():
@@ -329,152 +341,160 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
             label.weight = ft.FontWeight.BOLD if active else ft.FontWeight.W_500
             box.bgcolor = Colors.PRIMARY_BG if active else None
 
-    def open_stocktake(_=None) -> None:
-        if not session.can("items"):
-            notify("لا تملك صلاحية المواد/الجرد")
-            return
-        selected_key["value"] = "stocktake"
-        set_header("الجرد", "جرد بالمسح المستمر")
-        refresh_navigation_state()
-        content.opacity = 0
-        stocktake_center.show_center()
-        content.opacity = 1
-        content.update()
+    # NOTE: adapt_navigation / _pos_fullscreen are defined further below,
+    # next to the voice-session block they depend on. They are only *called*
+    # from render_route / pos_chrome_restore closures, i.e. at click time,
+    # once the whole shell (including them) exists.
 
-    def navigate(key: str) -> None:
-        # Special screens not in page_meta/actions (opened by dedicated handlers).
-        if key in ("pos", "نقطة البيع", "بيع سريع"):
-            open_pos()
-            return
-        if key in ("stocktake", "جرد"):
-            open_stocktake()
-            return
-        if key in ("sale", "فاتورة بيع"):
-            open_sale()
-            return
-        if key in ("purchase", "فاتورة شراء"):
-            open_purchase()
-            return
-        if key in ("notifications", "إشعارات", "تنبيهات"):
-            try:
-                notification_center.show_center()
-            except Exception as exc:
-                notify(str(exc), kind="error")
-            return
-        action = actions.get(key)
-        if action is None or key not in allowed_keys:
-            return
+    def render_route(key: str, kwargs: dict) -> None:
+        route = router.get(key)
         selected_key["value"] = key
-        title, subtitle = page_meta[key]
-        set_header(title, subtitle)
+        if route is not None and route.label:
+            set_header(route.label, route.subtitle)
         refresh_navigation_state()
         # Cross-fade: hide the outgoing view *before* the target's
         # show_center() swaps content.content in (it also calls
         # page.update() itself), so the new view first appears at
-        # opacity 0, then we fade it in with one more update(). No
-        # asyncio/sleep involved — this is Flet's built-in implicit
-        # animation (animate_opacity on the container), so there's no
-        # timing to get wrong: worst case it simply doesn't animate.
+        # opacity 0, then we fade it in with one more update(). This is
+        # Flet's built-in implicit animation (animate_opacity on the
+        # container), so there's no timing to get wrong.
         content.opacity = 0
         try:
-            action()
+            if kwargs:
+                route.render(**kwargs)
+            else:
+                route.render()
         except Exception as exc:
             content.opacity = 1
             try:
                 content.update()
             except Exception:
                 pass
-            notify(f"تعذر فتح القسم: {exc}", kind="error")
-            return
+            notify(f"تعذر فتح القسم: {exc}")
+            raise  # let the Router undo the stack push it just made
         content.opacity = 1
         content.update()
         notification_center.refresh_badge()
 
-    # Android hardware back button: by default, with no route/view stack
-    # pushed (this shell swaps `content` manually via navigate() instead
-    # of using page.views), Flutter's root Navigator has nothing to pop,
-    # so the OS treats back as "exit the app" -- one accidental back-press
-    # from any section would kill Nano entirely. `page.window.prevent_close`
-    # intercepts that close intent instead of letting it through: while any
-    # non-dashboard section is open (including the "sale"/"purchase"/"pos"
-    # quick-entry screens, which aren't in page_meta/actions but still set
-    # selected_key), back sends the user to the dashboard, exactly like
-    # tapping the "الرئيسية" sidebar/tab button. Only a second back-press
-    # from the dashboard itself actually closes the app. Desktop builds get
-    # the same behavior for free (there it's the window's close button).
+    def render_sale(_=None) -> None:
+        invoice_center.show_editor(None, "sale")
+
+    def render_purchase(_=None) -> None:
+        invoice_center.show_editor(None, "purchase")
+
+    def pos_chrome_restore(_key: str = "", _kwargs: dict | None = None) -> None:
+        # Registered as the POS route's on_leave: any way out of fullscreen
+        # POS (tab tap, hardware back, POS's own exit button) restores the
+        # shell chrome exactly once, before the next screen renders.
+        _pos_fullscreen["value"] = False
+        top_bar.visible = True
+        try:
+            if voice_session is not None:
+                voice_header_slot.visible = True
+        except Exception:
+            pass
+        adapt_navigation()
+
+    _DENY_MESSAGES = {
+        "pos": "لا تملك صلاحية الفواتير",
+        "sale": "لا تملك صلاحية الفواتير",
+        "purchase": "لا تملك صلاحية الفواتير",
+        "stocktake": "لا تملك صلاحية المواد/الجرد",
+    }
+
+    def _on_route_denied(exc: Exception, key: str, kwargs: dict) -> None:
+        # Render failures were already toasted inside render_route; here only
+        # permission denials are user-facing. Unknown keys stay silent, same
+        # as the old navigate() returned early on them.
+        if isinstance(exc, RouteDenied) and "permission" in str(exc):
+            notify(_DENY_MESSAGES.get(key, "لا تملك صلاحية هذا القسم"))
+
+    router = Router(
+        home="dashboard",
+        render=render_route,
+        can_render=lambda route: session.can(route.permission or route.key),
+        on_denied=_on_route_denied,
+    )
+    for _key, (_title, _subtitle) in page_meta.items():
+        router.add(
+            Route(
+                key=_key,
+                label=_title,
+                subtitle=_subtitle,
+                icon=icon_map[_key],
+                permission=_key,
+                render=actions[_key],
+            )
+        )
+    router.register("pos", label="نقطة البيع", permission="invoices", render=pos_center.show_center, on_leave=pos_chrome_restore)
+    router.register("sale", label="فاتورة بيع", subtitle="إنشاء فاتورة بيع جديدة — النقدي افتراضيًا", permission="invoices", render=render_sale, replace_current=True)
+    router.register("purchase", label="فاتورة شراء", subtitle="إنشاء فاتورة شراء جديدة — النقدي افتراضيًا", permission="invoices", render=render_purchase, replace_current=True)
+    router.register("stocktake", label="الجرد", subtitle="جرد بالمسح المستمر", permission="items", render=stocktake_center.show_center)
+
+    _NAV_ALIASES = {
+        "نقطة البيع": "pos",
+        "بيع سريع": "pos",
+        "جرد": "stocktake",
+        "فاتورة بيع": "sale",
+        "فاتورة شراء": "purchase",
+    }
+
+    def navigate(key: str, **kwargs) -> None:
+        # Voice session / notification rows / dashboard quick-actions all
+        # funnel through this one function, so the back-stack stays correct
+        # no matter where navigation was triggered from.
+        if key in ("notifications", "إشعارات", "تنبيهات"):
+            try:
+                notification_center.open_panel()
+            except Exception as exc:
+                notify(str(exc), kind="error")
+            return
+        target = _NAV_ALIASES.get(key, key)
+        # Tab-level sections behave like bottom-navigation: the destination
+        # becomes the new root of the stack. Sale/POS/stocktake editors
+        # opened from elsewhere push, so back returns where you came from.
+        router.go(target, reset=target in actions, **kwargs)
+
+    # Thin wrappers kept for the existing call-sites (sidebar buttons, the
+    # mobile "بيع سريع" FAB, the "المزيد" sheet, dashboard quick actions).
+    # All of them now delegate to the Router instead of re-implementing the
+    # opacity/header dance individually.
+    def open_pos(_=None) -> None:
+        navigate("pos")
+
+    def open_sale(_=None) -> None:
+        navigate("sale")
+
+    def open_purchase(_=None) -> None:
+        navigate("purchase")
+
+    def open_items_for_new(barcode_code: str) -> None:
+        navigate("items", prefill_barcode=barcode_code)
+
+    # Android hardware back button. `page.window.prevent_close` keeps the
+    # OS from killing the app on the first press; the handler then pops the
+    # Router's real back-stack (sale editor -> invoices list, POS -> where
+    # POS was opened from, ...). Only once the stack is empty *and* we're
+    # home does a press actually exit. os._exit() is used there because
+    # page.window.close() is a no-op on Android (no platform window behind
+    # the Activity) -- same as before, but now back finally behaves like a
+    # back button instead of always jumping to the dashboard.
     page.window.prevent_close = True
 
     def handle_window_event(e: ft.WindowEvent) -> None:
         if e.type != ft.WindowEventType.CLOSE:
             return
-        if selected_key["value"] != "dashboard":
+        if router.can_go_back():
+            router.back()
+            return
+        if router.current != "dashboard":
             navigate("dashboard")
             return
-        # `page.window.close()` (the previous call here) re-enters the
-        # same prevent_close-gated close intent this handler exists to
-        # intercept in the first place. On desktop that's fine -- with
-        # prevent_close now False it lets the real OS window close --
-        # but on Android there is no actual platform "window" behind an
-        # Activity, so close() quietly does nothing there. The visible
-        # symptom is exactly what was reported: back always lands you
-        # on the dashboard and a second press just... doesn't exit.
-        # os._exit() forcibly kills this process instead, which is what
-        # "exit the app" has to mean on Android, and still exits desktop
-        # builds the same way (there's no further UI to unwind at this
-        # point, so a hard exit is fine).
         import os
 
         os._exit(0)
 
     page.window.on_event = handle_window_event
-
-    def open_sale(_=None) -> None:
-        if not session.can("invoices"):
-            notify("لا تملك صلاحية الفواتير")
-            return
-        selected_key["value"] = "sale"
-        set_header("فاتورة بيع", "إنشاء فاتورة بيع جديدة — النقدي افتراضيًا")
-        refresh_navigation_state()
-        content.opacity = 0
-        invoice_center.show_editor(None, "sale")
-        content.opacity = 1
-        content.update()
-
-    def open_purchase(_=None) -> None:
-        if not session.can("invoices"):
-            notify("لا تملك صلاحية الفواتير")
-            return
-        selected_key["value"] = "purchase"
-        set_header("فاتورة شراء", "إنشاء فاتورة شراء جديدة — النقدي افتراضيًا")
-        refresh_navigation_state()
-        content.opacity = 0
-        invoice_center.show_editor(None, "purchase")
-        content.opacity = 1
-        content.update()
-
-    def open_pos(_=None) -> None:
-        if not session.can("invoices"):
-            notify("لا تملك صلاحية الفواتير")
-            return
-        selected_key["value"] = "pos"
-        refresh_navigation_state()
-        content.opacity = 0
-        pos_center.show_center()
-        content.opacity = 1
-        content.update()
-
-    def open_items_for_new(barcode_code: str) -> None:
-        if not session.can("items"):
-            notify("لا تملك صلاحية المواد")
-            return
-        selected_key["value"] = "items"
-        title, subtitle = page_meta["items"]
-        set_header(title, subtitle)
-        refresh_navigation_state()
-        content.opacity = 0
-        items_center.show_center(prefill_barcode=barcode_code)
-        content.opacity = 1
-        content.update()
 
     def nav_button(key: str, label: str, icon, on_click):
         icon_ctrl = ft.Icon(icon, size=21, color=Colors.TEXT_SECONDARY)
@@ -792,8 +812,9 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
     def adapt_navigation(_=None):
         if _pos_fullscreen["value"]:
             # A resize (e.g. tablet rotation) mid-sale must not pop the
-            # sidebar/tab bar back over the sale screen -- pos_fullscreen_exit()
-            # is the only path back to normal chrome.
+            # sidebar/tab bar back over the sale screen -- leaving POS is
+            # the Router's on_leave path (pos_chrome_restore below), which
+            # clears this flag first.
             return
         desktop = bool(page.width and page.width >= 900)
         sidebar.visible = desktop
@@ -821,15 +842,15 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         page.update()
 
     def pos_fullscreen_exit():
-        _pos_fullscreen["value"] = False
-        top_bar.visible = True
-        try:
-            if voice_session is not None:
-                voice_header_slot.visible = True
-        except Exception:
-            pass
-        adapt_navigation()
-        navigate("dashboard")
+        # Leaving POS is a navigation: routing out fires the POS route's
+        # on_leave hook (pos_chrome_restore), which clears the fullscreen
+        # flag and re-derives the chrome for the current width. So here we
+        # only pick the destination -- back to where POS was opened from if
+        # there's history, otherwise home.
+        if router.can_go_back():
+            router.back()
+        else:
+            navigate("dashboard")
 
     page.on_resize = adapt_navigation
     navigate("dashboard")
