@@ -45,7 +45,7 @@ jobs:
           PYTHONPATH: src
         run: |
           set -euo pipefail
-          python - <<'PY'
+          uv run python - <<'PY'
           # Verify multi-app entry points import without launching UI
           import importlib
           for mod in (
