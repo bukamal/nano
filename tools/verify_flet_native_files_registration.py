@@ -41,31 +41,39 @@ def verify(flutter_root: Path) -> dict[str, str]:
     if "package:flet_native_files/flet_native_files.dart" not in dart and "flet_native_files.createControl" not in dart:
         raise RuntimeError("Generated Dart bootstrap does not register flet_native_files")
 
-    # PHASE10: confirm Gradle's manifest merger actually folded the home
-    # screen widget receiver from android/src/main/AndroidManifest.xml into
-    # the generated app manifest -- a silent merge failure here would leave
-    # push_home_widget()/the periodic WorkManager pass calling into a
-    # channel with nothing listening on the widget side, without any build
-    # error to catch it.
-    merged_manifest = flutter_root / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
-    if merged_manifest.is_file():
-        manifest_text = _read(merged_manifest)
-        if "com.nano.homewidget.NanoWidgetReceiver" not in manifest_text:
-            raise RuntimeError(
-                "Generated AndroidManifest.xml is missing the PHASE10 home widget receiver "
-                "(com.nano.homewidget.NanoWidgetReceiver) -- check "
-                "extensions/flet_native_files/.../android/src/main/AndroidManifest.xml and "
-                "the plugin.platforms.android section of that package's pubspec.yaml"
-            )
+    # PHASE10: confirm the home screen widget receiver is registered.
+    # NOTE: Gradle folds plugin-library manifests into the FINAL merged
+    # manifest during the build itself -- the source app manifest
+    # (android/app/src/main/AndroidManifest.xml) only contains it when a
+    # previous merged build has run in the same tree. So check the
+    # authoritative SOURCE (the plugin's own manifest, as staged by flet
+    # under flutter-packages / the checked-out extension) plus, when a
+    # merged app manifest exists, the final artifact too. A silent merge
+    # failure would leave push_home_widget()/the periodic WorkManager pass
+    # calling into a channel with nothing listening on the widget side.
+    receiver_token = "com.nano.homewidget.NanoWidgetReceiver"
+    sources = [
+        flutter_root / "flutter-packages" / "flet_native_files" / "android" / "src" / "main" / "AndroidManifest.xml",
+        extension_root / "android" / "src" / "main" / "AndroidManifest.xml",
+        flutter_root / "android" / "app" / "src" / "main" / "AndroidManifest.xml",
+    ]
+    manifests_with_receiver = [p for p in sources if p.is_file() and receiver_token in _read(p)]
+    if not manifests_with_receiver:
+        raise RuntimeError(
+            "PHASE10 home widget receiver (com.nano.homewidget.NanoWidgetReceiver) not found in any "
+            "known manifest -- check extensions/flet_native_files/.../android/src/main/AndroidManifest.xml "
+            "and the plugin.platforms.android section of that package's pubspec.yaml"
+        )
 
-        # The receiver being present is not enough on its own: it must also
-        # be exported, since it's invoked by the launcher/System Server (a
-        # different process) via the APPWIDGET_UPDATE broadcast. A merged
-        # exported="false" builds and installs fine -- the widget just shows
-        # the "Couldn't load widget" placeholder forever because the update
-        # broadcast never reaches it. Match the specific <receiver> block
-        # instead of scanning the whole file, since some other exported
-        # component could otherwise mask a false here.
+    # The receiver being present is not enough on its own: it must also be
+    # exported, since it's invoked by the launcher/System Server (a different
+    # process) via the APPWIDGET_UPDATE broadcast. An exported="false"
+    # builds and installs fine -- the widget just shows the "Couldn't load
+    # widget" placeholder forever because the update broadcast never reaches
+    # it. Match the specific <receiver> block instead of scanning the whole
+    # file, since some other exported component could otherwise mask a false.
+    for manifest_path in manifests_with_receiver:
+        manifest_text = _read(manifest_path)
         receiver_match = re.search(
             r"<receiver\b[^>]*android:name=\"com\.nano\.homewidget\.NanoWidgetReceiver\"[^>]*/?>"
             r"|<receiver\b[^>]*android:name=\"\.homewidget\.NanoWidgetReceiver\"[^>]*/?>",
@@ -73,10 +81,10 @@ def verify(flutter_root: Path) -> dict[str, str]:
         )
         if receiver_match is None or 'android:exported="true"' not in receiver_match.group(0):
             raise RuntimeError(
-                "PHASE10 NanoWidgetReceiver is present in the merged manifest but not "
-                'android:exported="true" -- the launcher cannot deliver the '
-                "APPWIDGET_UPDATE broadcast across processes with exported=false, so the "
-                "widget will be added to the home screen but never render. Fix "
+                "PHASE10 NanoWidgetReceiver is present in "
+                f"{manifest_path} but not android:exported=\"true\" -- the launcher cannot "
+                "deliver the APPWIDGET_UPDATE broadcast across processes with exported=false, "
+                "so the widget will be added to the home screen but never render. Fix "
                 "android:exported on the <receiver> in "
                 "extensions/flet_native_files/.../android/src/main/AndroidManifest.xml"
             )
