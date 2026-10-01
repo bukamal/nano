@@ -17,6 +17,11 @@ dependencies = [
   # plugin dependency of an already-registered [tool.flet.dev_packages]
   # extension is picked up by `flet build apk` automatically.
   "flet-native-files==0.1.6",
+  # Encrypted .nanobackup (AES-GCM via backup_service) — imported lazily so
+  # the app still runs without it, but users who create encrypted backups
+  # need it installed; shipping it as a core dep keeps CI and release builds
+  # exercising the encrypted path consistently.
+  "cryptography>=42.0",
 ]
 
 [project.optional-dependencies]
