@@ -78,6 +78,28 @@ jobs:
           SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           "$SDKMANAGER" --licenses <<< "$(printf 'y\n%.0s' {1..30})" >/dev/null || true
           "$SDKMANAGER" "platforms;android-35" "build-tools;34.0.0" >/dev/null
+          # Core library desugaring for :app — flutter_local_notifications
+          # (via flet_native_files) requires it and the Flet-generated
+          # build.gradle.kts has no knob for it. A Gradle init script under
+          # ~/.gradle/init.d/ is auto-applied to EVERY build regardless of
+          # how many times flet regenerates the project (editing the
+          # generated file directly loses the race).
+          GRADLE_INIT_DIR="${GRADLE_USER_HOME:-$HOME/.gradle}/init.d"
+          mkdir -p "$GRADLE_INIT_DIR"
+          cat > "$GRADLE_INIT_DIR/nano-core-library-desugaring.init.gradle.kts" <<'EOF'
+          allprojects {
+              plugins.withId("com.android.application") {
+                  extensions.getByName("android").withGroovyBuilder {
+                      "compileOptions" {
+                          setProperty("coreLibraryDesugaringEnabled", true)
+                      }
+                  }
+                  dependencies {
+                      add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.1.4")
+                  }
+              }
+          }
+          EOF
           flet build apk --build-number 25 --build-version 0.9.6 --skip-flutter-doctor 2>&1 | tee flet-build.log
 
       - name: Verify native files
