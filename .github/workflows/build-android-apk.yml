@@ -38,10 +38,20 @@ jobs:
           java-version: '17'
 
       - name: Prepare Android SDK and accept licenses
-        uses: android-actions/setup-android@v3
-        # That action provisions the cmdline tools + base platforms and exports
-        # ANDROID_SDK_ROOT="$SDK_ROOT" (an absolute path under *this* runner);
-        # the project-specific platforms/build-tools are installed in Build APK.
+        # Manual provisioning instead of android-actions/setup-android@v3:
+        # that action has been flaky (dl.google 403/timeouts) and failed this
+        # job repeatedly. This installs the cmdline-tools directly and exports
+        # ANDROID_SDK_ROOT for the later steps -- same contract, no flake.
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          mkdir -p "$SDK_ROOT/cmdline-tools"
+          curl -fsSL -o /tmp/cmdline-tools.zip \
+            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+          unzip -q /tmp/cmdline-tools.zip -d /tmp/clt
+          mv /tmp/clt/cmdline-tools "$SDK_ROOT/cmdline-tools/latest"
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
 
       - name: Install project dependencies
         run: |
