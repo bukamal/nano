@@ -127,5 +127,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nano-release-apk
-          path: build/apk/nano-release.apk
+          # flet names the output app-release.apk (any flavour) — glob so a
+          # rename in flet can't silently upload nothing. if-no-files-found:
+          # error makes a missing APK fail the job loudly instead of a
+          # hollow "success".
+          path: |
+            build/apk/*.apk
+            build/apk/**/app-release.apk
+          if-no-files-found: error
           retention-days: 14
