@@ -22,7 +22,6 @@ from nano_offline.core import theme
 from nano_offline.core import theme_settings
 from nano_offline.core.paths import (
     PRIMARY_DB_NAME,
-    apply_shared_data_dir,
     database_path,
     migrate_legacy_database,
 )

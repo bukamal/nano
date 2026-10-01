@@ -77,4 +77,42 @@ def backups_dir() -> Path:
     return path
 
 
-__all__ = ["app_data_dir", "database_path", "backups_dir", "migrate_legacy_database", "APP_DIR_NAME"]
+_SHARED_DATA_DIR: Path | None = None
+
+
+def apply_shared_data_dir(path: str | Path) -> Path:
+    """Pin the suite database directory to an explicit (shared) location.
+
+    Used on Android so multiple entry points (accounting / inventory / POS)
+    — or a single app after reinstall — resolve the SAME nano.db. The value
+    is kept in-process AND mirrored into NANO_DATA_DIR so later calls of
+    app_data_dir()/database_path() (in any module) see it.
+    """
+    global _SHARED_DATA_DIR
+    resolved = Path(path).expanduser()
+    _SHARED_DATA_DIR = resolved
+    os.environ["NANO_DATA_DIR"] = str(resolved)
+    os.environ.pop("QEID_DATA_DIR", None)
+    return resolved
+
+
+def is_shared_data_dir_active() -> bool:
+    return _SHARED_DATA_DIR is not None
+
+
+def shared_data_dir() -> Path | None:
+    return _SHARED_DATA_DIR
+
+
+__all__ = [
+    "app_data_dir",
+    "database_path",
+    "backups_dir",
+    "migrate_legacy_database",
+    "apply_shared_data_dir",
+    "is_shared_data_dir_active",
+    "shared_data_dir",
+    "APP_DIR_NAME",
+    "PRIMARY_DB_NAME",
+    "LEGACY_DB_NAME",
+]
