@@ -131,6 +131,7 @@ allowBackup = "false"
 [tool.flet.android.permission]
 "android.permission.INTERNET" = true
 "android.permission.CAMERA" = true
+"android.permission.RECORD_AUDIO" = true
 "android.permission.POST_NOTIFICATIONS" = true
 "android.permission.RECEIVE_BOOT_COMPLETED" = true
 "android.permission.WAKE_LOCK" = true

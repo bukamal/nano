@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Smoke scripts import nano_offline directly; guarantee src is importable
+# even when the package isn't pip-installed (fresh CI runner).
+env = {**os.environ, "PYTHONPATH": str(ROOT / "src") + os.pathsep + os.environ.get("PYTHONPATH", "")}
 
 
 def _has_module(name: str) -> bool:
@@ -98,5 +103,5 @@ env_note = "(pytest already covered unit+integration; smoke scripts verify phase
 print(f"▶ smoke/contract scripts {env_note}", flush=True)
 for script in SCRIPTS:
     print("▶", script, flush=True)
-    subprocess.run([sys.executable, str(ROOT / script)], check=True, cwd=ROOT)
+    subprocess.run([sys.executable, str(ROOT / script)], check=True, cwd=ROOT, env=env)
 print("quality_gate passed")
