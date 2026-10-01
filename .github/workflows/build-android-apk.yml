@@ -100,8 +100,18 @@ jobs:
               }
           }
           EOF
+          # Stale Glance widget source: the checked-in NanoGlanceWidget.kt is
+          # an OLD copy whose symbols (Column, GlanceModifier, Text…) no longer
+          # resolve against the current Glance deps, and NanoWidgetReceiver.kt
+          # now DEFINES its own mainActivityClass()/NanoWidgetDiagnostics — so
+          # keeping both files makes :flet_native_files:compileReleaseKotlin
+          # fail with "Unresolved reference" + "Conflicting overloads" +
+          # "Redeclaration". Delete the stale file (wherever a copy exists:
+          # source tree AND flet's staged copy under build/flutter-packages)
+          # and wipe flet's staged project so it re-stages fresh sources.
+          find . -name "NanoGlanceWidget.kt" -type f -delete 2>/dev/null || true
+          rm -rf build/flutter-packages build/flutter 2>/dev/null || true
           flet build apk --build-number 25 --build-version 0.9.6 --skip-flutter-doctor 2>&1 | tee flet-build.log
-
       - name: Verify native files
         run: |
           python tools/verify_flet_native_files_registration.py build/flutter
