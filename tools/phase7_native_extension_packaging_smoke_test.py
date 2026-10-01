@@ -29,6 +29,16 @@ for needle in ["FilePicker.platform.pickFiles", "Share.shareXFiles", "Printing.l
     assert needle in dart, needle
 
 with tempfile.TemporaryDirectory(prefix="qeid-native-wheel-") as td:
+    # --no-build-isolation means pip uses THIS interpreter's build backend
+    # directly; ensure setuptools is importable there first (fresh CI images
+    # ship pip without setuptools, which fails with BackendUnavailable).
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-q", "setuptools>=68", "wheel"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
     proc = subprocess.run(
         [sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation", str(EXT), "-w", td],
         cwd=ROOT,
