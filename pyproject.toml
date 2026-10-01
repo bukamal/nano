@@ -96,6 +96,9 @@ build_number = 25
 android_permissions = [
   "android.permission.INTERNET",
   "android.permission.CAMERA",
+  # Voice «مكالمة ذكية» — SpeechRecognizer requires RECORD_AUDIO (runtime-
+  # requested by NanoSpeechHandler.listen, declared here so the APK ships it).
+  "android.permission.RECORD_AUDIO",
   # For the closed-app smart-notification check (WorkManager +
   # flutter_local_notifications, see extensions/flet_native_files):
   # POST_NOTIFICATIONS is the Android 13+ runtime permission actually

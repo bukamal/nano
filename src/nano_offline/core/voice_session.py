@@ -10,7 +10,7 @@ Foreground only (not an OS background service). Features:
 
 from __future__ import annotations
 
-import threading
+import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -57,8 +57,14 @@ class VoiceSessionController:
         self.tts_enabled = tts_enabled
         self.silent = True  # no toast tones during the call
         self._speaking = False
+        self._speak_gen = 0  # generation counter: invalidates stale TTS callbacks
         self._pending_relisten = False
         self._pending_relisten_delay = 0.4
+        self._loop_gen = 0  # session generation: cancels stale listen callbacks
+        self._relisten_task: asyncio.Task | None = None
+        self._loop_task: asyncio.Task | None = None
+        self._tts_task: asyncio.Task | None = None
+        self._listen_req = 0  # serializes listen cycles; stale callbacks drop
 
         self.active = False
         self.listening = False
@@ -188,6 +194,7 @@ class VoiceSessionController:
         if self.active:
             return
         self.active = True
+        self._loop_gen += 1  # invalidate any stale callbacks from a previous call
         self._pending_followup = None
         self._pending_disambiguate = None
         self._silence_streak = 0
@@ -211,7 +218,7 @@ class VoiceSessionController:
         self._push_turn("nano", greet)
         self._safe_update()
         self._notify_quiet(greet, kind="info")
-        self._listen()
+        self._run_task(self._listen_loop(first=True, greeting=greet))
 
     def _register_native_engine(self) -> None:
         """Auto-register the Android native STT engine when available
@@ -219,21 +226,45 @@ class VoiceSessionController:
         try:
             from nano_offline.core.voice_command import AndroidNativeVoiceEngine, get_engine
             eng = get_engine()
-            if isinstance(eng, AndroidNativeVoiceEngine) and eng.is_available():
-                return  # already registered and usable
             if self.native_files is not None:
-                voice_cmd.set_engine(AndroidNativeVoiceEngine(self.native_files, page=self.page))
+                if not isinstance(eng, AndroidNativeVoiceEngine) or eng.native_files is not self.native_files:
+                    voice_cmd.set_engine(AndroidNativeVoiceEngine(self.native_files, page=self.page))
         except Exception:
             pass
 
+    def _run_task(self, coro) -> None:
+        """Schedule a coroutine on the Flet UI loop (thread-safe entry)."""
+        try:
+            if hasattr(self.page, "run_task"):
+                self.page.run_task(coro)
+                return
+        except Exception:
+            pass
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(coro)
+            else:
+                loop.run_until_complete(coro)
+        except Exception:
+            try:
+                coro.close()  # never leak an un-awaited coroutine warning
+            except Exception:
+                pass
+
     def stop(self, reason: str = "stop") -> None:
         self.active = False
+        self._loop_gen += 1  # every in-flight listen/relisten/speak callback is now stale
         self.listening = False
         self._pending_followup = None
+        self._pending_relisten = False
+        self._speaking = False
+        self._cancel_relisten_task()
         try:
             voice_cmd.cancel()
         except Exception:
             pass
+        self._cancel_tts()
         self.banner.visible = False
         self.fab.icon = ft.Icons.AUTO_AWESOME
         self.fab.bgcolor = Colors.PRIMARY
@@ -250,62 +281,75 @@ class VoiceSessionController:
         if reason not in ("silent",):
             self._notify_quiet("انتهت المكالمة", kind="info")
 
-    def _listen(self) -> None:
-        if not self.active or self.listening:
-            return
+    # ------------------------------------------------------------------
+    # Continuous call loop — one async task drives listen → execute →
+    # speak → relisten. No threads touch the Flet page anymore.
+    # ------------------------------------------------------------------
+
+    async def _listen_loop(self, *, first: bool = False, greeting: str = "") -> None:
+        """Continuous «call» loop. Each cycle: listen once, execute, speak,
+        then loop again — until the call ends or silence persists."""
+        gen = self._loop_gen
+        if self._loop_task is not None and not self._loop_task.done():
+            return  # a loop is already driving the call — never fork a second one
+        self._loop_task = asyncio.current_task()
+        if first and greeting:
+            await asyncio.sleep(0.3)  # let the greeting toast/visual settle
+            if not self._is_current(gen):
+                return
+        while self.active and self._is_current(gen):
+            # Never hold the mic while Nano is talking (reply audio would feed
+            # back / be cut off); the speak task reopens listening when done.
+            while self._speaking and self._is_current(gen):
+                if not await self._sleep(0.15, gen):
+                    return
+            got = await self._listen_once(gen)
+            if not self._is_current(gen) or not self.active:
+                return
+            if got:
+                self._silence_streak = 0
+            else:
+                self._silence_streak += 1
+                if self._silence_streak >= 3:
+                    # Speak the guidance instead of looping silently forever —
+                    # the user hears WHY the call ends.
+                    self._notify_quiet("لم أسمعك بعد عدة محاولات — أنهيت المكالمة. افتح المكالمة من جديد متى شئت.", kind="info")
+                    self._reply("ما قدرت اسمعك، جرّب تقرب من المايك أو تسمح بالإذن ثم افتح المكالمة من جديد.", kind="warning")
+                    await self._wait_speech_done(gen)
+                    self.stop(reason="silent")
+                    return
+            # inter-cycle gap
+            if not await self._sleep(0.25, gen):
+                return
+
+    def _is_current(self, gen: int) -> bool:
+        return self.active and gen == self._loop_gen
+
+    async def _sleep(self, seconds: float, gen: int) -> bool:
+        """Cancellable sleep; False if the call ended / generation changed."""
+        try:
+            await asyncio.sleep(max(0.05, seconds))
+        except asyncio.CancelledError:
+            return False
+        return self._is_current(gen)
+
+    async def _listen_once(self, gen: int) -> bool:
+        """One utterance capture. Returns True when a command was executed."""
         self.listening = True
         self._refresh_section_chip()
         self._set_listening_visual(True)
         self._hint.value = "يستمع…"
         self._safe_update()
-        # Barge-in (recommendation #3): when a fresh listen cycle starts while
-        # TTS is still speaking (fast user, tap-to-barge-in, or a short
-        # relisten delay), CUT THE TTS NOW instead of waiting for it to end.
-        if self._speaking:
-            self._interrupt_speech()
+
+        result: dict[str, str] = {}
 
         def on_final(text: str):
-            self.listening = False
-            self._set_listening_visual(False)
-            self._silence_streak = 0
-            text = (text or "").strip()
-            if not text:
-                self._schedule_relisten(0.45)
-                return
-            self._last_command = text
-            self._push_turn("user", text)
-            self._hint.value = f"«{text}»"
-            self._safe_update()
-            self._execute(text)
+            if not result:
+                result["final"] = (text or "").strip()
 
         def on_error(msg: str):
-            self.listening = False
-            self._set_listening_visual(False)
-            soft = any(
-                x in (msg or "")
-                for x in ("لم يُلتقط", "لم يُفهم", "انتهى وقت", "NO_MATCH", "SPEECH_TIMEOUT", "timeout", "permission", "أُلغي")
-            )
-            try:
-                self._bubble_tip.value = ""
-                self._bubble_tip.visible = False
-            except Exception:
-                pass
-            self._safe_update()
-            if not self.active:
-                return
-            if "permission" in (msg or "").lower() or "إذن" in (msg or ""):
-                self._notify_quiet("يلزم إذن الميكروفون", kind="warning")
-                self.stop(reason="permission")
-                return
-            # Soft miss: stay in the call silently, listen again (AI-call style).
-            # After several consecutive silent cycles, end the call gracefully
-            # instead of looping the mic forever (modern-assistant behavior).
-            self._silence_streak += 1
-            if self._silence_streak >= 6:
-                self.stop(reason="silent")
-                self._notify_quiet("أُنهيت المكالمة لعدم وجود نشاط صوتي", kind="info")
-                return
-            self._schedule_relisten(0.4 if soft else 0.7)
+            if not result:
+                result["error"] = msg or ""
 
         def on_partial(text: str):
             if text:
@@ -318,59 +362,101 @@ class VoiceSessionController:
                 on_partial=on_partial,
                 on_final=on_final,
                 on_error=on_error,
-                # Adaptive: first utterance gets a generous window; follow-ups
-                # inside the same call get a tighter one (snappier loop).
                 timeout_sec=8.0 if self.memory.turn_count == 0 else 5.5,
             )
         except Exception as exc:
-            on_error(str(exc))
+            result["error"] = str(exc)
 
-    def _on_bubble_tap(self) -> None:
-        """Barge-in (recommendation #3): tapping the bubble while Nano is
-        speaking CUTS THE TTS MID-SENTENCE and reopens the mic immediately —
-        the user never waits out a long reply to give the next command.
-        Tapping otherwise (idle/listening) ends the call as before."""
-        if self._speaking:
-            self._interrupt_speech()
-            self._notify_quiet("تفضل، أنا منصت…", kind="info")
-            self._schedule_relisten(0.1)
-            return
-        self.stop(reason="ended")
+        # listen_once schedules an async task internally; poll for completion.
+        # Longest wait = listen timeout + native margin.
+        deadline = asyncio.get_event_loop().time() + 20.0
+        while not result and self._is_current(gen):
+            await asyncio.sleep(0.08)
+            if asyncio.get_event_loop().time() > deadline:
+                result.setdefault("error", "انتهى وقت الاستماع دون نتيجة واضحة")
+        if not self._is_current(gen):
+            self.listening = False
+            return False
 
-    def _interrupt_speech(self) -> None:
-        """Kill in-flight TTS immediately so the mic can hear the user."""
-        if not self._speaking:
-            return
-        self._speaking = False
-        self._pending_relisten = False
+        self.listening = False
+        self._set_listening_visual(False)
         try:
-            if self.native_files is not None and hasattr(self.page, "run_task"):
-                async def _stop():
-                    try:
-                        await self.native_files.speech_stop_speak()
-                    except Exception:
-                        pass
-                self.page.run_task(_stop)
+            self._bubble_tip.visible = False
         except Exception:
             pass
+        self._safe_update()
+
+        if "final" in result:
+            text = result["final"]
+            if not text:
+                return False  # pure silence — loop handles the streak
+            self._push_turn("user", text)
+            self._hint.value = f"«{text}»"
+            self._safe_update()
+            try:
+                self._execute(text)
+            except Exception as exc:
+                self._reply(f"صار خطأ أثناء التنفيذ: {exc}", kind="error")
+            return True
+
+        # ---- error path ----
+        msg = result.get("error", "")
+        low = (msg or "").lower()
+        if "permission" in low or "إذن" in (msg or ""):
+            self._notify_quiet("يلزم إذن الميكروفون — اسمح للتطبيق ثم افتح المكالمة من جديد", kind="warning")
+            self._reply("ما أقدر أستمع بدون إذن الميكروفون. اسمح بالإذن من إعدادات النظام ثم أعد فتح المكالمة.", kind="warning")
+            await self._wait_speech_done(gen)
+            self.stop(reason="permission")
+            return False
+        if "busy" in low:
+            # recognizer busy: give it a beat and retry within the same call
+            await asyncio.sleep(0.6)
+            return False
+        if "غير متاح" in (msg or "") or "unavailable" in low:
+            self._reply("خدمة التعرّف على الكلام غير متاحة على هذا الجهاز الآن.", kind="warning")
+            return False
+        # Soft miss: stay in the call; speak a gentle hint after the first miss
+        if self._silence_streak == 1:
+            self._reply("تفضل، أنا منصت…", kind="info")
+            await self._wait_speech_done(gen)
+        return False
+
+    def _cancel_relisten_task(self) -> None:
+        t = self._relisten_task
+        if t is not None and not t.done():
+            try:
+                t.cancel()
+            except Exception:
+                pass
+        self._relisten_task = None
 
     def _schedule_relisten(self, delay: float) -> None:
-        """Restart mic after reply — never while TTS is still speaking
-        (the reply must stay audible); _speak() re-triggers this the moment
-        TTS ends. Tap-to-barge-in (bubble) is the immediate interrupt path."""
+        """Queue a relisten AFTER the current speech finishes (the reply must
+        stay audible). The speak task re-opens the mic itself when TTS ends.
+        If TTS is off/unavailable, relisten happens after a short delay."""
         if not self.active:
             return
-        if self.tts_enabled and self._speaking:
+        if self.tts_enabled and self.native_files is not None and (self._speaking or self._tts_task is not None):
             self._pending_relisten = True
             self._pending_relisten_delay = max(0.3, delay)
             return
-        wait = max(0.2, delay)
+        if self._relisten_task is not None and not self._relisten_task.done():
+            return  # already queued
+        gen = self._loop_gen
 
-        def _go():
-            if self.active and not self.listening and not self._speaking:
-                self._listen()
+        async def _go():
+            if not await self._sleep(max(0.25, delay), gen):
+                return
+            if self._is_current(gen) and not self.listening and not self._speaking:
+                loop_task = self._loop_task
+                if loop_task is not None and not loop_task.done():
+                    return  # main loop still alive — it will pick up listening
+                self._run_task(self._listen_loop())
 
-        threading.Timer(wait, _go).start()
+        try:
+            self._relisten_task = asyncio.get_event_loop().create_task(_go())
+        except Exception:
+            pass
 
     def _execute(self, text: str) -> None:
         section = (self.get_section() or "dashboard").lower()
@@ -1007,11 +1093,17 @@ class VoiceSessionController:
             self._notify_quiet(text, kind=kind)
         except Exception:
             pass
-        if self.tts_enabled and text:
+        if self.tts_enabled and text and self.native_files is not None:
             # Any schedule_relisten while speaking will wait until TTS finishes
             self._pending_relisten = True
             self._pending_relisten_delay = 0.45
             self._speak(text)
+        else:
+            # No TTS on this device/mute state: make sure the listen loop is
+            # still alive so the call never goes dead after a reply.
+            self._pending_relisten = True
+            self._pending_relisten_delay = 0.45
+            self._after_speech_stale()
 
     def _show_help(self) -> None:
         section = (self.get_section() or "dashboard").lower()
@@ -1079,12 +1171,19 @@ class VoiceSessionController:
         return t in ("لا", "لاء", "الغاء", "إلغاء", "كانسل", "no", "n") or t.startswith("لا")
 
     def _speak(self, text: str) -> None:
-        if not self.tts_enabled or not self.native_files or not text:
+        """Speak via native TTS and reopen the mic exactly when it ends.
+        Generation counter guarantees a stale TTS completion can never leave
+        _speaking stuck True (the «no reply, endless listen» bug)."""
+        self._speaking = False
+        self._cancel_tts()
+        if not self.tts_enabled or self.native_files is None or not text:
+            self._after_speech_stale()
             return
         spoken = (text or "").strip()
-        # Allow long full replies; native layer waits until utterance ends
         self._last_spoken = spoken
         self._speaking = True
+        gen = self._loop_gen
+        my_task: asyncio.Task | None = None
 
         async def _go():
             try:
@@ -1096,18 +1195,69 @@ class VoiceSessionController:
             except Exception:
                 pass
             finally:
-                self._speaking = False
-                self._last_spoken = ""
-                if self._pending_relisten and self.active:
-                    self._pending_relisten = False
-                    delay = self._pending_relisten_delay
-                    self._schedule_relisten(delay)
+                # only the latest TTS task may flip state / reopen the mic
+                if self._tts_task is my_task:
+                    self._tts_task = None
+                    self._speaking = False
+                    self._last_spoken = ""
+                    if self._pending_relisten and self._is_current(gen):
+                        self._pending_relisten = False
+                        self._schedule_relisten(self._pending_relisten_delay)
 
         try:
-            if hasattr(self.page, "run_task"):
-                self.page.run_task(_go)
+            loop = asyncio.get_event_loop()
+            self._tts_task = loop.create_task(_go()) if loop.is_running() else None
+            if self._tts_task is None:
+                loop.run_until_complete(_go())
         except Exception:
             self._speaking = False
+            self._tts_task = None
+            self._after_speech_stale()
+
+    def _cancel_tts(self) -> None:
+        t = self._tts_task
+        if t is not None and not t.done():
+            try:
+                t.cancel()
+            except Exception:
+                pass
+        self._tts_task = None
+        try:
+            if self.native_files is not None and hasattr(self.page, "run_task"):
+                async def _stop():
+                    try:
+                        await self.native_files.speech_stop_speak()
+                    except Exception:
+                        pass
+                self.page.run_task(_stop)
+        except Exception:
+            pass
+
+    def _after_speech_stale(self) -> None:
+        """TTS unavailable (desktop / muted): resume the loop directly so the
+        call never stalls between turns."""
+        if self._pending_relisten and self.active:
+            self._pending_relisten = False
+            self._schedule_relisten(self._pending_relisten_delay)
+
+    def _on_bubble_tap(self) -> None:
+        """Barge-in: tapping the bubble while Nano is speaking CUTS the TTS
+        mid-sentence and reopens the mic immediately. Tapping otherwise ends
+        the call."""
+        if self._speaking:
+            self._speaking = False
+            self._pending_relisten = False
+            self._cancel_tts()
+            self._notify_quiet("تفضل، أنا منصت…", kind="info")
+            self._schedule_relisten(0.1)
+            return
+        self.stop(reason="ended")
+
+    def _wait_speech_done(self, gen: int) -> None:
+        """Best-effort: ensure relisten is queued behind current speech."""
+        if self._speaking and self.active and self._is_current(gen):
+            self._pending_relisten = True
+            self._pending_relisten_delay = 0.45
 
 
     def _safe_update(self) -> None:

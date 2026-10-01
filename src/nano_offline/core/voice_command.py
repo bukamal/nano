@@ -154,7 +154,10 @@ class AndroidNativeVoiceEngine:
     ) -> None:
         import asyncio
 
+        started = {"ok": False}
+
         async def _run():
+            started["ok"] = True
             try:
                 # Optional availability probe
                 try:

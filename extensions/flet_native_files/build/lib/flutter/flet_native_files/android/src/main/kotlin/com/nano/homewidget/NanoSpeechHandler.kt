@@ -138,8 +138,21 @@ class NanoSpeechHandler(
     fun listen(language: String, timeoutMs: Int, result: MethodChannel.Result) {
         mainHandler.post {
             if (pendingResult != null) {
-                result.error("busy", "استماع قيد التنفيذ بالفعل", null)
-                return@post
+                // Stale pending result (e.g. Flutter side timed out earlier
+                // without cancel): clear it instead of deadlocking every
+                // future listen behind a "busy" error forever.
+                try {
+                    recognizer?.cancel()
+                } catch (_: Exception) {
+                }
+                destroyRecognizer()
+                val stale = pendingResult
+                pendingResult = null
+                clearTimeout()
+                try {
+                    stale?.success("")
+                } catch (_: Exception) {
+                }
             }
             if (!isAvailable()) {
                 result.error("unavailable", "التعرّف على الكلام غير متاح على هذا الجهاز", null)
