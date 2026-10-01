@@ -37,7 +37,8 @@ jobs:
       - name: Install project
         run: |
           uv sync
-          uv pip install -e . -e extensions/flet_native_files 2>/dev/null || uv pip install -e .
+          uv pip install -e extensions/flet_native_files
+          uv pip install -e .
 
       - name: Suite import smoke
         env:
