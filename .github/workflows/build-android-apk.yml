@@ -60,7 +60,7 @@ jobs:
       - name: Install project dependencies
         run: |
           set -e
-          pip install --upgrade pip
+          pip install --upgrade pip setuptools wheel
           pip install "flet==0.28.3" pyyaml coverage
           # The local extension first: flet-native-files is not on PyPI, so it
           # must already satisfy the pin before `pip install -e .[dev]` resolves.
