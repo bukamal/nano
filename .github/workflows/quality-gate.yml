@@ -8,6 +8,7 @@ on:
       - "apps/**"
       - "tools/**"
       - "pyproject.toml"
+  workflow_dispatch:
   push:
     branches: [main, master]
     paths:
@@ -69,7 +70,16 @@ jobs:
           # Run in the SAME interpreter uv just provisioned packages into,
           # without `uv run` (it re-resolves the lockfile and can silently
           # swap to a different Python than the one deps were installed in).
-          VENV_PY="$(find .venv -name python -type f -o -name python3 -type f 2>/dev/null | head -1 || true)"
+          # IMPORTANT: uv/venv put *symlinks* at .venv/bin/python{,3}, so a
+          # `find ... -type f` matches nothing and the fallback would run the
+          # whole smoke suite against the bare system Python (no flet, no
+          # cryptography) and fail on the first non-stdlib import -- exactly
+          # the phase10_backup_encryption crash this replaced. Match by
+          # executability instead.
+          VENV_PY=""
+          for cand in .venv/bin/python .venv/bin/python3; do
+            if [ -x "$cand" ]; then VENV_PY="$cand"; break; fi
+          done
           if [ -n "$VENV_PY" ]; then
             PYTHONPATH=src "$VENV_PY" tools/quality_gate.py
           else
