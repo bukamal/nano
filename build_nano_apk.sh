@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Single source of truth for the app version/build number: the same
+# src/nano_offline/version.py the Python app reports on its splash/login
+# screens. Deriving them here (instead of hardcoding a version literal) is
+# what keeps the APK metadata, the wheel and the in-app "الإصدار" text from
+# drifting apart.
+eval "$(python3 tools/app_version.py --shell)"
+BUILD_VERSION="${BUILD_VERSION:-0.0.0}"
+BUILD_NUMBER="${BUILD_NUMBER:-1}"
+
 # Build Nano Android APK and copy the installer into dist/.
 #
 # NOTE on the pub.dev "authorization failed" flake:
@@ -107,7 +116,7 @@ MAX_ATTEMPTS=3
 attempt=1
 while true; do
   set +e
-  uv run flet build apk --product "Nano | نانو" --org com.nano --build-number 25 --build-version 0.9.6
+  uv run flet build apk --product "Nano | نانو" --org com.nano --build-number "$BUILD_NUMBER" --build-version "$BUILD_VERSION"
   status=$?
   set -e
 

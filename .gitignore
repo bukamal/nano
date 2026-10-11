@@ -1,0 +1,44 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# --- Tooling caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- Build output (flet/gradle/dart/setuptools) ---
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.apk
+*.aab
+*.whl
+
+# dist/ holds generated installers; keep the two hand-written notes tracked
+# but ignore the actual build artifacts placed there by build_nano_apk.*.
+dist/*
+!dist/README.md
+!dist/INSTALLER_READY.md
+
+# --- Release snapshots / archives ---
+*.zip
+*.tar.gz
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

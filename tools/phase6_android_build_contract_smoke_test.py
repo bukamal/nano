@@ -4,12 +4,14 @@ import re
 root = Path(__file__).resolve().parents[1]
 pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
 workflow = (root / ".github/workflows/build-android-apk.yml").read_text(encoding="utf-8")
+version_py = (root / "src/nano_offline/version.py").read_text(encoding="utf-8")
 main = (root / "src/main.py").read_text(encoding="utf-8")
 paths = (root / "src/nano_offline/core/paths.py").read_text(encoding="utf-8")
 
-version = re.search(r'^version\s*=\s*"(\d+)\.(\d+)\.(\d+)"', pyproject, re.M)
+# Single source of truth: src/nano_offline/version.py (not a literal in pyproject).
+version = re.search(r'APP_VERSION\s*=\s*"(\d+)\.(\d+)\.(\d+)"', version_py)
 assert version and tuple(map(int, version.groups())) >= (0, 6, 0)
-build = re.search(r'^build_number\s*=\s*(\d+)', pyproject, re.M)
+build = re.search(r'BUILD_NUMBER\s*=\s*(\d+)', version_py)
 assert build and int(build.group(1)) >= 6
 for needle in ['"android.permission.INTERNET"', 'allowBackup = "false"']:
     assert needle in pyproject, needle
@@ -24,6 +26,10 @@ for needle in ["flet build apk", "tools/quality_gate.py", "actions/upload-artifa
 assert "nano-release-apk" in workflow
 assert "if-no-files-found: error" in workflow
 assert "*.apk" in workflow
-assert f"--build-number {build.group(1)}" in workflow
-assert f"--build-version {'.'.join(version.groups())}" in workflow
+# The workflow must DERIVE the version/build from version.py (via
+# tools/app_version.py) instead of hardcoding it -- that hardcoded pair is
+# what used to drift out of sync with the app's own reported version.
+assert "tools/app_version.py --shell" in workflow
+assert "steps.appver.outputs.build_number" in workflow
+assert "steps.appver.outputs.build_version" in workflow
 print("phase6_android_build_contract_smoke_test passed")

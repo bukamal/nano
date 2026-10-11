@@ -8,23 +8,24 @@ workflow = (ROOT / ".github/workflows/build-android-apk.yml").read_text(encoding
 preflight = (ROOT / "tools/apk_release_preflight.py").read_text(encoding="utf-8")
 
 for needle in [
-    'version = "0.9.6"',
-    'build_number = 25',
+    'dynamic = ["version"]',
+    '[tool.setuptools.dynamic]',
+    'version = { attr = "nano_offline.version.APP_VERSION" }',
     '[tool.flet.dev_packages]',
     '"flet-native-files" = "extensions/flet_native_files"',
 ]:
     assert needle in pyproject, needle
+assert re.search(r'^build_number\s*=\s*\d+', pyproject, re.M), "build_number missing from pyproject"
 assert "flet-native-files==" in pyproject
 schema_match = re.search(r'^SCHEMA_VERSION\s*=\s*(\d+)', db, re.M)
 assert schema_match and int(schema_match.group(1)) >= 9, "SCHEMA_VERSION must be >= 9"
 for needle in [
     "pip install -e extensions/flet_native_files",
-    "--build-number 25",
-    "--build-version 0.9.6",
+    "tools/app_version.py --shell",
     "verify_flet_native_files_registration.py build/flutter",
 ]:
     assert needle in workflow, needle
-assert 'version = "0.9.6"' in preflight
+assert "app_version.py" in preflight
 assert "flet-native-files" in preflight
 
 print("phase7_project_contract_smoke_test passed")

@@ -5,6 +5,8 @@ import sqlite3
 from pathlib import Path
 from typing import Iterator
 
+from nano_offline.core import search_index
+
 # PHASE10 wave2 (B4): expense receipt photo columns (receipt_image/receipt_name) live in the expenses table schema + migration.
 SCHEMA_VERSION = 15  # PHASE11: adds notification_delivery_log (external dispatch)
 
@@ -453,6 +455,10 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._actor_user_id: int | None = None
         self._actor_username: str | None = None
+        # Set by initialize(): the search-index tokenizer when FTS5/trigram is
+        # available and the index is live; None means "use the LIKE fallback".
+        # Repositories read it when choosing a search path.
+        self.fts_tokenizer: str | None = None
 
     def connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=5.0)
@@ -478,6 +484,7 @@ class Database:
             self._pre_schema_migrate(conn)
             conn.executescript(SCHEMA_SQL)
             self._migrate(conn)
+            self.fts_tokenizer = search_index.ensure(conn)
             conn.execute(
                 "INSERT INTO schema_meta(key,value) VALUES('schema_version',?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",

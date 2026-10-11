@@ -5,7 +5,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-assert tuple(int(x) for x in project["project"]["version"].split(".")) >= (0, 4, 0)
+# Version lives in the single source of truth (version.py); pyproject resolves
+# it dynamically, so it has no literal [project].version anymore.
+import re
+
+version_py = (ROOT / "src/nano_offline/version.py").read_text(encoding="utf-8")
+app_version = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', version_py).group(1)
+assert tuple(int(x) for x in app_version.split(".")) >= (0, 4, 0)
 assert project["tool"]["flet"]["build_number"] >= 4
 assert "flet==0.28.3" in project["project"]["dependencies"]
 

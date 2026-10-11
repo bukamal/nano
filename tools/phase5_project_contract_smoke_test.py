@@ -5,7 +5,8 @@ root = Path(__file__).resolve().parents[1]
 pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
 database = (root / "src/nano_offline/core/database.py").read_text(encoding="utf-8")
 license_code = (root / "src/nano_offline/services/license_service.py").read_text(encoding="utf-8")
-match = re.search(r'^version\s*=\s*"(\d+)\.(\d+)\.(\d+)"', pyproject, re.M)
+version_file = (root / "src/nano_offline/version.py").read_text(encoding="utf-8")
+match = re.search(r'APP_VERSION\s*=\s*"(\d+)\.(\d+)\.(\d+)"', version_file)
 assert match and tuple(map(int, match.groups())) >= (0, 5, 0)
 build = re.search(r'^build_number\s*=\s*(\d+)', pyproject, re.M)
 assert build and int(build.group(1)) >= 5

@@ -11,6 +11,7 @@ src/flutter/flet_native_files/__init__.py
 src/flutter/flet_native_files/pubspec.yaml
 src/flutter/flet_native_files/__pycache__/__init__.cpython-312.pyc
 src/flutter/flet_native_files/__pycache__/__init__.cpython-313.pyc
+src/flutter/flet_native_files/__pycache__/__init__.cpython-314.pyc
 src/flutter/flet_native_files/android/build.gradle
 src/flutter/flet_native_files/android/src/main/AndroidManifest.xml
 src/flutter/flet_native_files/android/src/main/kotlin/com/nano/homewidget/NanoGlanceWidget.kt

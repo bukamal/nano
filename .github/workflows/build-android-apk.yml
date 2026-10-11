@@ -71,6 +71,19 @@ jobs:
         run: |
           python tools/quality_gate.py
 
+      - name: Resolve app version from version.py
+        # Single source of truth: the APK metadata is derived from the same
+        # src/nano_offline/version.py the app shows on its splash/login screen,
+        # so the built artifact can never report a version different from the
+        # code inside it (they used to be hardcoded 0.9.6/25 here).
+        id: appver
+        run: |
+          set -euo pipefail
+          eval "$(python tools/app_version.py --shell)"
+          echo "build_version=$BUILD_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Building Nano $BUILD_VERSION (build $BUILD_NUMBER)"
+
       - name: Build APK
         shell: bash
         run: |
@@ -111,7 +124,7 @@ jobs:
           # and wipe flet's staged project so it re-stages fresh sources.
           find . -name "NanoGlanceWidget.kt" -type f -delete 2>/dev/null || true
           rm -rf build/flutter-packages build/flutter 2>/dev/null || true
-          flet build apk --build-number 25 --build-version 0.9.6 --skip-flutter-doctor 2>&1 | tee flet-build.log
+          flet build apk --build-number "${{ steps.appver.outputs.build_number }}" --build-version "${{ steps.appver.outputs.build_version }}" --skip-flutter-doctor 2>&1 | tee flet-build.log
       - name: Verify native files
         run: |
           python tools/verify_flet_native_files_registration.py build/flutter

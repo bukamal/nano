@@ -7,7 +7,10 @@ hits a ``REAL`` column, so storage never accumulates binary-float noise.
 This module audits whether an existing database already obeys the invariants
 that discipline protects:
 
-- ``storage_clean``      -- every money column holds values with no sub-cent noise.
+- ``storage_clean``      -- every money *amount* column holds values with no
+  sub-cent noise. Derived per-unit costs (weighted averages, line value /
+  quantity) are ratios rather than amounts and are deliberately exempt: a
+  legitimate ``$10 / 3 units = 3.333... `` average has no cent invariant.
 - ``invoice_line_total`` -- ``invoice_lines.total`` is exactly
   ``cents(unit_price * quantity)`` for that line.
 - ``invoice_total``      -- ``invoices.total`` is exactly the sum of the cents
@@ -31,21 +34,35 @@ from decimal import Decimal
 
 from nano_offline.core import money
 
-# Money-bearing columns per table. Exchange rates are deliberately excluded:
-# they are conversion ratios, not amounts, and have no cent invariant.
+# Money *amount* columns per table: these must hold clean cents. Exchange rates
+# and derived per-unit costs are deliberately excluded (see RATIO_COLUMNS):
+# they are ratios, not amounts, and have no cent invariant.
 MONEY_COLUMNS: dict[str, tuple[str, ...]] = {
     "customers": ("balance",),
     "suppliers": ("balance",),
-    "items": ("purchase_price", "selling_price", "average_cost", "opening_unit_cost"),
+    "items": ("selling_price",),
     "item_units": ("selling_price", "purchase_price"),
     "invoices": ("total", "initial_paid_amount", "paid_amount"),
-    "invoice_lines": ("unit_price", "total", "unit_cost", "cost_amount"),
+    "invoice_lines": ("unit_price", "total", "cost_amount"),
     "payments": ("amount",),
     "payment_allocations": ("amount",),
     "vouchers": ("amount",),
-    "inventory_movements": ("unit_cost", "value_delta"),
+    "inventory_movements": ("value_delta",),
     "ledger_entries": ("debit", "credit"),
     "expenses": ("amount",),
+}
+
+# Derived per-unit costs. These are ratios (a line value divided by a quantity,
+# or a running weighted average of such values), so they legitimately carry
+# sub-cent precision. Requiring clean cents here produced false positives on
+# perfectly valid weighted-average costing (e.g. buying 3 units for $10 stores
+# an average_cost of 3.3333...). They are listed explicitly, rather than simply
+# omitted from MONEY_COLUMNS, so the exemption is documented and a future
+# maintainer does not "helpfully" re-add them.
+RATIO_COLUMNS: dict[str, tuple[str, ...]] = {
+    "items": ("purchase_price", "average_cost", "opening_unit_cost"),
+    "invoice_lines": ("unit_cost",),
+    "inventory_movements": ("unit_cost",),
 }
 
 _STORAGE_TOLERANCE_CENTS = 1e-6  # abs(value*100 - round(value*100)) must stay under this
@@ -191,4 +208,4 @@ def summarize(issues: list[dict]) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["MONEY_COLUMNS", "run_checks", "summarize"]
+__all__ = ["MONEY_COLUMNS", "RATIO_COLUMNS", "run_checks", "summarize"]

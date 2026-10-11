@@ -859,6 +859,10 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
 
 
 def main(page: ft.Page):
+    from nano_offline.core.logging_config import get_logger, setup_logging
+
+    setup_logging()
+    _log = get_logger("nano.startup")
     # Voice command hook: default is StubVoiceEngine (UI works, no STT yet).
     # To plug a real on-device Arabic model or platform STT:
     #   from nano_offline.core.voice_command import set_engine, YourEngine
@@ -967,11 +971,9 @@ def main(page: ft.Page):
         except Exception as exc:
             # Never leave the user on a blank/gray page: build_shell failing
             # used to be silent (controls already cleared by reset_page).
-            # Surface the real cause, keep a retry, and log to stderr for
-            # adb logcat capture.
-            import traceback
-
-            traceback.print_exc()
+            # Surface the real cause, keep a retry, and record it in the
+            # on-device log + crash log (not just stderr).
+            _log.exception("build_shell failed: %s", exc)
 
             def retry(_=None):
                 page.close(err_dialog)

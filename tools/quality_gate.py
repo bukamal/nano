@@ -96,6 +96,7 @@ SCRIPTS = [
     "tools/phase10_forecast_smoke_test.py",
     "tools/money_consistency_smoke_test.py",
     "tools/phase11_router_contract_smoke_test.py",
+    "tools/version_consistency_smoke_test.py",
     "tools/apk_release_preflight.py",
 ]
 

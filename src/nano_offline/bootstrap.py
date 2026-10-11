@@ -20,6 +20,7 @@ from flet_native_files import NativeFiles
 from nano_offline.app_context import AppContext
 from nano_offline.core import theme
 from nano_offline.core import theme_settings
+from nano_offline.core.logging_config import get_logger, setup_logging
 from nano_offline.core.paths import (
     PRIMARY_DB_NAME,
     database_path,
@@ -29,6 +30,8 @@ from nano_offline.core.theme import Colors
 from nano_offline.views.activation_view import ActivationGate
 from nano_offline.views.login_view import LoginGate
 from nano_offline.views.splash_view import SplashGate
+
+_log = get_logger("nano.startup")
 
 _FONTS_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 _CUSTOM_FONTS = {
@@ -219,6 +222,7 @@ def create_context() -> AppContext:
 
 
 def _show_boot_error(page: ft.Page, err: BaseException) -> None:
+    _log.critical("boot failed: %s", err, exc_info=err)
     detail = "".join(traceback.format_exception(type(err), err, err.__traceback__))
     page.controls.clear()
     page.bgcolor = "#0F172A"
@@ -252,6 +256,9 @@ def run_app(
     app_id: str,
     build_shell: Callable,
 ) -> None:
+    # Configure logging before anything else so startup failures and every
+    # later warning/error land in the on-device log file (logs/nano.log) too.
+    setup_logging()
     page.title = app_title
     page.rtl = True
     page.padding = 0
@@ -396,9 +403,7 @@ def run_app(
             )
             # Surface a soft warning when apps would see different DBs
             if status.get("needs_permission"):
-                import logging as _logging
-
-                _logging.getLogger("nano.shared_storage").warning(
+                get_logger("nano.shared_storage").warning(
                     "قاعدة البيانات غير مشتركة بين التطبيقات — "
                     "امنح صلاحية «الوصول إلى كل الملفات» ثم أعد تشغيل التطبيق. "
                     "dir=%s",

@@ -5,6 +5,18 @@ import sqlite3
 from nano_offline.core.asyncdb import Offloadable, blocking
 from nano_offline.core.database import Database
 from nano_offline.core import money
+from nano_offline.core import search_index
+
+_ITEM_LIST_SQL = """
+SELECT i.*, c.name AS category_name, u.name AS unit_name, u.abbreviation AS unit_abbreviation,
+    (
+        EXISTS(SELECT 1 FROM invoice_lines WHERE item_id = i.id)
+        OR EXISTS(SELECT 1 FROM inventory_movements WHERE item_id = i.id)
+    ) AS has_activity
+FROM items i
+LEFT JOIN categories c ON c.id=i.category_id
+LEFT JOIN units u ON u.id=i.base_unit_id
+"""
 
 
 class ItemRepository(Offloadable):
@@ -22,31 +34,77 @@ class ItemRepository(Offloadable):
         building a widget for each one. That's what actually keeps the UI
         fast once there are thousands of items, not just a fast query.
         """
-        sql = """
-        SELECT i.*, c.name AS category_name, u.name AS unit_name, u.abbreviation AS unit_abbreviation,
-            (
-                EXISTS(SELECT 1 FROM invoice_lines WHERE item_id = i.id)
-                OR EXISTS(SELECT 1 FROM inventory_movements WHERE item_id = i.id)
-            ) AS has_activity
-        FROM items i
-        LEFT JOIN categories c ON c.id=i.category_id
-        LEFT JOIN units u ON u.id=i.base_unit_id
-        """
-        params: list = []
         search = search.strip()
+        with self.db.connect() as conn:
+            use_fts = search_index.is_fts_eligible(conn, "items_fts", search)
+            try:
+                sql = _ITEM_LIST_SQL
+                params = []
+                if use_fts:
+                    # FTS5 trigram index answering the same substring semantics
+                    # (name OR barcode) from an index instead of a full scan.
+                    sql += " JOIN items_fts ON items_fts.rowid = i.id"
+                if search:
+                    if use_fts:
+                        sql += " WHERE items_fts MATCH ?"
+                        params.append(search_index.match_expression(search))
+                    else:
+                        # Literal-substring LIKE (escaped % and _, matching the
+                        # FTS semantics precisely). Full scan -- fine at current
+                        # data sizes given the item_id/invoice_lines index.
+                        sql += " WHERE i.name LIKE ? ESCAPE '\\' OR i.barcode LIKE ? ESCAPE '\\'"
+                        params.extend(
+                            [search_index.like_pattern(search), search_index.like_pattern(search)]
+                        )
+                sql += " ORDER BY i.name"
+                if limit is not None:
+                    sql += " LIMIT ? OFFSET ?"
+                    params.extend([int(limit), int(offset)])
+                return [dict(r) for r in conn.execute(sql, params).fetchall()]
+            except sqlite3.OperationalError:
+                # Index vanished or cannot be queried (e.g. tokenizer missing on
+                # this build). Fall back to the always-available LIKE path.
+                return self._list_like(conn, search, limit, offset)
+
+    def _list_like(
+        self, conn: sqlite3.Connection, search: str, limit: int | None, offset: int
+    ) -> list[dict]:
+        sql = _ITEM_LIST_SQL
+        params: list = []
         if search:
-            # A leading "%" wildcard can't use the name index either way,
-            # but matching barcode too means this stays a full scan -- fine
-            # at current data sizes given the new item_id/invoice_lines
-            # index above; worth an FTS5 table if item counts get very large.
-            sql += " WHERE i.name LIKE ? OR i.barcode LIKE ?"
-            params.extend([f"%{search}%", f"%{search}%"])
+            sql += " WHERE i.name LIKE ? ESCAPE '\\' OR i.barcode LIKE ? ESCAPE '\\'"
+            params.extend([search_index.like_pattern(search), search_index.like_pattern(search)])
         sql += " ORDER BY i.name"
         if limit is not None:
             sql += " LIMIT ? OFFSET ?"
             params.extend([int(limit), int(offset)])
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+    @blocking
+    def count(self, search: str = "") -> int:
+        """Total items matching ``search`` (name/barcode substring) without paging."""
+        search = search.strip()
         with self.db.connect() as conn:
-            return [dict(r) for r in conn.execute(sql, params).fetchall()]
+            if self.db.fts_tokenizer == search_index.TOKENIZER and search_index.is_fts_eligible(
+                conn, "items_fts", search
+            ):
+                try:
+                    return int(
+                        conn.execute(
+                            "SELECT COUNT(*) FROM items_fts WHERE items_fts MATCH ?",
+                            (search_index.match_expression(search),),
+                        ).fetchone()[0]
+                    )
+                except sqlite3.OperationalError:
+                    pass
+            if search:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM items WHERE name LIKE ? ESCAPE '\\' OR barcode LIKE ? ESCAPE '\\'",
+                    (search_index.like_pattern(search), search_index.like_pattern(search)),
+                ).fetchone()
+            else:
+                row = conn.execute("SELECT COUNT(*) FROM items").fetchone()
+            return int(row[0])
 
     @blocking
     def get(self, item_id: int) -> dict | None:
