@@ -240,6 +240,7 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
 .progress-track {{ height:7px; border-radius:999px; background:#E9EEF3; overflow:hidden; }}
 .progress-fill {{ height:100%; border-radius:999px; background:{accent}; }}
 .metric .fx {{ display:block; margin-top:2px; font-size:10px; font-weight:600; color:#94A3B8; }}
+.equiv {{ display:block; margin-top:1px; font-size:10px; color:#64748B; }}
 .sign-row {{ display:flex; gap:16px; margin-top:26px; align-items:flex-end; }}
 .sign-box {{
   flex:1; border:1px dashed #CBD5E1; border-radius:10px; padding:22px 10px 8px;
@@ -276,13 +277,79 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
         status_key = str(inv.get("payment_status") or "unpaid")
         status_text, status_fg, status_bg = _STATUS_STYLE.get(status_key, ("—", "#475569", "#F1F5F9"))
 
+        # Cross-unit equivalents per line (e.g. "≈ 6.67 صندوق" under a
+        # 10-meter line) -- mirrors the invoice detail sheet. Units are
+        # fetched once per item so a 40-line invoice costs ~2 queries, and
+        # single-unit lines render exactly as before (no equiv cell).
+        unit_map: dict[int, list[dict]] = {}
+        try:
+            line_item_ids = {int(ln.get("item_id")) for ln in (inv["lines"] or []) if ln.get("item_id") is not None}
+        except (TypeError, ValueError):
+            line_item_ids = set()
+        if line_item_ids:
+            try:
+                with self.db.connect() as _conn:
+                    for _iid in line_item_ids:
+                        _rows: list[dict] = []
+                        _base = _conn.execute("SELECT base_unit_id FROM items WHERE id=?", (_iid,)).fetchone()
+                        _base_id = int(_base["base_unit_id"]) if _base and _base["base_unit_id"] is not None else None
+                        if _base_id is not None:
+                            _bu = _conn.execute("SELECT id, name FROM units WHERE id=?", (_base_id,)).fetchone()
+                            if _bu:
+                                _rows.append({"id": int(_bu["id"]), "name": _bu["name"], "factor": 1.0, "is_base": True})
+                        for _r in _conn.execute(
+                            "SELECT u.id AS id, u.name AS name, iu.conversion_factor AS factor"
+                            " FROM item_units iu JOIN units u ON u.id=iu.unit_id WHERE iu.item_id=? ORDER BY u.name",
+                            (_iid,),
+                        ).fetchall():
+                            if _base_id is not None and int(_r["id"]) == _base_id:
+                                continue
+                            try:
+                                _f = float(_r["factor"] or 0)
+                            except (TypeError, ValueError):
+                                continue
+                            if _f <= 0:
+                                continue
+                            _rows.append({"id": int(_r["id"]), "name": _r["name"], "factor": _f, "is_base": False})
+                        unit_map[_iid] = _rows
+            except Exception:
+                unit_map = {}
+
+        def _equiv_cell(line: dict) -> str:
+            try:
+                _iid = int(line.get("item_id")) if line.get("item_id") is not None else None
+            except (TypeError, ValueError):
+                return self._qty(line.get("quantity"))
+            _siblings = unit_map.get(_iid) if _iid is not None else None
+            if not _siblings or len(_siblings) < 2:
+                return self._qty(line.get("quantity"))
+            try:
+                _base_qty = float(line.get("quantity_in_base") or 0)
+            except (TypeError, ValueError):
+                return self._qty(line.get("quantity"))
+            if _base_qty <= 0:
+                return self._qty(line.get("quantity"))
+            try:
+                _line_uid = int(line.get("unit_id")) if line.get("unit_id") is not None else None
+            except (TypeError, ValueError):
+                _line_uid = None
+            _parts = []
+            for _u in _siblings:
+                if _u["id"] == _line_uid:
+                    continue
+                _mark = "=" if _u["is_base"] else "≈"
+                _parts.append(f"{_mark} {self._qty(_base_qty / _u['factor'])} {self._e(_u['name'] or '')}".strip())
+            if not _parts:
+                return self._qty(line.get("quantity"))
+            return f"{self._qty(line.get('quantity'))}<span class=\"equiv\">{'، '.join(_parts)}</span>"
+
         line_rows = []
         for idx, line in enumerate(inv["lines"], start=1):
             description = line.get("description") or line.get("item_name") or "—"
             unit = line.get("unit_abbreviation") or line.get("unit_name") or "—"
             line_rows.append(
                 f"<tr><td>{idx}</td><td>{self._e(description)}</td>"
-                f"<td>{self._e(unit)}</td><td class='money'>{self._qty(line['quantity'])}</td>"
+                f"<td>{self._e(unit)}</td><td class='money'>{_equiv_cell(line)}</td>"
                 f"<td class='money'>{self._money(line['unit_price'], inv)}</td>"
                 f"<td class='money'>{self._money(line['total'], inv)}</td></tr>"
             )
