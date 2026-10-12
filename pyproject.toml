@@ -110,7 +110,7 @@ copyright = "Copyright © 2026"
 # Kept in lock-step with version.py:BUILD_NUMBER by
 # tools/version_consistency_smoke_test.py (build_number has no dynamic form
 # in [tool.flet], so the contract test is what enforces it).
-build_number = 47
+build_number = 48
 android_permissions = [
   "android.permission.INTERNET",
   "android.permission.CAMERA",

@@ -65,8 +65,8 @@ RATIO_COLUMNS: dict[str, tuple[str, ...]] = {
     "inventory_movements": ("unit_cost",),
 }
 
-_STORAGE_TOLERANCE_CENTS = 1e-6  # abs(value*100 - round(value*100)) must stay under this
-_UNQUIET_PENNY = Decimal("0.005")  # flags sums more than half a cent apart
+_STORAGE_TOLERANCE_CENTS = 1e-4  # |quantum-scaled value - nearest int| must stay under this
+_UNQUIET_PENNY = Decimal("0.0000005")  # flags sums more than half a quantum apart
 
 
 def _exact(value) -> Decimal:
@@ -75,7 +75,11 @@ def _exact(value) -> Decimal:
 
 
 def _is_dirty_cents(value) -> bool:
-    scaled = float(value) * 100.0
+    # Decimal, not float: at 6 places a large clean value scaled in binary
+    # floating point carries representation noise that looks like dirt.
+    # _exact() keeps the shortest round-trip form, so only genuine
+    # sub-quantum garbage scales to a non-integer here.
+    scaled = _exact(value) * (10**money.MONEY_DECIMALS)
     return abs(scaled - round(scaled)) > _STORAGE_TOLERANCE_CENTS
 
 

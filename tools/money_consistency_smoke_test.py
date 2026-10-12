@@ -17,9 +17,9 @@ def main() -> None:
     # --- money module basics: the classical 0.1+0.2 and 0.1*3 traps --------
     assert money.quantized(0.1 + 0.2) == 0.3
     assert money.quantized(0.1 * 3) == 0.3
-    assert money.to_cents(0.3) == 30 and money.to_cents(money.from_cents(30)) == 30
+    assert money.to_cents(0.3) == 300000 and money.to_cents(money.from_cents(300000)) == 300000
     assert float(money.quantize_sum([0.1, 0.2, 0.4])) == 0.7
-    assert float(money.quantize("1.005")) == 1.01  # round-half-up
+    assert float(money.quantize("0.0000005")) == 0.000001  # round-half-up
 
     with tempfile.TemporaryDirectory(prefix="nano-money-consist-") as td:
         ctx = AppContext.create(Path(td) / "nano.db")
@@ -66,21 +66,21 @@ def main() -> None:
         # Sanity: stored values must already be clean cents even for the
         # float-prone amounts the services received.
         with ctx.db.connect() as conn:
-            assert money.to_cents(float(conn.execute("SELECT total FROM invoices WHERE id=?", (sale_stock,)).fetchone()[0])) == 30
-            assert money.to_cents(float(conn.execute("SELECT total FROM invoices WHERE id=?", (sale_service,)).fetchone()[0])) == 60
+            assert money.to_cents(float(conn.execute("SELECT total FROM invoices WHERE id=?", (sale_stock,)).fetchone()[0])) == 300000
+            assert money.to_cents(float(conn.execute("SELECT total FROM invoices WHERE id=?", (sale_service,)).fetchone()[0])) == 600000
             line_total = conn.execute(
                 "SELECT total FROM invoice_lines WHERE invoice_id=?", (sale_stock,)
             ).fetchone()[0]
-            assert money.to_cents(float(line_total)) == 30
+            assert money.to_cents(float(line_total)) == 300000
 
         # 1) A database written through the services must be fully consistent.
         issues = money_consistency.run_checks(ctx.db.connect())
         assert not issues, money_consistency.summarize(issues)
 
-        # 2) Injecting sub-cent noise must be caught immediately.
+        # 2) Injecting sub-quantum noise must be caught immediately.
         with ctx.db.transaction() as conn:
             conn.execute(
-                "UPDATE invoice_lines SET total=total+0.034 WHERE invoice_id=?",
+                "UPDATE invoice_lines SET total=total+0.03456789 WHERE invoice_id=?",
                 (sale_stock,),
             )
         issues = money_consistency.run_checks(ctx.db.connect())

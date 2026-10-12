@@ -181,7 +181,7 @@ class AccountingRebuilder:
         for p in conn.execute("SELECT * FROM payments").fetchall():
             allocated = payment_sums.get(int(p["id"]), 0.0)
             # Same quantized-vs-quantized discipline as _sync_initial_invoice_payments:
-            # allocations are written at the cent boundary, legacy payment/total
+            # allocations are written at the storage-quantum boundary, legacy payment/total
             # rows can carry raw rate-derived floats (3.7760000000000002).
             if money.quantized(allocated) > money.quantized(p["amount"]) + EPSILON:
                 raise ValueError(f"توزيع الدفعة #{p['id']} يتجاوز قيمة الدفعة")

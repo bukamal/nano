@@ -67,7 +67,11 @@ def home_widget_snapshot(dashboard, settings=None) -> dict:
         with dashboard.db.connect() as conn:
             overdue = conn.execute(
                 "SELECT COUNT(*) AS c, COALESCE(SUM(total-paid_amount),0) AS t "
-                "FROM invoices WHERE type='sale' AND status!='cancelled' AND (total-paid_amount)>0.01"
+                # Threshold follows the storage quantum (money.MONEY_DECIMALS):
+                # with 4-place USD storage a real remainder can be as small
+                # as 0.0001 (= ~1 SYP), so the old cent boundary would hide
+                # genuine small receivables.
+                "FROM invoices WHERE type='sale' AND status!='cancelled' AND (total-paid_amount)>0.0001"
             ).fetchone()
             low = conn.execute(
                 "SELECT COUNT(*) AS c FROM items WHERE item_type='مخزون' AND quantity<=5"

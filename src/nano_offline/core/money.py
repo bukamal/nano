@@ -7,21 +7,32 @@ payments and allocations that binary noise silently accumulates into phantom
 fractions of a cent on balances, totals and COGS.
 
 The fix this module provides is discipline at the *write boundary*: every
-money value computed and stored by the accounting services is quantized to 2
-decimal places (round-half-up) first, so the database only ever holds clean
-cent values. Reads/sums then have nothing exotic left to accumulate.
+money value computed and stored by the accounting services is quantized to
+:data:`MONEY_DECIMALS` places (round-half-up) first, so the database only
+ever holds clean quantum values. Reads/sums then have nothing exotic left
+to accumulate.
+
+Why 6 and not 2: the stored currency is USD but the primary display
+currency is SYP (≈13500 per USD), so one USD cent spans ~135 SYP -- any
+SYP price that is not a multiple of 135 lost up to 134 SYP on every
+write/read round-trip (e.g. 15000 SYP came back as 14985). Six places
+keep every whole-pound figure exact both in 0-decimal displays and in
+2-decimal input fields (worst-case error ≈ 0.007 SYP, far below either
+display step), while ledger sums stay uniformly quantized, exactly as
+before.
 
 Helpers:
 
-- :func:`quantize` -- round any amount to cents (half-up). Apply on WRITE,
-  per line / per transaction.
+- :func:`quantize` -- round any amount to the storage quantum (half-up).
+  Apply on WRITE, per line / per transaction.
 - :func:`quantized` -- quantize but return a plain ``float``, the type every
   ``REAL`` column and the whole UI currently use.
 - :func:`quantize_sum` -- sum an iterable quantizing at *every* step (not just
   once at the end), mirroring how each stored value is already clean.
-- :func:`to_cents` / :func:`from_cents` -- exact integer-cents view of a value,
-  the basis of the money-consistency checks and the stepping stone to a full
-  integer-typed money migration (see ``tools/money_consistency_check.py``).
+- :func:`to_cents` / :func:`from_cents` -- exact integer view of a value in
+  units of the storage quantum, the basis of the money-consistency checks
+  and the stepping stone to a full integer-typed money migration (see
+  ``tools/money_consistency_check.py``).
 
 ``Decimal(str(value))`` is deliberately used over ``Decimal(value)`` so a
 stored ``0.1`` is read as the decimal it displays as, not its full binary
@@ -35,7 +46,7 @@ from __future__ import annotations
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Iterable
 
-MONEY_DECIMALS = 2
+MONEY_DECIMALS = 6
 CENTS_PER_UNIT = 10**MONEY_DECIMALS
 _CENTS_QUANTUM = Decimal(1).scaleb(-MONEY_DECIMALS)
 

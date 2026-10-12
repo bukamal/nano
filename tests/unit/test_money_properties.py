@@ -60,7 +60,7 @@ def test_quantize_sum_never_drifts_over_repeats(values):
 def test_half_up_is_used_not_bankers():
     # The accounting convention here is half-up; banker's rounding would turn
     # 0.005 -> 0.00 and 0.015 -> 0.02 inconsistently.
-    assert money.quantize(Decimal("0.005")) == Decimal("0.01")
-    assert money.quantize(Decimal("0.015")) == Decimal("0.02")
-    assert money.quantize(Decimal("0.025")) == Decimal("0.03")
-    assert money.quantize(Decimal("-0.005")) == Decimal("-0.01")
+    assert money.quantize(Decimal("0.0000005")) == Decimal("0.000001")
+    assert money.quantize(Decimal("0.0000015")) == Decimal("0.000002")
+    assert money.quantize(Decimal("0.0000025")) == Decimal("0.000003")
+    assert money.quantize(Decimal("-0.0000005")) == Decimal("-0.000001")
