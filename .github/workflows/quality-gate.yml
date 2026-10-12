@@ -38,6 +38,10 @@ jobs:
       - name: Install project
         run: |
           uv sync
+          # uv-created venvs ship without pip (uv manages deps itself); the
+          # packaging smoke test shells out to `python -m pip` to build the
+          # flet-native-files wheel, so seed pip like build_nano_apk.sh does.
+          uv run python -m ensurepip --upgrade
           uv pip install -e extensions/flet_native_files
           uv pip install -e .
 

@@ -180,10 +180,15 @@ class AccountingRebuilder:
         }
         for p in conn.execute("SELECT * FROM payments").fetchall():
             allocated = payment_sums.get(int(p["id"]), 0.0)
-            # Same quantized-vs-quantized discipline as _sync_initial_invoice_payments:
-            # allocations are written at the storage-quantum boundary, legacy payment/total
-            # rows can carry raw rate-derived floats (3.7760000000000002).
-            if money.quantized(allocated) > money.quantized(p["amount"]) + EPSILON:
+            # Same quantized-vs-quantized discipline as _sync_initial_invoice_payments,
+            # compared at CENT granularity on purpose: legacy payment/total rows
+            # can carry raw rate-derived floats (3.7760000000000002) next to
+            # cent-quantized allocations (3.78). At the 6-place storage quantum
+            # those are genuinely different amounts, but flagging them would
+            # break rebuild/restore for every pre-existing database -- and the
+            # guard's job is catching real over-allocation (>= 1 cent), not
+            # representation dust from the old quantum.
+            if money.quantized(allocated, decimals=2) > money.quantized(p["amount"], decimals=2) + EPSILON:
                 raise ValueError(f"توزيع الدفعة #{p['id']} يتجاوز قيمة الدفعة")
 
         invoice_sums = {
@@ -194,7 +199,10 @@ class AccountingRebuilder:
         }
         for inv in conn.execute("SELECT * FROM invoices").fetchall():
             allocated = invoice_sums.get(int(inv["id"]), 0.0)
-            if money.quantized(allocated) > money.quantized(inv["total"]) + EPSILON:
+            # Cent granularity, same reasoning as the payment-level guard
+            # above: forgive legacy representation dust, flag real
+            # over-allocation.
+            if money.quantized(allocated, decimals=2) > money.quantized(inv["total"], decimals=2) + EPSILON:
                 raise ValueError(
                     f"الدفعات الموزعة على الفاتورة #{inv['id']} تتجاوز إجمالي الفاتورة؛ عدّل السندات المرتبطة أولًا"
                 )
