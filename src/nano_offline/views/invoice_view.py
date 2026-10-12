@@ -295,12 +295,58 @@ class InvoiceCenter:
         accent_bg = Colors.SUCCESS_BG if sale else Colors.PURPLE_BG
 
         line_rows: list[ft.Control] = []
+        units_cache: dict[int, list] = {}
         for line in invoice.get("lines") or []:
             qty = float(line.get("quantity") or 0)
             unit_price = float(line.get("unit_price") or 0)
             line_total = float(line.get("total") or 0)
             unit = line.get("unit_abbreviation") or line.get("unit_name") or ""
             name = line.get("item_name") or line.get("description") or "—"
+            # Cross-unit equivalent (e.g. "≈ 6.67 صندوق" under a 10-meter
+            # line): computed from the stored quantity_in_base divided by
+            # each sibling unit's factor. Shown only when the item really
+            # has more than one unit, so single-unit lines look exactly as
+            # before. "=" marks the exact base-unit value, "≈" the rounded
+            # sub-unit conversions.
+            equiv_text = None
+            try:
+                line_item_id = int(line.get("item_id")) if line.get("item_id") is not None else None
+            except (TypeError, ValueError):
+                line_item_id = None
+            if line_item_id is not None:
+                if line_item_id not in units_cache:
+                    try:
+                        units_cache[line_item_id] = self.ctx.items.units(line_item_id)
+                    except Exception:
+                        units_cache[line_item_id] = []
+                siblings = units_cache[line_item_id]
+                if len(siblings) > 1:
+                    try:
+                        base_qty = float(line.get("quantity_in_base") or 0)
+                    except (TypeError, ValueError):
+                        base_qty = 0.0
+                    try:
+                        line_uid = int(line.get("unit_id")) if line.get("unit_id") is not None else None
+                    except (TypeError, ValueError):
+                        line_uid = None
+                    parts = []
+                    for u in siblings:
+                        try:
+                            uid = int(u.get("id"))
+                        except (TypeError, ValueError):
+                            continue
+                        if uid == line_uid:
+                            continue
+                        try:
+                            uf = float(u.get("conversion_factor") or 0)
+                        except (TypeError, ValueError):
+                            continue
+                        if uf <= 0 or base_qty <= 0:
+                            continue
+                        mark = "=" if u.get("is_base") else "≈"
+                        parts.append(f"{mark} {self._qty(base_qty / uf)} {u.get('name') or ''}".strip())
+                    if parts:
+                        equiv_text = "، ".join(parts)
             line_rows.append(
                 ft.Container(
                     ft.Row(
@@ -316,7 +362,8 @@ class InvoiceCenter:
                                         spacing=0,
                                         tight=True,
                                     ),
-                                ],
+                                ]
+                                + ([ft.Text(equiv_text, size=9, color=Colors.TEXT_FAINT)] if equiv_text else []),
                                 spacing=1, expand=True,
                             ),
                             ft.Text(self.money(line_total), size=12, weight=ft.FontWeight.BOLD),
