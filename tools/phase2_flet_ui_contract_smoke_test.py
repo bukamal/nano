@@ -42,4 +42,9 @@ print("phase2_flet_ui_contract_smoke_test passed")
 
 assert "label=ft.Text(label)" not in main
 assert "page.show_dialog" not in main + invoice_ui
-assert "state[\"base_price\"] * float(state.get(\"factor\") or 1)" in invoice_ui
+# Unit price resolution lives in one helper now (override -> base x factor
+# -> derived from a sibling sub-unit), not inlined per call site.
+assert "def _fill_line_price" in invoice_ui
+assert "def _derived_base_price" in invoice_ui
+assert "derived_from" in invoice_ui
+assert "سعر مشتق من" in invoice_ui

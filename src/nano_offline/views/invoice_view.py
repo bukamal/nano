@@ -1167,6 +1167,70 @@ class InvoiceCenter:
             paid_progress.value = max(0.0, min(1.0, (paid_value / total))) if total > 1e-9 else 1.0
             self.page.update()
 
+        def _derived_base_price(state: dict) -> tuple[float | None, str | None]:
+            """Per-base-unit price (USD) derived from a sibling sub-unit.
+
+            When the item itself carries no purchase/selling price but one of
+            its sub-units has an explicit per-unit override (e.g. box =
+            15000 with factor 1.5), the base-unit price is that override
+            divided by its factor (15000 / 1.5 = 10000 per meter). Returns
+            (price, unit name) or (None, None) when nothing can be derived.
+            """
+            key = "purchase_price" if type_dd.value == "purchase" else "selling_price"
+            for row in (state.get("units") or {}).values():
+                row = row or {}
+                raw = row.get(key)
+                if raw in (None, ""):
+                    continue
+                try:
+                    price = float(raw)
+                except (TypeError, ValueError):
+                    continue
+                if price <= 0:
+                    continue
+                try:
+                    factor = float(row.get("conversion_factor") or 1)
+                except (TypeError, ValueError):
+                    continue
+                if factor <= 0:
+                    continue
+                return price / factor, str(row.get("name") or "")
+            return None, None
+
+        def _fill_line_price(state: dict) -> None:
+            """Smart price chain for one invoice line (display currency).
+
+            1. explicit per-unit override of the chosen unit;
+            2. item base price x the chosen unit's factor;
+            3. derived base price (see _derived_base_price) x factor, with
+               state["derived_from"] recording the source unit for the hint;
+            4. zeroes when nothing is known (caller may warn, never blocks).
+            """
+            uid = int(state["unit"].value) if state["unit"].value else None
+            urow = state.get("units", {}).get(uid) if uid else None
+            key = "purchase_price" if type_dd.value == "purchase" else "selling_price"
+            override = (urow or {}).get(key)
+            if override not in (None, ""):
+                state["price"].value = currency.format_plain(currency.to_display(float(override), currency.get_effective_rate(self.ctx.settings)))
+                state["derived_from"] = None
+                return
+            try:
+                base = float(state.get("base_price") or 0)
+            except (TypeError, ValueError):
+                base = 0.0
+            factor = float(state.get("factor") or 1)
+            if base > 0:
+                state["price"].value = currency.format_plain(base * factor)
+                state["derived_from"] = None
+                return
+            derived, dname = _derived_base_price(state)
+            if derived is not None:
+                state["price"].value = currency.format_plain(currency.to_display(derived * factor, currency.get_effective_rate(self.ctx.settings)))
+                state["derived_from"] = dname
+            else:
+                state["price"].value = currency.format_plain(base * factor)
+                state["derived_from"] = None
+
         def update_line_units(state: dict, selected_unit_id: int | None = None) -> None:
             unit_select = state["unit"]
             unit_select.options = []
@@ -1198,13 +1262,7 @@ class InvoiceCenter:
                 base_price_usd = float(item_row["selling_price"] if type_dd.value == "sale" else item_row["purchase_price"])
                 state["base_price"] = currency.to_display(base_price_usd, currency.get_effective_rate(self.ctx.settings))
                 update_line_units(state)
-                _uid0 = int(state["unit"].value) if state["unit"].value else None
-                _urow0 = state.get("units", {}).get(_uid0) if _uid0 else None
-                _sp0 = (_urow0 or {}).get("purchase_price" if type_dd.value == "purchase" else "selling_price")
-                if _sp0 not in (None, ""):
-                    state["price"].value = currency.format_plain(currency.to_display(float(_sp0), currency.get_effective_rate(self.ctx.settings)))
-                else:
-                    state["price"].value = currency.format_plain(state["base_price"] * float(state.get("factor") or 1))
+                _fill_line_price(state)
             recalc()
 
         def unit_changed(state: dict) -> None:
@@ -1213,11 +1271,7 @@ class InvoiceCenter:
                 unit_row = state.get("units", {}).get(uid)
                 state["factor"] = float(unit_row["conversion_factor"]) if unit_row else 1.0
                 if state.get("base_price") is not None:
-                    _sp1 = (unit_row or {}).get("purchase_price" if type_dd.value == "purchase" else "selling_price")
-                    if _sp1 not in (None, ""):
-                        state["price"].value = currency.format_plain(currency.to_display(float(_sp1), currency.get_effective_rate(self.ctx.settings)))
-                    else:
-                        state["price"].value = currency.format_plain(float(state["base_price"]) * state["factor"])
+                    _fill_line_price(state)
             recalc()
 
         def remove_line(state: dict) -> None:
@@ -1290,6 +1344,26 @@ class InvoiceCenter:
                         badge.bgcolor = Colors.WARNING_BG
                         badge.border_radius = 8
                         show = True
+            if not show and state.get("derived_from"):
+                # Smart-price hint: the line price was derived from a sibling
+                # sub-unit's override (e.g. per-meter price computed from the
+                # box price), not typed by the user -- say so explicitly.
+                try:
+                    _pv = currency.parse_display_input(state["price"].value, self.ctx.settings)
+                except Exception:
+                    _pv = None
+                if _pv:
+                    badge.content = ft.Row(
+                        [
+                            ft.Icon(ft.Icons.INFO_OUTLINE, size=13, color=Colors.PRIMARY),
+                            ft.Text(f"سعر مشتق من {state['derived_from']}", size=10, color=Colors.PRIMARY, expand=True),
+                        ],
+                        spacing=5, tight=True,
+                    )
+                    badge.padding = ft.padding.symmetric(horizontal=8, vertical=4)
+                    badge.bgcolor = Colors.PRIMARY_BG
+                    badge.border_radius = 8
+                    show = True
             badge.visible = show
             _safe_update(badge)
 
@@ -1299,6 +1373,7 @@ class InvoiceCenter:
             state: dict = {
                 "factor": float(initial.get("conversion_factor") or 1),
                 "units": {},
+                "derived_from": None,
                 "base_price": (
                     currency.to_display(
                         float(initial_item["selling_price"] if type_dd.value == "sale" else initial_item["purchase_price"]),
@@ -1406,13 +1481,7 @@ class InvoiceCenter:
                 # don't have -- compute it the same way item_changed() would,
                 # so a scanned line shows a real price and not "0.00".
                 if not initial.get("unit_price") and state.get("base_price") is not None:
-                    _uid2 = int(state["unit"].value) if state["unit"].value else None
-                    _urow2 = state.get("units", {}).get(_uid2) if _uid2 else None
-                    _sp2 = (_urow2 or {}).get("purchase_price" if type_dd.value == "purchase" else "selling_price")
-                    if _sp2 not in (None, ""):
-                        price.value = currency.format_plain(currency.to_display(float(_sp2), currency.get_effective_rate(self.ctx.settings)))
-                    else:
-                        price.value = currency.format_plain(float(state["base_price"]) * float(state.get("factor") or 1))
+                    _fill_line_price(state)
             refresh_stock_badge(state)
             refresh_price_badge(state)
             recalc()
@@ -1496,13 +1565,7 @@ class InvoiceCenter:
                     item_row = item_map[int(state["item"].value)]
                     base_price_usd = float(item_row["selling_price"] if type_dd.value == "sale" else item_row["purchase_price"])
                     state["base_price"] = currency.to_display(base_price_usd, currency.get_effective_rate(self.ctx.settings))
-                    _uid3 = int(state["unit"].value) if state["unit"].value else None
-                    _urow3 = state.get("units", {}).get(_uid3) if _uid3 else None
-                    _sp3 = (_urow3 or {}).get("purchase_price" if type_dd.value == "purchase" else "selling_price")
-                    if _sp3 not in (None, ""):
-                        state["price"].value = currency.format_plain(currency.to_display(float(_sp3), currency.get_effective_rate(self.ctx.settings)))
-                    else:
-                        state["price"].value = currency.format_plain(state["base_price"] * float(state.get("factor") or 1))
+                    _fill_line_price(state)
                 refresh_stock_badge(state)
                 refresh_price_badge(state)
             update_party_insight()
