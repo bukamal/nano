@@ -215,8 +215,7 @@ tbody tr:nth-child(even) td {{ background:#F8FAFC; }}
 tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
 .money {{ white-space:nowrap; text-align:end; }}
 .inv-table thead th {{ text-align:center; }}
-.inv-table td {{ text-align:end; }}
-.inv-table td.desc {{ text-align:start; }}
+.inv-table td {{ text-align:center; }}
 .money-wrap {{
   display:inline-flex; align-items:baseline; gap:3px;
   direction:rtl; unicode-bidi:isolate; white-space:nowrap; font-variant-numeric:tabular-nums;
@@ -348,7 +347,7 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
             description = line.get("description") or line.get("item_name") or "—"
             unit = line.get("unit_abbreviation") or line.get("unit_name") or "—"
             line_rows.append(
-                f"<tr><td>{idx}</td><td class=\"desc\">{self._e(description)}</td>"
+                f"<tr><td>{idx}</td><td>{self._e(description)}</td>"
                 f"<td>{self._e(unit)}</td><td class='money'>{_equiv_cell(line)}</td>"
                 f"<td class='money'>{self._money(line['unit_price'], inv)}</td>"
                 f"<td class='money'>{self._money(line['total'], inv)}</td></tr>"
