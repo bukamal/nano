@@ -32,6 +32,7 @@ def kpi_card(
     on_tap: Callable[[ft.ControlEvent], None] | None = None,
     amount_usd: float | int | None = None,
     settings=None,
+    suffix: str = "",
 ) -> ft.Container:
     """Build one KPI card for a summary row.
 
@@ -48,6 +49,7 @@ def kpi_card(
             the value then renders as a split symbol+amount ``Row`` (see
             ``money_row``), which keeps the symbol left of the amount on
             builds whose text shaping misplaces it inside a single ``Text``.
+        suffix: Small faint caption under the value (e.g. a balance state).
     """
     return ft.Container(
         ft.Row(
@@ -65,7 +67,8 @@ def kpi_card(
                             if amount_usd is not None
                             else ft.Text(value, size=16, weight=ft.FontWeight.BOLD)
                         ),
-                    ],
+                    ]
+                    + ([ft.Text(suffix, size=9, color=Colors.TEXT_FAINT)] if suffix else []),
                     spacing=2, expand=True,
                 ),
                 *([ft.Icon(ft.Icons.CHEVRON_LEFT_ROUNDED, size=16, color=Colors.TEXT_FAINT)] if on_tap else []),

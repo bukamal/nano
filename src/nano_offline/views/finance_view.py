@@ -7,6 +7,7 @@ import flet as ft
 from nano_offline.core.toast import toast
 
 from nano_offline.components import SearchSelect, SelectAllTextField, SmartAmountField, SmartDateField, empty_state, kpi_card, new_form_sheet, render_form_sheet, status_pill
+from nano_offline.components.money_text import money_row
 from nano_offline.core.theme import Colors, Radius, Shadow
 from nano_offline.core import currency
 from nano_offline.core.home_widget import refresh_home_widget
@@ -15,13 +16,17 @@ from nano_offline.core.home_widget import refresh_home_widget
 # Compatibility terminology: «سند دفع» هو نفسه «سند صرف» في الإصدارات السابقة.
 
 class FinanceCenter:
-    def __init__(self, page: ft.Page, ctx, content: ft.Container, on_changed=None, native_files=None, on_title_change=None):
+    def __init__(self, page: ft.Page, ctx, content: ft.Container, on_changed=None, native_files=None, on_title_change=None, on_open_invoice=None):
         self.page = page
         self.ctx = ctx
         self.content = content
         self.on_changed = on_changed
         self.native_files = native_files
         self.on_title_change = on_title_change
+        # Drill-down from statement rows into the source document --
+        # wired in main.py to the invoice center (same pattern as
+        # parties_view's on_open_receipt/on_open_payment callbacks).
+        self.on_open_invoice = on_open_invoice
 
     def money(self, value) -> str:
         return currency.format_amount(value, self.ctx.settings)
@@ -122,9 +127,9 @@ class FinanceCenter:
             payments = sum(float(v.get("amount") or 0) for v in vouchers if v.get("voucher_type") == "payment")
             unallocated_total = sum(float(v.get("unallocated_amount") or 0) for v in vouchers)
             summary.controls = [
-                ft.Container(kpi_card("إجمالي القبض", self.money(receipts), ft.Icons.ADD_CARD, Colors.SUCCESS, on_tap=lambda _: set_filter("receipt")), col={"xs": 6, "md": 4}),
-                ft.Container(kpi_card("إجمالي الدفع", self.money(payments), ft.Icons.PAYMENTS_OUTLINED, Colors.DANGER, on_tap=lambda _: set_filter("payment")), col={"xs": 6, "md": 4}),
-                ft.Container(kpi_card("رصيد غير موزع", self.money(unallocated_total), ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.PRIMARY), col={"xs": 12, "md": 4}),
+                ft.Container(kpi_card("إجمالي القبض", "", ft.Icons.ADD_CARD, Colors.SUCCESS, on_tap=lambda _: set_filter("receipt"), amount_usd=receipts, settings=self.ctx.settings), col={"xs": 6, "md": 4}),
+                ft.Container(kpi_card("إجمالي الدفع", "", ft.Icons.PAYMENTS_OUTLINED, Colors.DANGER, on_tap=lambda _: set_filter("payment"), amount_usd=payments, settings=self.ctx.settings), col={"xs": 6, "md": 4}),
+                ft.Container(kpi_card("رصيد غير موزع", "", ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.PRIMARY, amount_usd=unallocated_total, settings=self.ctx.settings), col={"xs": 12, "md": 4}),
             ]
             q = (search.value or "").strip().casefold()
             filtered = []
@@ -153,10 +158,14 @@ class FinanceCenter:
                             ft.Column([
                                 ft.Row([ft.Text(f"{title} #{voucher['id']}", size=13, weight=ft.FontWeight.BOLD, expand=True), *badges]),
                                 ft.Text(f"{voucher.get('party_name') or '—'} • {voucher.get('voucher_date') or '—'}", size=10, color=Colors.TEXT_SECONDARY),
-                                ft.Text(f"موزع {self.money(allocated)}" + (f" • على الحساب {self.money(unallocated)}" if unallocated else ""), size=9, color=Colors.TEXT_SECONDARY),
+                                ft.Row(
+                                    [ft.Text("موزع ", size=9, color=Colors.TEXT_SECONDARY), money_row(allocated, self.ctx.settings, size=9, color=Colors.TEXT_SECONDARY)]
+                                    + ([ft.Text(" • على الحساب ", size=9, color=Colors.TEXT_SECONDARY), money_row(unallocated, self.ctx.settings, size=9, color=Colors.TEXT_SECONDARY)] if unallocated else []),
+                                    spacing=2, tight=True,
+                                ),
                             ], spacing=2, expand=True),
                             ft.Column([
-                                ft.Text(self.money(voucher.get("amount")), size=15, weight=ft.FontWeight.BOLD, color=accent),
+                                money_row(voucher.get("amount"), self.ctx.settings, size=15, weight=ft.FontWeight.BOLD, color=accent),
                                 ft.Text(voucher.get("reference") or "بدون مرجع", size=9, color=Colors.TEXT_FAINT, max_lines=1),
                             ], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END),
                             ft.Icon(ft.Icons.CHEVRON_LEFT, size=18, color=Colors.TEXT_FAINT),
@@ -346,6 +355,29 @@ class FinanceCenter:
         <div class='row'><span class='label'>على الحساب</span><strong>{self.money(voucher.get('unallocated_amount'))}</strong></div>
         <div class='line'></div><div style='font-size:10px'>{voucher.get('notes') or ''}</div><div class='footer'>تم إنشاء السند بواسطة Nano</div></body></html>"""
 
+    def _open_payment_source(self, payment_id: int) -> None:
+        """Drill-down for a ledger 'payment' movement: a real voucher opens
+        its detail sheet, while an invoice's own initial payment (a derived
+        reflection row, not a real voucher -- and its id lives in a
+        different id space than vouchers) opens the invoice itself, so a
+        tap can never land on an unrelated voucher that merely shares the
+        numeric id."""
+        try:
+            with self.ctx.db.connect() as conn:
+                prow = conn.execute(
+                    "SELECT source_type, source_id FROM payments WHERE id=?", (payment_id,)
+                ).fetchone()
+        except Exception:
+            prow = None
+        if prow is not None and str(prow["source_type"]) == "invoice_initial" and prow["source_id"] is not None:
+            if self.on_open_invoice is not None:
+                try:
+                    self.on_open_invoice(int(prow["source_id"]))
+                    return
+                except (TypeError, ValueError):
+                    pass
+        self.show_voucher_detail(payment_id)
+
     def show_voucher_detail(self, voucher_id: int) -> None:
         voucher = self.ctx.payments.get_voucher(voucher_id)
         if not voucher:
@@ -356,7 +388,7 @@ class FinanceCenter:
         allocations = voucher.get("allocations") or []
         alloc_controls = []
         for a in allocations:
-            alloc_controls.append(ft.Container(ft.Row([ft.Text(f"فاتورة #{a['invoice_id']}", size=11, expand=True), ft.Text(self.money(a.get("amount")), size=11, weight=ft.FontWeight.BOLD)]), padding=7, bgcolor=Colors.BACKGROUND, border_radius=10))
+            alloc_controls.append(ft.Container(ft.Row([ft.Text(f"فاتورة #{a['invoice_id']}", size=11, expand=True), money_row(a.get("amount"), self.ctx.settings, size=11, weight=ft.FontWeight.BOLD)]), padding=7, bgcolor=Colors.BACKGROUND, border_radius=10))
         if not alloc_controls:
             alloc_controls.append(ft.Text("لا توجد توزيعات على فواتير", size=10, color=Colors.TEXT_SECONDARY))
         # Bottom sheet instead of a centered AlertDialog -- same read-mostly
@@ -393,12 +425,12 @@ class FinanceCenter:
                     ft.Text(f"{title} #{voucher_id}", size=18, weight=ft.FontWeight.BOLD),
                     ft.Container(
                         ft.Column([
-                            ft.Container(ft.Column([ft.Text(self.money(voucher.get("amount")), size=28, weight=ft.FontWeight.BOLD, color=accent), ft.Text(title, size=11, color=Colors.TEXT_SECONDARY)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2), padding=14, bgcolor=Colors.BACKGROUND, border_radius=16),
+                            ft.Container(ft.Column([money_row(voucher.get("amount"), self.ctx.settings, size=28, weight=ft.FontWeight.BOLD, color=accent), ft.Text(title, size=11, color=Colors.TEXT_SECONDARY)], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2), padding=14, bgcolor=Colors.BACKGROUND, border_radius=16),
                             ft.ResponsiveRow([
                                 ft.Container(ft.Text(f"التاريخ: {voucher.get('voucher_date') or '—'}", size=11), col={"xs": 6}),
                                 ft.Container(ft.Text(f"الحساب: {voucher.get('party_name') or '—'}", size=11), col={"xs": 6}),
                                 ft.Container(ft.Text(f"المرجع: {voucher.get('reference') or '—'}", size=11), col={"xs": 6}),
-                                ft.Container(ft.Text(f"على الحساب: {self.money(voucher.get('unallocated_amount'))}", size=11), col={"xs": 6}),
+                                ft.Container(ft.Row([ft.Text("على الحساب: ", size=11), money_row(voucher.get("unallocated_amount"), self.ctx.settings, size=11)], spacing=2, tight=True), col={"xs": 6}),
                             ]),
                             ft.Text(voucher.get("notes") or "بدون ملاحظات", size=10, color=Colors.TEXT_SECONDARY),
                             ft.Divider(height=8), ft.Text("التوزيعات", size=13, weight=ft.FontWeight.BOLD), ft.Column(alloc_controls, spacing=5),
@@ -510,7 +542,13 @@ class FinanceCenter:
                                 ft.Column(
                                     [
                                         ft.Text(f"فاتورة #{iid}", weight=ft.FontWeight.BOLD),
-                                        ft.Text(f"{inv['invoice_date']} • المتاح للتوزيع {self.money(inv['allocatable_amount'])}", size=11, color=Colors.TEXT_SECONDARY),
+                                        ft.Row(
+                                            [
+                                                ft.Text(f"{inv['invoice_date']} • المتاح للتوزيع ", size=11, color=Colors.TEXT_SECONDARY),
+                                                money_row(inv["allocatable_amount"], self.ctx.settings, size=11, color=Colors.TEXT_SECONDARY),
+                                            ],
+                                            spacing=2, tight=True,
+                                        ),
                                     ],
                                     expand=True,
                                     spacing=2,
@@ -646,8 +684,8 @@ class FinanceCenter:
             categories = {str(e.get("category_name") or "بلا تصنيف") for e in expenses}
             month_total = sum(float(e.get("amount") or 0) for e in expenses if str(e.get("expense_date") or "").startswith(current_month))
             summary.controls = [
-                ft.Container(kpi_card("إجمالي المصروفات", self.money(total), ft.Icons.PAYMENTS_OUTLINED, Colors.DANGER_DARK), col={"xs": 6, "md": 4}),
-                ft.Container(kpi_card("هذا الشهر", self.money(month_total), ft.Icons.CALENDAR_MONTH_OUTLINED, Colors.ORANGE, on_tap=lambda _: toggle_month()), col={"xs": 6, "md": 4}),
+                ft.Container(kpi_card("إجمالي المصروفات", "", ft.Icons.PAYMENTS_OUTLINED, Colors.DANGER_DARK, amount_usd=total, settings=self.ctx.settings), col={"xs": 6, "md": 4}),
+                ft.Container(kpi_card("هذا الشهر", "", ft.Icons.CALENDAR_MONTH_OUTLINED, Colors.ORANGE, on_tap=lambda _: toggle_month(), amount_usd=month_total, settings=self.ctx.settings), col={"xs": 6, "md": 4}),
                 ft.Container(kpi_card("التصنيفات", str(len(categories)), ft.Icons.CATEGORY_OUTLINED, Colors.PURPLE), col={"xs": 12, "md": 4}),
             ]
             rows.controls = []
@@ -663,7 +701,7 @@ class FinanceCenter:
                             ]),
                             ft.Text(exp.get("expense_date") or "—", size=10, color=Colors.TEXT_SECONDARY),
                         ], spacing=2, expand=True),
-                        ft.Column([ft.Text(self.money(exp.get("amount")), size=15, weight=ft.FontWeight.BOLD, color=Colors.DANGER_DARK), ft.Text(exp.get("reference") or "بدون مرجع", size=9, color=Colors.TEXT_FAINT)], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END),
+                        ft.Column([money_row(exp.get("amount"), self.ctx.settings, size=15, weight=ft.FontWeight.BOLD, color=Colors.DANGER_DARK), ft.Text(exp.get("reference") or "بدون مرجع", size=9, color=Colors.TEXT_FAINT)], spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END),
                         ft.PopupMenuButton(items=[
                             ft.PopupMenuItem(text="تعديل", icon=ft.Icons.EDIT_OUTLINED, on_click=lambda _, eid=int(exp["id"]): self.show_expense_dialog(eid)),
                             ft.PopupMenuItem(text="حذف", icon=ft.Icons.DELETE_OUTLINE, on_click=lambda _, eid=int(exp["id"]): self.confirm_delete_expense(eid)),
@@ -972,8 +1010,8 @@ class FinanceCenter:
                 result.controls.append(
                     ft.ResponsiveRow(
                         [
-                            ft.Container(kpi_card("الرصيد الحالي", f"{self.money(abs(balance))} — {balance_label}", ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.PRIMARY if balance >= 0 else Colors.SUCCESS), col={"xs": 12, "md": 4}),
-                            ft.Container(kpi_card("الرصيد الافتتاحي للفترة", self.money(data["opening_balance"]), ft.Icons.HISTORY_OUTLINED, Colors.PURPLE), col={"xs": 6, "md": 4}),
+                            ft.Container(kpi_card("الرصيد الحالي", "", ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.PRIMARY if balance >= 0 else Colors.SUCCESS, amount_usd=abs(balance), settings=self.ctx.settings, suffix=balance_label), col={"xs": 12, "md": 4}),
+                            ft.Container(kpi_card("الرصيد الافتتاحي للفترة", "", ft.Icons.HISTORY_OUTLINED, Colors.PURPLE, amount_usd=data["opening_balance"], settings=self.ctx.settings), col={"xs": 6, "md": 4}),
                             ft.Container(kpi_card("فواتير مفتوحة", str(len(data["open_invoices"])), ft.Icons.RECEIPT_LONG_OUTLINED, Colors.ORANGE), col={"xs": 6, "md": 4}),
                         ],
                         spacing=8, run_spacing=8,
@@ -985,8 +1023,26 @@ class FinanceCenter:
                 for row in data["rows"][: render_limit["n"]]:
                     movement = float(row["movement"])
                     inflow = movement >= 0
-                    movement_text = f"+{self.money(movement)}" if inflow else f"-{self.money(abs(movement))}"
                     accent = Colors.SUCCESS if inflow else Colors.DANGER_DARK
+                    # Drill-down like the items/invoices lists: tapping a
+                    # movement opens its source document (invoice or
+                    # voucher). Other source types stay plain rows.
+                    source_type = str(row.get("source_type") or "")
+                    try:
+                        source_id = int(row["source_id"]) if row.get("source_id") is not None else None
+                    except (TypeError, ValueError):
+                        source_id = None
+                    if source_type == "invoice" and source_id is not None:
+                        def _open(_=None, _iid=source_id):
+                            if self.on_open_invoice is not None:
+                                self.on_open_invoice(_iid)
+                            else:
+                                self.notify("عرض الفواتير غير متاح من هنا")
+                        tap, chevron = _open, ft.Icon(ft.Icons.CHEVRON_LEFT, size=18, color=Colors.TEXT_FAINT)
+                    elif source_type == "payment" and source_id is not None:
+                        tap, chevron = (lambda _, _pid=source_id: self._open_payment_source(_pid)), ft.Icon(ft.Icons.CHEVRON_LEFT, size=18, color=Colors.TEXT_FAINT)
+                    else:
+                        tap, chevron = None, ft.Container(width=0)
                     result.controls.append(
                         ft.Container(
                             ft.Row(
@@ -1002,15 +1058,23 @@ class FinanceCenter:
                                     ),
                                     ft.Column(
                                         [
-                                            ft.Text(movement_text, size=15, weight=ft.FontWeight.BOLD, color=accent),
-                                            ft.Text(f"الرصيد {self.money(row['balance'])}", size=9, color=Colors.TEXT_FAINT),
+                                            money_row(abs(movement), self.ctx.settings, size=15, weight=ft.FontWeight.BOLD, color=accent, prefix="+" if inflow else "-"),
+                                            ft.Row(
+                                                [
+                                                    ft.Text("الرصيد ", size=9, color=Colors.TEXT_FAINT),
+                                                    money_row(row["balance"], self.ctx.settings, size=9, color=Colors.TEXT_FAINT),
+                                                ],
+                                                spacing=2, tight=True,
+                                            ),
                                         ],
                                         spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END,
                                     ),
+                                    chevron,
                                 ],
                                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                             ),
                             padding=12, bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=16, shadow=Shadow.SM,
+                            on_click=tap, ink=tap is not None,
                         )
                     )
                 if not data["rows"]:

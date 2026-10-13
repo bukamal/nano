@@ -182,7 +182,7 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         on_fullscreen_enter=lambda: pos_fullscreen_enter(),
         on_fullscreen_exit=lambda: pos_fullscreen_exit(),
     )
-    finance_center = FinanceCenter(page, ctx, content, native_files=native_files, on_title_change=set_header)
+    finance_center = FinanceCenter(page, ctx, content, native_files=native_files, on_title_change=set_header, on_open_invoice=invoice_center.show_invoice_detail)
     reports_center = ReportsCenter(page, ctx, content, native_files=native_files, on_title_change=set_header)
     admin_center = AdminCenter(page, ctx, content, on_logout=on_logout, native_files=native_files, on_theme_changed=on_theme_changed)
     party_center = PartyCenter(
