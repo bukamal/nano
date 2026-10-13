@@ -45,9 +45,9 @@ def kpi_card(
             shortcut and gets a trailing chevron to hint that.
         amount_usd: When the value is a money amount, pass the raw USD
             figure (plus ``settings``) instead of a preformatted string:
-            the value then renders as a split amount+symbol ``Row`` (see
-            ``money_row``), which keeps the Arabic symbol order on builds
-            whose text shaping misplaces it inside a single ``Text``.
+            the value then renders as a split symbol+amount ``Row`` (see
+            ``money_row``), which keeps the symbol left of the amount on
+            builds whose text shaping misplaces it inside a single ``Text``.
     """
     return ft.Container(
         ft.Row(

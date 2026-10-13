@@ -70,23 +70,22 @@ def money_row(
     """Amount + currency symbol as two separate controls in one ``Row``.
 
     A single mixed-direction ``Text`` ("10,000 ل.س") relies on the build's
-    text-direction handling to place the symbol, and some Flet/Flutter
-    builds shape it on the wrong side (symbol right of the number). Row
-    order instead follows the page layout direction -- reliably RTL here
-    -- so the amount lands right and the symbol left no matter how the
-    build shapes text. Use this wherever a visible amount must keep the
-    Arabic symbol order; keep plain ``money_text`` for labels/sentences.
+    text-direction handling to place the symbol, and on-device it lands on
+    the wrong side. Children are therefore ordered symbol-first: with the
+    sheet rows laying out left-to-right on device, the symbol renders left
+    of the amount as required. Use this wherever a visible amount must keep
+    the Arabic symbol order; keep plain ``money_text`` for labels/sentences.
     """
     return ft.Row(
         [
+            money_text_from_str(
+                currency.get_display_symbol(settings),
+                size=size, weight=weight, color=color,
+            ),
             money_text(
                 amount_usd, settings,
                 size=size, weight=weight, color=color,
                 with_symbol=False, decimals=decimals,
-            ),
-            money_text_from_str(
-                currency.get_display_symbol(settings),
-                size=size, weight=weight, color=color,
             ),
         ],
         spacing=spacing,
