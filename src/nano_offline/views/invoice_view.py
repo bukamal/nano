@@ -24,6 +24,7 @@ from nano_offline.components import (
 
 from nano_offline.services.invoice_service import InvoiceLineInput
 from nano_offline.components.buttons import stepper_icon_button
+from nano_offline.components.money_text import money_row
 from nano_offline.core.theme import Colors, Radius, Shadow
 from nano_offline.core import currency
 from nano_offline.core.margin_guard import check_sale_margin
@@ -357,7 +358,7 @@ class InvoiceCenter:
                                     ft.Row(
                                         [
                                             ft.Text(f"{self._qty(qty)} {unit} × ", size=10, color=Colors.TEXT_SECONDARY),
-                                            ft.Text(self.money(unit_price), size=10, color=Colors.TEXT_SECONDARY),
+                                            money_row(unit_price, self.ctx.settings, size=10, color=Colors.TEXT_SECONDARY),
                                         ],
                                         spacing=0,
                                         tight=True,
@@ -366,7 +367,7 @@ class InvoiceCenter:
                                 + ([ft.Text(equiv_text, size=9, color=Colors.TEXT_FAINT)] if equiv_text else []),
                                 spacing=1, expand=True,
                             ),
-                            ft.Text(self.money(line_total), size=12, weight=ft.FontWeight.BOLD),
+                            money_row(line_total, self.ctx.settings, size=12, weight=ft.FontWeight.BOLD),
                         ],
                     ),
                     padding=8, bgcolor=Colors.BACKGROUND, border_radius=11,
@@ -409,9 +410,9 @@ class InvoiceCenter:
                 ft.Row([status_pill(status, status_fg, status_bg)], alignment=ft.MainAxisAlignment.START),
                 ft.ResponsiveRow(
                     [
-                        ft.Container(kpi_card("الإجمالي", self.money(total), ft.Icons.RECEIPT_LONG_OUTLINED, Colors.PRIMARY), col={"xs": 4}),
-                        ft.Container(kpi_card("المدفوع", self.money(paid_amount), ft.Icons.CHECK_CIRCLE_OUTLINE, Colors.SUCCESS), col={"xs": 4}),
-                        ft.Container(kpi_card("المتبقي", self.money(remaining), ft.Icons.SCHEDULE, Colors.ORANGE if remaining > 1e-9 else Colors.SUCCESS), col={"xs": 4}),
+                        ft.Container(kpi_card("الإجمالي", "", ft.Icons.RECEIPT_LONG_OUTLINED, Colors.PRIMARY, amount_usd=total, settings=self.ctx.settings), col={"xs": 4}),
+                        ft.Container(kpi_card("المدفوع", "", ft.Icons.CHECK_CIRCLE_OUTLINE, Colors.SUCCESS, amount_usd=paid_amount, settings=self.ctx.settings), col={"xs": 4}),
+                        ft.Container(kpi_card("المتبقي", "", ft.Icons.SCHEDULE, Colors.ORANGE if remaining > 1e-9 else Colors.SUCCESS, amount_usd=remaining, settings=self.ctx.settings), col={"xs": 4}),
                     ],
                     spacing=7, run_spacing=7,
                 ),

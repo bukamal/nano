@@ -8,6 +8,7 @@ from nano_offline.core.toast import toast
 
 from nano_offline.components import SearchSelect, SegmentedToggle, SegmentOption, SelectAllTextField, SmartAmountField, empty_state, kpi_card, status_pill
 from nano_offline.components.buttons import header_close_button, inline_icon_button
+from nano_offline.components.money_text import money_row
 from nano_offline.core.theme import Colors, IconSize, LazyPalette, Radius, Shadow
 from nano_offline.core import currency
 from nano_offline.core import barcode_quality
@@ -2126,7 +2127,7 @@ class ItemsCenter:
                             ft.Column([ft.Text(data["name"], size=18, weight=ft.FontWeight.BOLD), ft.Text(f"{data.get('item_type')} • {data.get('category_name') or 'بلا تصنيف'}", size=10, color=Colors.TEXT_SECONDARY)], spacing=1, expand=True),
                             ft.Column(
                                 [
-                                    ft.Text(money(data.get("selling_price")), size=14, weight=ft.FontWeight.BOLD),
+                                    money_row(data.get("selling_price"), ctx.settings, size=14, weight=ft.FontWeight.BOLD),
                                     ft.Text("سعر البيع", size=9, color=Colors.TEXT_SECONDARY),
                                 ],
                                 spacing=1,
@@ -2137,9 +2138,9 @@ class ItemsCenter:
                             ft.Column([
                                 ft.ResponsiveRow([
                                     ft.Container(kpi_card("المخزون", qty_fmt(stats.get("quantity")), ft.Icons.INVENTORY, Colors.PRIMARY), col={"xs": 6, "md": 3}),
-                                    ft.Container(kpi_card("متوسط التكلفة", money(stats.get("average_cost")), ft.Icons.PRICE_CHECK_OUTLINED, Colors.PURPLE), col={"xs": 6, "md": 3}),
-                                    ft.Container(kpi_card("قيمة المخزون", money(stats.get("inventory_cost_value")), ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.SUCCESS), col={"xs": 6, "md": 3}),
-                                    ft.Container(kpi_card("بسعر البيع", money(stats.get("inventory_sale_value")), ft.Icons.SELL_OUTLINED, Colors.WARNING), col={"xs": 6, "md": 3}),
+                                    ft.Container(kpi_card("متوسط التكلفة", "", ft.Icons.PRICE_CHECK_OUTLINED, Colors.PURPLE, amount_usd=stats.get("average_cost"), settings=ctx.settings), col={"xs": 6, "md": 3}),
+                                    ft.Container(kpi_card("قيمة المخزون", "", ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.SUCCESS, amount_usd=stats.get("inventory_cost_value"), settings=ctx.settings), col={"xs": 6, "md": 3}),
+                                    ft.Container(kpi_card("بسعر البيع", "", ft.Icons.SELL_OUTLINED, Colors.WARNING, amount_usd=stats.get("inventory_sale_value"), settings=ctx.settings), col={"xs": 6, "md": 3}),
                                 ], spacing=7, run_spacing=7),
                                 ft.ResponsiveRow([
                                     ft.Container(kpi_card("كمية مباعة", qty_fmt(stats.get("sold_qty")), ft.Icons.TRENDING_UP, Colors.DANGER), col={"xs": 6, "md": 3}),

@@ -16,6 +16,11 @@ from typing import Callable
 import flet as ft
 
 from nano_offline.core.theme import Colors, Shadow
+from nano_offline.components.money_text import money_row
+
+
+def _money_value(amount_usd: float | int | None, settings) -> ft.Row:
+    return money_row(amount_usd, settings, size=16, weight=ft.FontWeight.BOLD)
 
 
 def kpi_card(
@@ -25,6 +30,8 @@ def kpi_card(
     accent: str,
     *,
     on_tap: Callable[[ft.ControlEvent], None] | None = None,
+    amount_usd: float | int | None = None,
+    settings=None,
 ) -> ft.Container:
     """Build one KPI card for a summary row.
 
@@ -36,6 +43,11 @@ def kpi_card(
             (success/danger/etc.) to the reader.
         on_tap: If given, the whole card becomes a tappable filter
             shortcut and gets a trailing chevron to hint that.
+        amount_usd: When the value is a money amount, pass the raw USD
+            figure (plus ``settings``) instead of a preformatted string:
+            the value then renders as a split amount+symbol ``Row`` (see
+            ``money_row``), which keeps the Arabic symbol order on builds
+            whose text shaping misplaces it inside a single ``Text``.
     """
     return ft.Container(
         ft.Row(
@@ -48,7 +60,11 @@ def kpi_card(
                 ft.Column(
                     [
                         ft.Text(label, size=10, color=Colors.TEXT_SECONDARY),
-                        ft.Text(value, size=16, weight=ft.FontWeight.BOLD),
+                        (
+                            _money_value(amount_usd, settings)
+                            if amount_usd is not None
+                            else ft.Text(value, size=16, weight=ft.FontWeight.BOLD)
+                        ),
                     ],
                     spacing=2, expand=True,
                 ),

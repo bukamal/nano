@@ -57,6 +57,44 @@ def money_text_from_str(
     return ft.Text(**opts)
 
 
+def money_row(
+    amount_usd: float | int | None,
+    settings=None,
+    *,
+    size: float | None = None,
+    weight: ft.FontWeight | None = None,
+    color: str | None = None,
+    decimals: int | None = None,
+    spacing: float = 3,
+) -> ft.Row:
+    """Amount + currency symbol as two separate controls in one ``Row``.
+
+    A single mixed-direction ``Text`` ("10,000 ل.س") relies on the build's
+    text-direction handling to place the symbol, and some Flet/Flutter
+    builds shape it on the wrong side (symbol right of the number). Row
+    order instead follows the page layout direction -- reliably RTL here
+    -- so the amount lands right and the symbol left no matter how the
+    build shapes text. Use this wherever a visible amount must keep the
+    Arabic symbol order; keep plain ``money_text`` for labels/sentences.
+    """
+    return ft.Row(
+        [
+            money_text(
+                amount_usd, settings,
+                size=size, weight=weight, color=color,
+                with_symbol=False, decimals=decimals,
+            ),
+            money_text_from_str(
+                currency.get_display_symbol(settings),
+                size=size, weight=weight, color=color,
+            ),
+        ],
+        spacing=spacing,
+        tight=True,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+
 def labeled_money(
     label: str,
     amount_usd: float | int | None,
@@ -115,6 +153,7 @@ def labeled_money_from_str(
 __all__ = [
     "money_text",
     "money_text_from_str",
+    "money_row",
     "labeled_money",
     "labeled_money_from_str",
 ]
