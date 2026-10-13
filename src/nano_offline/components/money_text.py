@@ -90,6 +90,7 @@ def money_row(
         ],
         spacing=spacing,
         tight=True,
+        wrap=True,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
 
