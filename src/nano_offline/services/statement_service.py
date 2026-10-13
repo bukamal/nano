@@ -138,4 +138,140 @@ class StatementService:
             "invoice": "فاتورة",
             "payment": "دفعة",
             "expense": "مصروف",
+            "day_close": "تسوية",
         }.get(str(source_type), str(source_type))
+
+    # General-ledger account registry: every account_code the rebuilder and
+    # services post into, with its Arabic label and normal-balance nature
+    # (which side a positive balance sits on). Unknown future codes fall
+    # back to a debit nature and their raw code as label -- trial_balance()
+    # and account_statement() never crash on them.
+    ACCOUNT_LABELS: dict[str, tuple[str, str]] = {
+        "CASH": ("الصندوق", "debit"),
+        "AR": ("العملاء", "debit"),
+        "AP": ("الموردون", "credit"),
+        "SALES": ("المبيعات", "credit"),
+        "PURCHASES": ("المشتريات", "debit"),
+        "COGS": ("تكلفة البضاعة", "debit"),
+        "INVENTORY": ("المخزون", "debit"),
+        "EXPENSE": ("المصروفات", "debit"),
+    }
+
+    @classmethod
+    def account_info(cls, code: str) -> tuple[str, str]:
+        return cls.ACCOUNT_LABELS.get(str(code), (str(code), "debit"))
+
+    def trial_balance(self) -> dict:
+        """Trial balance over all ledger postings.
+
+        One row per known account (zero rows included, as a real trial
+        balance lists every account), each with its debit/credit totals and
+        its balance on the account's normal side, plus grand totals and a
+        balanced flag. NOTE: day-close adjustments post single-sided CASH
+        lines, so a posted adjustment shows here honestly as a difference
+        instead of being silently absorbed.
+        """
+        with self.db.connect() as conn:
+            sums = {
+                str(r["account_code"]): (float(r["d"] or 0), float(r["c"] or 0))
+                for r in conn.execute(
+                    "SELECT account_code, COALESCE(SUM(debit),0) AS d, COALESCE(SUM(credit),0) AS c"
+                    " FROM ledger_entries GROUP BY account_code"
+                ).fetchall()
+            }
+            known = [r["account_code"] for r in conn.execute(
+                "SELECT DISTINCT account_code FROM ledger_entries"
+            ).fetchall()]
+            codes = list(self.ACCOUNT_LABELS) + [c for c in known if c not in self.ACCOUNT_LABELS]
+            accounts = []
+            total_debit = 0.0
+            total_credit = 0.0
+            for code in codes:
+                d, c = sums.get(str(code), (0.0, 0.0))
+                label, nature = self.account_info(code)
+                balance = (d - c) if nature == "debit" else (c - d)
+                accounts.append({
+                    "code": code, "label": label, "nature": nature,
+                    "debit": d, "credit": c, "balance": balance,
+                })
+                total_debit += d
+                total_credit += c
+            return {
+                "accounts": accounts,
+                "total_debit": total_debit,
+                "total_credit": total_credit,
+                "difference": total_debit - total_credit,
+                "balanced": abs(total_debit - total_credit) <= 1e-6,
+            }
+
+    def account_statement(
+        self,
+        account_code: str,
+        *,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> dict:
+        """Chronological statement for one GL account, same shape as
+        party_statement: opening balance, ordered movements with running
+        balances, debit/credit totals, and source labels -- except party
+        names are resolved per row (a CASH or SALES movement usually has
+        no party at all)."""
+        code = str(account_code)
+        _, nature = self.account_info(code)
+        sign = 1 if nature == "debit" else -1
+
+        def _signed(debit: float, credit: float) -> float:
+            return (debit - credit) if sign == 1 else (credit - debit)
+
+        with self.db.connect() as conn:
+            params: list[object] = [code]
+            before_sql = "SELECT COALESCE(SUM(debit-credit),0) FROM ledger_entries WHERE account_code=?"
+            if date_from:
+                before_sql += " AND entry_date<?"
+                params.append(date_from)
+            else:
+                before_sql += " AND 1=0"
+            raw_opening = float(conn.execute(before_sql, params).fetchone()[0])
+            opening = raw_opening if sign == 1 else -raw_opening
+            sql = """SELECT le.id,le.entry_date,le.account_code,le.debit,le.credit,
+                            le.source_type,le.source_id,le.description,le.created_at,
+                            le.party_type,le.party_id,
+                            COALESCE(c.name, s.name) AS party_name
+                     FROM ledger_entries le
+                     LEFT JOIN customers c ON le.party_type='customer' AND c.id=le.party_id
+                     LEFT JOIN suppliers s ON le.party_type='supplier' AND s.id=le.party_id
+                     WHERE le.account_code=?"""
+            row_params: list[object] = [code]
+            if date_from:
+                sql += " AND le.entry_date>=?"
+                row_params.append(date_from)
+            if date_to:
+                sql += " AND le.entry_date<=?"
+                row_params.append(date_to)
+            sql += " ORDER BY le.entry_date,le.id"
+            running = opening
+            rows: list[dict] = []
+            debit_total = 0.0
+            credit_total = 0.0
+            for raw in conn.execute(sql, row_params).fetchall():
+                row = dict(raw)
+                debit = float(row["debit"] or 0)
+                credit = float(row["credit"] or 0)
+                movement = _signed(debit, credit)
+                running += movement
+                debit_total += debit
+                credit_total += credit
+                row["movement"] = movement
+                row["balance"] = running
+                row["source_label"] = self._source_label(row["source_type"])
+                rows.append(row)
+            return {
+                "code": code,
+                "label": self.account_info(code)[0],
+                "nature": nature,
+                "opening_balance": opening,
+                "rows": rows,
+                "debit_total": debit_total,
+                "credit_total": credit_total,
+                "closing_balance": running,
+            }

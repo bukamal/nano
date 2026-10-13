@@ -8,6 +8,7 @@ from nano_offline.core.toast import toast
 
 from nano_offline.components import SearchSelect, SelectAllTextField, SmartAmountField, SmartDateField, empty_state, kpi_card, new_form_sheet, render_form_sheet, status_pill
 from nano_offline.components.money_text import money_row
+from nano_offline.services.statement_service import StatementService
 from nano_offline.core.theme import Colors, Radius, Shadow
 from nano_offline.core import currency
 from nano_offline.core.home_widget import refresh_home_widget
@@ -70,6 +71,7 @@ class FinanceCenter:
             ("expenses", "المصروفات", ft.Icons.PAYMENTS_OUTLINED, self.show_expenses),
             ("customers", "كشف العملاء", ft.Icons.PEOPLE_ALT_OUTLINED, lambda: self.show_statements("customer")),
             ("suppliers", "كشف الموردين", ft.Icons.LOCAL_SHIPPING_OUTLINED, lambda: self.show_statements("supplier")),
+            ("ledger", "دفتر الأستاذ", ft.Icons.DESCRIPTION_OUTLINED, self.show_ledger),
         ]
         return ft.Row(
             [self._nav_chip(label, icon, active=key == active, on_click=action) for key, label, icon, action in items],
@@ -1140,3 +1142,220 @@ class FinanceCenter:
         )
         self.content.content = ft.Column([sticky_header, scroll_body], spacing=0, expand=True)
         self.page.update()
+
+    def show_ledger(self) -> None:
+        """General-ledger hub inside Finance (option A): trial balance over
+        every posted account plus a per-account chronological statement --
+        the same card language as the customer/supplier statements, so the
+        whole money area reads as one system."""
+        self._set_header("دفتر الأستاذ", "ميزان المراجعة وكشوف الحسابات من القيود المرحلة")
+        account_dd = SearchSelect(
+            label="الحساب",
+            choices=[(code, label) for code, (label, _) in StatementService.ACCOUNT_LABELS.items()],
+        )
+        date_from = SmartDateField(label="من تاريخ", hint_text="YYYY-MM-DD")
+        date_to = SmartDateField(label="إلى تاريخ", hint_text="YYYY-MM-DD")
+        result = ft.Column(spacing=8)
+        render_limit = {"n": 60}
+
+        def render_trial() -> None:
+            tb = self.ctx.statements.trial_balance()
+            balanced = bool(tb["balanced"])
+            result.controls.append(
+                ft.Text("ميزان المراجعة", size=14, weight=ft.FontWeight.BOLD, color=Colors.TEXT_SECONDARY),
+            )
+            result.controls.append(
+                ft.ResponsiveRow(
+                    [
+                        ft.Container(kpi_card("إجمالي مدين", "", ft.Icons.ARROW_DOWNWARD, Colors.PRIMARY, amount_usd=tb["total_debit"], settings=self.ctx.settings), col={"xs": 6, "md": 4}),
+                        ft.Container(kpi_card("إجمالي دائن", "", ft.Icons.ARROW_UPWARD, Colors.PURPLE, amount_usd=tb["total_credit"], settings=self.ctx.settings), col={"xs": 6, "md": 4}),
+                        ft.Container(kpi_card("حالة التوازن", "", ft.Icons.CHECK_CIRCLE_OUTLINE if balanced else ft.Icons.WARNING_AMBER_ROUNDED, Colors.SUCCESS if balanced else Colors.DANGER_DARK, amount_usd=abs(tb["difference"]), settings=self.ctx.settings, suffix="متوازن" if balanced else "فرق غير مرحل"), col={"xs": 12, "md": 4}),
+                    ],
+                    spacing=8, run_spacing=8,
+                )
+            )
+
+            def pick(code: str):
+                def handler(_=None):
+                    account_dd.value = code
+                    try:
+                        account_dd.update()
+                    except Exception:
+                        pass
+                    render_from_filters()
+                return handler
+
+            for acc in tb["accounts"]:
+                has_activity = abs(float(acc["debit"]) or 0) > 1e-9 or abs(float(acc["credit"]) or 0) > 1e-9
+                result.controls.append(
+                    ft.Container(
+                        ft.Row(
+                            [
+                                ft.Container(
+                                    ft.Text(str(acc["code"]), size=10, weight=ft.FontWeight.BOLD, color=Colors.PRIMARY),
+                                    padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                                    bgcolor=Colors.PRIMARY_BG, border_radius=8,
+                                ),
+                                ft.Column(
+                                    [
+                                        ft.Text(acc["label"], size=13, weight=ft.FontWeight.BOLD, expand=True),
+                                        ft.Row(
+                                            [
+                                                ft.Text("مدين ", size=9, color=Colors.TEXT_FAINT),
+                                                money_row(acc["debit"], self.ctx.settings, size=9, color=Colors.TEXT_FAINT),
+                                                ft.Text(" • دائن ", size=9, color=Colors.TEXT_FAINT),
+                                                money_row(acc["credit"], self.ctx.settings, size=9, color=Colors.TEXT_FAINT),
+                                            ],
+                                            spacing=2, tight=True,
+                                        ),
+                                    ],
+                                    expand=True, spacing=2,
+                                ),
+                                money_row(acc["balance"], self.ctx.settings, size=14, weight=ft.FontWeight.BOLD),
+                                ft.Icon(ft.Icons.CHEVRON_LEFT, size=18, color=Colors.TEXT_FAINT),
+                            ],
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        padding=11, bgcolor=Colors.WHITE if has_activity else Colors.BACKGROUND_ALT,
+                        border=ft.border.all(1, Colors.BORDER), border_radius=16, shadow=Shadow.SM,
+                        on_click=pick(str(acc["code"])), ink=True,
+                    )
+                )
+
+        def render_account() -> None:
+            data = self.ctx.statements.account_statement(
+                str(account_dd.value),
+                date_from=(date_from.value or "").strip() or None,
+                date_to=(date_to.value or "").strip() or None,
+            )
+            result.controls.append(
+                ft.Text(f"كشف حساب: {data['label']}", size=14, weight=ft.FontWeight.BOLD, color=Colors.TEXT_SECONDARY),
+            )
+            result.controls.append(
+                ft.ResponsiveRow(
+                    [
+                        ft.Container(kpi_card("الرصيد الافتتاحي", "", ft.Icons.HISTORY_OUTLINED, Colors.PURPLE, amount_usd=data["opening_balance"], settings=self.ctx.settings), col={"xs": 6, "md": 3}),
+                        ft.Container(kpi_card("إجمالي مدين", "", ft.Icons.ARROW_DOWNWARD, Colors.PRIMARY, amount_usd=data["debit_total"], settings=self.ctx.settings), col={"xs": 6, "md": 3}),
+                        ft.Container(kpi_card("إجمالي دائن", "", ft.Icons.ARROW_UPWARD, Colors.PURPLE, amount_usd=data["credit_total"], settings=self.ctx.settings), col={"xs": 6, "md": 3}),
+                        ft.Container(kpi_card("الرصيد الختامي", "", ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED, Colors.SUCCESS, amount_usd=data["closing_balance"], settings=self.ctx.settings), col={"xs": 6, "md": 3}),
+                    ],
+                    spacing=8, run_spacing=8,
+                )
+            )
+            for row in data["rows"][: render_limit["n"]]:
+                movement = float(row["movement"])
+                inflow = movement >= 0
+                accent = Colors.SUCCESS if inflow else Colors.DANGER_DARK
+                source_type = str(row.get("source_type") or "")
+                try:
+                    source_id = int(row["source_id"]) if row.get("source_id") is not None else None
+                except (TypeError, ValueError):
+                    source_id = None
+                if source_type == "invoice" and source_id is not None:
+                    def _open(_=None, _iid=source_id):
+                        if self.on_open_invoice is not None:
+                            self.on_open_invoice(_iid)
+                        else:
+                            self.notify("عرض الفواتير غير متاح من هنا")
+                    tap, chevron = _open, ft.Icon(ft.Icons.CHEVRON_LEFT, size=18, color=Colors.TEXT_FAINT)
+                elif source_type == "payment" and source_id is not None:
+                    tap, chevron = (lambda _, _pid=source_id: self._open_payment_source(_pid)), ft.Icon(ft.Icons.CHEVRON_LEFT, size=18, color=Colors.TEXT_FAINT)
+                else:
+                    tap, chevron = None, ft.Container(width=0)
+                party = row.get("party_name") or "—"
+                result.controls.append(
+                    ft.Container(
+                        ft.Row(
+                            [
+                                ft.Container(ft.Icon(ft.Icons.SOUTH_WEST if inflow else ft.Icons.NORTH_EAST, size=18, color=accent), width=44, height=44, alignment=ft.alignment.center, bgcolor=Colors.SUCCESS_BG if inflow else Colors.DANGER_BG, border_radius=14),
+                                ft.Column(
+                                    [
+                                        ft.Text(f"{row['description'] or row['source_label']} • {party}", size=13, weight=ft.FontWeight.BOLD),
+                                        ft.Text(f"{row['entry_date']} • {row['source_label']} #{row['source_id'] or '—'}", size=10, color=Colors.TEXT_SECONDARY),
+                                    ],
+                                    expand=True, spacing=2,
+                                ),
+                                ft.Column(
+                                    [
+                                        money_row(abs(movement), self.ctx.settings, size=15, weight=ft.FontWeight.BOLD, color=accent, prefix="+" if inflow else "-"),
+                                        ft.Row(
+                                            [
+                                                ft.Text("الرصيد ", size=9, color=Colors.TEXT_FAINT),
+                                                money_row(row["balance"], self.ctx.settings, size=9, color=Colors.TEXT_FAINT),
+                                            ],
+                                            spacing=2, tight=True,
+                                        ),
+                                    ],
+                                    spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END,
+                                ),
+                                chevron,
+                            ],
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        padding=12, bgcolor=Colors.WHITE, border=ft.border.all(1, Colors.BORDER), border_radius=16, shadow=Shadow.SM,
+                        on_click=tap, ink=tap is not None,
+                    )
+                )
+            if not data["rows"]:
+                result.controls.append(empty_state(
+                    "لا توجد حركات لهذا الحساب في الفترة المحددة",
+                    icon=ft.Icons.DESCRIPTION_OUTLINED,
+                    hint="جرّب توسيع نطاق التاريخ",
+                ))
+            elif len(data["rows"]) > render_limit["n"]:
+                remaining = len(data["rows"]) - render_limit["n"]
+
+                def load_more(_=None):
+                    render_limit["n"] += 60
+                    render()
+
+                result.controls.append(
+                    ft.OutlinedButton(
+                        f"تحميل المزيد ({remaining})",
+                        icon=ft.Icons.EXPAND_MORE_ROUNDED,
+                        on_click=load_more,
+                    )
+                )
+
+        def render(_=None):
+            result.controls = []
+            try:
+                render_trial()
+                if account_dd.value:
+                    render_account()
+            except Exception as exc:
+                self.notify(str(exc), kind="error")
+            self.page.update()
+
+        def render_from_filters(_=None):
+            render_limit["n"] = 60
+            render()
+
+        account_dd.on_change = render_from_filters
+        sticky_header = ft.Container(
+            ft.Column(
+                [
+                    self._section_nav("ledger"),
+                    ft.ResponsiveRow(
+                        [
+                            ft.Container(account_dd, col={"xs": 12, "md": 6}),
+                            ft.Container(date_from, col={"xs": 6, "md": 3}),
+                            ft.Container(date_to, col={"xs": 6, "md": 3}),
+                        ]
+                    ),
+                    ft.Row([ft.FilledButton("عرض", icon=ft.Icons.SEARCH, on_click=render_from_filters)], wrap=True),
+                ],
+                spacing=10,
+            ),
+            padding=ft.padding.only(left=16, right=16, top=14, bottom=12),
+            bgcolor=Colors.WHITE,
+            border=ft.border.only(bottom=ft.BorderSide(1, Colors.BORDER)),
+            shadow=Shadow.SM,
+        )
+        scroll_body = ft.Container(
+            ft.Column([result, ft.Container(height=24)], spacing=12, scroll=ft.ScrollMode.AUTO, expand=True),
+            expand=True,
+            padding=ft.padding.only(top=12, left=16, right=16),
+        )
+        self.content.content = ft.Column([sticky_header, scroll_body], spacing=0, expand=True)
+        render()
