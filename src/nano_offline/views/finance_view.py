@@ -929,7 +929,7 @@ class FinanceCenter:
         dialog.actions = [ft.TextButton("إلغاء", on_click=close), ft.FilledButton("حذف", on_click=delete)]
         self.page.open(dialog)
 
-    def show_statements(self, party_type: str) -> None:
+    def show_statements(self, party_type: str, party_id: int | None = None) -> None:
         source = self.ctx.customers.list() if party_type == "customer" else self.ctx.suppliers.list()
         title = "كشف حساب العملاء" if party_type == "customer" else "كشف حساب الموردين"
         active = "customers" if party_type == "customer" else "suppliers"
@@ -1141,6 +1141,18 @@ class FinanceCenter:
             padding=ft.padding.only(top=12, left=16, right=16),
         )
         self.content.content = ft.Column([sticky_header, scroll_body], spacing=0, expand=True)
+        if party_id is not None:
+            # Deep-link entry (party card, receivables report): preselect
+            # the account and render immediately instead of waiting for a
+            # manual pick. Unknown ids simply leave the picker empty.
+            try:
+                wanted = str(int(party_id))
+            except (TypeError, ValueError):
+                wanted = None
+            if wanted is not None and any(str(p["id"]) == wanted for p in source):
+                party_dd.value = wanted
+                render_from_filters()
+                return
         self.page.update()
 
     def show_ledger(self) -> None:

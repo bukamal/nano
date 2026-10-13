@@ -18,7 +18,7 @@ class PartyCenter:
     Extracted from ``main.py`` (previously the inline ``party_view`` closure).
     """
 
-    def __init__(self, page: ft.Page, ctx, content: ft.Container, *, native_files=None, on_title_change=None, on_open_receipt=None, on_open_payment=None):
+    def __init__(self, page: ft.Page, ctx, content: ft.Container, *, native_files=None, on_title_change=None, on_open_receipt=None, on_open_payment=None, on_open_statement=None):
         self.page = page
         self.ctx = ctx
         self.content = content
@@ -26,6 +26,7 @@ class PartyCenter:
         self.on_title_change = on_title_change
         self.on_open_receipt = on_open_receipt
         self.on_open_payment = on_open_payment
+        self.on_open_statement = on_open_statement
 
     def _set_header(self, title: str, subtitle: str = "") -> None:
         if self.on_title_change:
@@ -268,6 +269,13 @@ class PartyCenter:
                         )
                     actions.append(
                         ft.FilledButton("سند صرف", icon=ft.Icons.PAYMENTS_OUTLINED, on_click=_pay, expand=True)
+                    )
+                if self.on_open_statement is not None:
+                    def _statement(_=None):
+                        close()
+                        self.on_open_statement(party_type, int(data["id"]))
+                    actions.append(
+                        ft.OutlinedButton("كشف الحساب", icon=ft.Icons.DESCRIPTION_OUTLINED, on_click=_statement, expand=True)
                     )
                 actions.append(ft.FilledButton("إغلاق", on_click=close, expand=True))
                 return actions

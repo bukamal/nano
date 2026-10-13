@@ -183,7 +183,19 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         on_fullscreen_exit=lambda: pos_fullscreen_exit(),
     )
     finance_center = FinanceCenter(page, ctx, content, native_files=native_files, on_title_change=set_header, on_open_invoice=invoice_center.show_invoice_detail)
-    reports_center = ReportsCenter(page, ctx, content, native_files=native_files, on_title_change=set_header)
+
+    def open_statement(party_type: str, party_id: int | None = None) -> None:
+        # Land on the Finance shell, then open the matching party
+        # statement with the account preselected -- same shape as
+        # open_purchase_draft above (navigate first, then drive the
+        # destination center directly).
+        navigate("finance")
+        finance_center.show_statements(party_type, party_id)
+
+    reports_center = ReportsCenter(
+        page, ctx, content, native_files=native_files, on_title_change=set_header,
+        on_open_statement=open_statement, on_open_invoice=invoice_center.show_invoice_detail,
+    )
     admin_center = AdminCenter(page, ctx, content, on_logout=on_logout, native_files=native_files, on_theme_changed=on_theme_changed)
     party_center = PartyCenter(
         page, ctx, content,
@@ -191,6 +203,7 @@ def build_shell(page: ft.Page, ctx: AppContext, *, on_logout, native_files: Nati
         on_title_change=set_header,
         on_open_receipt=lambda customer_id=None, amount=None: open_receipt(customer_id, amount),
         on_open_payment=lambda supplier_id=None, amount=None: open_supplier_payment(supplier_id, amount),
+        on_open_statement=open_statement,
     )
     items_center = ItemsCenter(
         page, ctx, content, native_files=native_files, on_title_change=set_header,

@@ -47,12 +47,14 @@ def _badge_bg(accent: str) -> str:
 
 
 class ReportsCenter:
-    def __init__(self, page: ft.Page, ctx, content: ft.Container, *, native_files=None, on_title_change=None):
+    def __init__(self, page: ft.Page, ctx, content: ft.Container, *, native_files=None, on_title_change=None, on_open_statement=None, on_open_invoice=None):
         self.page = page
         self.ctx = ctx
         self.content = content
         self.native_files = native_files
         self.on_title_change = on_title_change
+        self.on_open_statement = on_open_statement
+        self.on_open_invoice = on_open_invoice
         self._report_key: str = "pnl"
         self.report_dropdown: ft.Dropdown | None = None
         self.date_from: ft.TextField | None = None
@@ -134,6 +136,7 @@ class ReportsCenter:
     def _entry(
         self, *, icon, accent: str, title: str, subtitle: str,
         value: str, value_sub: str | None = None, footer: ft.Control | None = None,
+        on_click=None,
     ) -> ft.Container:
         """One list row shared by every report's item/invoice/party/movement
         list -- icon badge + title/subtitle + trailing value, same visual
@@ -161,6 +164,7 @@ class ReportsCenter:
                         ],
                         spacing=1, horizontal_alignment=ft.CrossAxisAlignment.END,
                     ),
+                    *([ft.Icon(ft.Icons.CHEVRON_LEFT, size=18, color=Colors.TEXT_FAINT)] if on_click is not None else []),
                 ],
                 spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER,
             )
@@ -174,6 +178,7 @@ class ReportsCenter:
             border=ft.border.all(1, Colors.BORDER_ALT),
             border_radius=Radius.LG,
             shadow=Shadow.SM,
+            on_click=on_click, ink=on_click is not None,
         )
 
     @staticmethod
@@ -597,17 +602,26 @@ class ReportsCenter:
         open_customers = self.ctx.reports.outstanding_invoices("customer", as_of=date_to)
         open_suppliers = self.ctx.reports.outstanding_invoices("supplier", as_of=date_to)
 
-        def party_cards(report: dict, label: str, icon) -> ft.Column:
+        def party_cards(report: dict, label: str, icon, party_type: str) -> ft.Column:
             column = ft.Column(spacing=6)
             for row in report["rows"]:
                 balance = float(row["balance"] or 0)
                 balance_label = "مستحق" if balance >= 0 else "رصيد دائن/مقدم"
+                try:
+                    pid = int(row["id"])
+                except (TypeError, ValueError):
+                    pid = None
+                if pid is not None and self.on_open_statement is not None:
+                    tap = lambda _, _t=party_type, _pid=pid: self.on_open_statement(_t, _pid)
+                else:
+                    tap = None
                 column.controls.append(
                     self._entry(
                         icon=icon, accent=Colors.WARNING if balance >= 0 else Colors.SUCCESS,
                         title=row["name"],
                         subtitle=f"{balance_label} • فواتير: {int(row['invoice_count'])}",
                         value=self.money(abs(balance)),
+                        on_click=tap,
                     )
                 )
             if not column.controls:
@@ -617,12 +631,21 @@ class ReportsCenter:
         def open_cards(rows: list[dict], label: str) -> ft.Column:
             column = ft.Column(spacing=6)
             for row in rows:
+                try:
+                    iid = int(row["id"])
+                except (TypeError, ValueError):
+                    iid = None
+                if iid is not None and self.on_open_invoice is not None:
+                    tap = lambda _, _iid=iid: self.on_open_invoice(_iid)
+                else:
+                    tap = None
                 column.controls.append(
                     self._entry(
                         icon=ft.Icons.RECEIPT_LONG_OUTLINED, accent=Colors.WARNING,
                         title=f"فاتورة #{row['id']} • {row['party_name']}",
                         subtitle=f"{row['invoice_date']} • الإجمالي {self.money(row['total'])} • المدفوع {self.money(row['paid_as_of'])}",
                         value=self.money(row["remaining_amount"]),
+                        on_click=tap,
                     )
                 )
             if not column.controls:
@@ -639,9 +662,9 @@ class ReportsCenter:
                 ],
                 spacing=10, run_spacing=10,
             ),
-            self._section_title(ft.Icons.PEOPLE_ALT_OUTLINED, "العملاء"), party_cards(customers, "عملاء", ft.Icons.PERSON_OUTLINE),
+            self._section_title(ft.Icons.PEOPLE_ALT_OUTLINED, "العملاء"), party_cards(customers, "عملاء", ft.Icons.PERSON_OUTLINE, "customer"),
             self._section_title(ft.Icons.RECEIPT_LONG_OUTLINED, "فواتير العملاء المفتوحة"), open_cards(open_customers, "بيع"),
-            self._section_title(ft.Icons.LOCAL_SHIPPING_OUTLINED, "الموردون"), party_cards(suppliers, "موردون", ft.Icons.LOCAL_SHIPPING_OUTLINED),
+            self._section_title(ft.Icons.LOCAL_SHIPPING_OUTLINED, "الموردون"), party_cards(suppliers, "موردون", ft.Icons.LOCAL_SHIPPING_OUTLINED, "supplier"),
             self._section_title(ft.Icons.RECEIPT_LONG_OUTLINED, "فواتير الموردين المفتوحة"), open_cards(open_suppliers, "شراء"),
         ]
 
