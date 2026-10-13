@@ -25,7 +25,6 @@ OVERDUE_DAYS_KEY = "invoice_overdue_days"
 
 # --- Printed document ----------------------------------------------------#
 FOOTER_TEXT_KEY = "invoice_footer_text"
-SHOW_SIGN_BOXES_KEY = "invoice_show_sign_boxes"
 SHOW_VERIFY_QR_KEY = "invoice_show_verify_qr"
 
 DEFAULT_NUMBER_PREFIX = ""
@@ -33,7 +32,6 @@ DEFAULT_NUMBER_PADDING = 0
 DEFAULT_DUE_DAYS = 0  # 0 == no due-date line printed (cash-style invoices)
 DEFAULT_OVERDUE_DAYS = 30
 DEFAULT_FOOTER_TEXT = ""
-DEFAULT_SHOW_SIGN_BOXES = True
 DEFAULT_SHOW_VERIFY_QR = True
 
 VALID_NUMBER_PADDING = (0, 4, 5, 6)
@@ -101,22 +99,18 @@ def footer_text(settings) -> str:
     return (settings.get(FOOTER_TEXT_KEY, DEFAULT_FOOTER_TEXT) or "").strip()
 
 
-def show_sign_boxes(settings) -> bool:
-    return _flag(settings, SHOW_SIGN_BOXES_KEY, DEFAULT_SHOW_SIGN_BOXES)
-
-
 def show_verify_qr(settings) -> bool:
     return _flag(settings, SHOW_VERIFY_QR_KEY, DEFAULT_SHOW_VERIFY_QR)
 
 
 __all__ = [
     "NUMBER_PREFIX_KEY", "NUMBER_PADDING_KEY", "DEFAULT_DUE_DAYS_KEY",
-    "OVERDUE_DAYS_KEY", "FOOTER_TEXT_KEY", "SHOW_SIGN_BOXES_KEY",
+    "OVERDUE_DAYS_KEY", "FOOTER_TEXT_KEY",
     "SHOW_VERIFY_QR_KEY",
     "DEFAULT_NUMBER_PREFIX", "DEFAULT_NUMBER_PADDING", "DEFAULT_DUE_DAYS",
-    "DEFAULT_OVERDUE_DAYS", "DEFAULT_FOOTER_TEXT", "DEFAULT_SHOW_SIGN_BOXES",
+    "DEFAULT_OVERDUE_DAYS", "DEFAULT_FOOTER_TEXT",
     "DEFAULT_SHOW_VERIFY_QR", "VALID_NUMBER_PADDING",
     "number_prefix", "number_padding", "format_invoice_number",
     "default_due_days", "overdue_days", "due_date_for", "footer_text",
-    "show_sign_boxes", "show_verify_qr",
+    "show_verify_qr",
 ]

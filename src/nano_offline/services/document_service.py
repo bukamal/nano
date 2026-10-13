@@ -81,8 +81,9 @@ class DocumentService:
         layouts (three-up totals rows in particular) mix this right-to-left
         page with left-to-right amount text closely enough that the browser's
         automatic bidi reordering places the symbol on the wrong side of the
-        number -- flex layout order doesn't depend on that reordering, so the
-        symbol always lands after the amount as intended.
+        number -- flex layout order doesn't depend on that reordering. The
+        row runs right-to-left (Arabic convention: the amount first on the
+        right, the symbol to its left).
         """
         amount_text, symbol = self._money_parts(value, inv)
         return (
@@ -213,9 +214,12 @@ td {{ padding:7px 6px; border-bottom:1px solid #E9EEF3; vertical-align:top; font
 tbody tr:nth-child(even) td {{ background:#F8FAFC; }}
 tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
 .money {{ white-space:nowrap; text-align:end; }}
+.inv-table thead th {{ text-align:center; }}
+.inv-table td {{ text-align:end; }}
+.inv-table td.desc {{ text-align:start; }}
 .money-wrap {{
   display:inline-flex; align-items:baseline; gap:3px;
-  direction:ltr; unicode-bidi:isolate; white-space:nowrap; font-variant-numeric:tabular-nums;
+  direction:rtl; unicode-bidi:isolate; white-space:nowrap; font-variant-numeric:tabular-nums;
 }}
 .note {{ border:1px solid #BFD5E8; background:#EEF6FC; border-radius:10px; padding:10px 12px; margin-top:14px; font-size:11.5px; }}
 .note b {{ color:{accent_deep}; }}
@@ -242,10 +246,6 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
 .metric .fx {{ display:block; margin-top:2px; font-size:10px; font-weight:600; color:#94A3B8; }}
 .equiv {{ display:block; margin-top:1px; font-size:10px; color:#64748B; }}
 .sign-row {{ display:flex; gap:16px; margin-top:26px; align-items:flex-end; }}
-.sign-box {{
-  flex:1; border:1px dashed #CBD5E1; border-radius:10px; padding:22px 10px 8px;
-  text-align:center; font-size:10.5px; color:#64748B;
-}}
 .verify-box {{
   flex:0 0 auto; text-align:center; font-size:9px; color:#64748B; line-height:1.4;
 }}
@@ -348,7 +348,7 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
             description = line.get("description") or line.get("item_name") or "—"
             unit = line.get("unit_abbreviation") or line.get("unit_name") or "—"
             line_rows.append(
-                f"<tr><td>{idx}</td><td>{self._e(description)}</td>"
+                f"<tr><td>{idx}</td><td class=\"desc\">{self._e(description)}</td>"
                 f"<td>{self._e(unit)}</td><td class='money'>{_equiv_cell(line)}</td>"
                 f"<td class='money'>{self._money(line['unit_price'], inv)}</td>"
                 f"<td class='money'>{self._money(line['total'], inv)}</td></tr>"
@@ -411,11 +411,6 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
         )
         footer_note = invoice_settings.footer_text(settings)
         footer_html = f'<div class="note">{self._e(footer_note)}</div>' if footer_note else ""
-        sign_boxes_html = (
-            '<div class="sign-box">توقيع المستلم</div><div class="sign-box">ختم الشركة</div>'
-            if invoice_settings.show_sign_boxes(settings)
-            else ""
-        )
         verify_box_html = (
             f'<div class="verify-box">{verify_qr}'
             f'<span>تحقق من الفاتورة</span>'
@@ -423,6 +418,7 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
             if invoice_settings.show_verify_qr(settings)
             else ""
         )
+        sign_row_html = f'<div class="sign-row">{verify_box_html}</div>' if verify_box_html else ""
 
         body = f"""
 {watermark_html}
@@ -448,16 +444,13 @@ tbody tr:last-child td {{ border-bottom:1px solid #E2E8F0; }}
   <div class="progress-label"><span>نسبة السداد</span><span>{round(paid_ratio * 100)}٪</span></div>
   <div class="progress-track"><div class="progress-fill" style="width:{paid_ratio * 100:.1f}%"></div></div>
 </div>
-<table>
+<table class="inv-table">
 <thead><tr><th>#</th><th>البيان</th><th>الوحدة</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead>
 <tbody>{''.join(line_rows)}</tbody>
 </table>
 {f'<div class="note"><b>ملاحظات:</b> {self._e(inv.get("notes"))}</div>' if inv.get('notes') else ''}
 {footer_html}
-<div class="sign-row">
-  {sign_boxes_html}
-  {verify_box_html}
-</div>
+{sign_row_html}
 """
         return self._shell(f"#{self._e(display_number)}", kind, body)
 

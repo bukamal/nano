@@ -958,10 +958,6 @@ class AdminCenter:
             min_lines=2,
             max_lines=4,
         )
-        invoice_sign_boxes_switch = ft.Switch(
-            label="إظهار مربعي \"توقيع المستلم\" و\"ختم الشركة\" عند الطباعة",
-            value=invoice_settings.show_sign_boxes(iset),
-        )
         invoice_verify_qr_switch = ft.Switch(
             label="إظهار رمز التحقق (QR) من صحة الفاتورة عند الطباعة",
             value=invoice_settings.show_verify_qr(iset),
@@ -985,7 +981,6 @@ class AdminCenter:
                     invoice_settings.DEFAULT_DUE_DAYS_KEY: str(due_days),
                     invoice_settings.OVERDUE_DAYS_KEY: str(overdue_after),
                     invoice_settings.FOOTER_TEXT_KEY: (invoice_footer_field.value or "").strip(),
-                    invoice_settings.SHOW_SIGN_BOXES_KEY: "1" if invoice_sign_boxes_switch.value else "0",
                     invoice_settings.SHOW_VERIFY_QR_KEY: "1" if invoice_verify_qr_switch.value else "0",
                 })
                 invoice_due_days_field.value = str(due_days)
@@ -2027,7 +2022,6 @@ class AdminCenter:
                     ft.Divider(height=1, color=Colors.BACKGROUND_ALT),
                     ft.Text("محتوى الطباعة", size=12, weight=ft.FontWeight.W_600),
                     invoice_footer_field,
-                    invoice_sign_boxes_switch,
                     invoice_verify_qr_switch,
                     ft.FilledButton("حفظ إعدادات الفواتير", icon=ft.Icons.SAVE_OUTLINED, on_click=save_invoice_settings),
                 ],
