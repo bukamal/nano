@@ -9,7 +9,9 @@ ctx = (ROOT / "src/nano_offline/app_context.py").read_text(encoding="utf-8")
 
 required_main = [
     "from nano_offline.views.reports_view import ReportsCenter",
-    "reports_center = ReportsCenter(page, ctx, content, native_files=native_files, on_title_change=set_header)",
+    "reports_center = ReportsCenter(",
+    "on_open_statement=open_statement",
+    "on_open_invoice=invoice_center.show_invoice_detail",
     "reports_center.show_center",
     '"التقارير"',
     "ft.Icons.QUERY_STATS_OUTLINED",
